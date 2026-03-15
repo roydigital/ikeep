@@ -1,0 +1,55 @@
+// All SQLite table names, column names, and schema version.
+class DbConstants {
+  DbConstants._();
+
+  static const String dbName = 'ikeep.db';
+  static const int dbVersion = 1;
+
+  // ── items ────────────────────────────────────────────────────────────────────
+  static const String tableItems = 'items';
+  static const String colItemId = 'id';
+  static const String colItemUuid = 'uuid';
+  static const String colItemName = 'name';
+  static const String colItemLocationUuid = 'location_uuid';
+  static const String colItemTags = 'tags'; // JSON array string
+  static const String colItemImagePaths = 'image_paths'; // JSON array string
+  static const String colItemSavedAt = 'saved_at'; // Unix ms
+  static const String colItemUpdatedAt = 'updated_at'; // Unix ms
+  static const String colItemLatitude = 'latitude';
+  static const String colItemLongitude = 'longitude';
+  static const String colItemExpiryDate = 'expiry_date'; // Unix ms
+  static const String colItemIsArchived = 'is_archived'; // 0 or 1
+  static const String colItemNotes = 'notes';
+  static const String colItemCloudId = 'cloud_id';
+  static const String colItemLastSyncedAt = 'last_synced_at'; // Unix ms
+
+  // ── locations ────────────────────────────────────────────────────────────────
+  static const String tableLocations = 'locations';
+  static const String colLocId = 'id';
+  static const String colLocUuid = 'uuid';
+  static const String colLocName = 'name';
+  static const String colLocFullPath = 'full_path';
+  static const String colLocParentUuid = 'parent_uuid';
+  static const String colLocIconName = 'icon_name';
+  static const String colLocUsageCount = 'usage_count';
+  static const String colLocCreatedAt = 'created_at'; // Unix ms
+
+  // ── item_location_history ────────────────────────────────────────────────────
+  static const String tableHistory = 'item_location_history';
+  static const String colHistId = 'id';
+  static const String colHistUuid = 'uuid';
+  static const String colHistItemUuid = 'item_uuid';
+  static const String colHistLocationUuid = 'location_uuid';
+  static const String colHistLocationName = 'location_name'; // snapshot
+  static const String colHistMovedAt = 'moved_at'; // Unix ms
+  static const String colHistNote = 'note';
+
+  // ── pending_sync_operations ──────────────────────────────────────────────────
+  static const String tablePendingSync = 'pending_sync_operations';
+  static const String colSyncId = 'id';
+  static const String colSyncOperationType = 'operation_type'; // upsert | delete
+  static const String colSyncEntityType = 'entity_type'; // item | location
+  static const String colSyncEntityUuid = 'entity_uuid';
+  static const String colSyncPayload = 'payload'; // JSON
+  static const String colSyncFailedAt = 'failed_at'; // Unix ms
+}

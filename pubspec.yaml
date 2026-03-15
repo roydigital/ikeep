@@ -1,0 +1,70 @@
+name: ikeep
+description: "Where Did I Keep It? — A smart item location tracker"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+
+  # Routing
+  go_router: ^14.6.2
+
+  # Local Database
+  sqflite: ^2.3.3+1
+  sqflite_common_ffi: ^2.3.4+4
+
+  # Image
+  image_picker: ^1.1.2
+
+  # Storage & Paths
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # ML Kit (on-device image labeling for name suggestions)
+  google_mlkit_image_labeling: ^0.14.2
+
+  # Notifications
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+
+  # Cloud Sync
+  appwrite: ^13.0.0
+
+  # Utilities
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.4
+  intl: ^0.19.0
+  permission_handler: ^11.3.1
+
+  # UI
+  flutter_animate: ^4.5.2
+
+dependency_overrides:
+  flutter_web_auth_2: ^4.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon.png
+  min_sdk_android: 21
+  adaptive_icon_background: "#1E1035"
+  adaptive_icon_foreground: assets/icon.png
