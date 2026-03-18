@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "921371510551",
+    "project_id": "ikeep-1af18",
+    "storage_bucket": "ikeep-1af18.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:921371510551:android:3d9815612345e7ad9c9952",
+        "android_client_info": {
+          "package_name": "com.example.ikeep"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD_c7BnGzyIilWWHZpViITIg5H0k_tG_Rk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

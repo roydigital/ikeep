@@ -22,7 +22,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isOnboarding = state.uri.path == AppRoutes.onboarding;
 
       if (!onboardingDone && !isOnboarding) return AppRoutes.onboarding;
-      if (onboardingDone && state.uri.path == AppRoutes.splash) return AppRoutes.home;
+      if (onboardingDone && state.uri.path == AppRoutes.splash) {
+        return AppRoutes.home;
+      }
       return null;
     },
     routes: [
@@ -60,7 +62,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.search,
         builder: (context, state) {
-          final initial = state.extra as String? ?? '';
+          final extra = state.extra;
+          if (extra is Map<String, dynamic>) {
+            return SearchScreen(
+              initialQuery: extra['initialQuery'] as String? ?? '',
+            );
+          }
+          final initial = extra as String? ?? '';
           return SearchScreen(initialQuery: initial);
         },
       ),

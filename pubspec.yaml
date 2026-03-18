@@ -38,6 +38,16 @@ dependencies:
   # Cloud Sync
   appwrite: ^13.0.0
 
+  # Authentication
+  google_sign_in: ^6.2.2
+  firebase_core: ^3.13.1
+  firebase_auth: ^5.5.4
+  cloud_firestore: ^5.6.8
+
+  # Geolocation
+  geolocator: ^13.0.2
+  geocoding: ^3.0.0
+
   # Utilities
   uuid: ^4.5.1
   shared_preferences: ^2.3.4
@@ -59,6 +69,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/icon.png
     - assets/images/
 
 flutter_launcher_icons:

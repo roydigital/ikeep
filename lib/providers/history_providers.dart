@@ -8,3 +8,8 @@ final itemHistoryProvider =
         (ref, itemUuid) async {
   return ref.watch(historyRepositoryProvider).getHistoryForItem(itemUuid);
 });
+
+final itemLatestHistoryProvider =
+    FutureProvider.family<ItemLocationHistory?, String>((ref, itemUuid) async {
+  return ref.watch(historyRepositoryProvider).getLatestHistoryForItem(itemUuid);
+});

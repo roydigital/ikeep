@@ -32,6 +32,19 @@ class HistoryDao {
     return rows.map(ItemLocationHistory.fromMap).toList();
   }
 
+  Future<ItemLocationHistory?> getLatestHistoryForItem(String itemUuid) async {
+    final db = await _db;
+    final rows = await db.query(
+      DbConstants.tableHistory,
+      where: '${DbConstants.colHistItemUuid} = ?',
+      whereArgs: [itemUuid],
+      orderBy: '${DbConstants.colHistMovedAt} DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return ItemLocationHistory.fromMap(rows.first);
+  }
+
   Future<void> deleteHistoryForItem(String itemUuid) async {
     final db = await _db;
     await db.delete(

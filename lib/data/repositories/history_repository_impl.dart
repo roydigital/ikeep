@@ -21,4 +21,8 @@ class HistoryRepositoryImpl implements HistoryRepository {
   @override
   Future<List<ItemLocationHistory>> getHistoryForItem(String itemUuid) =>
       historyDao.getHistoryForItem(itemUuid);
+
+  @override
+  Future<ItemLocationHistory?> getLatestHistoryForItem(String itemUuid) =>
+      historyDao.getLatestHistoryForItem(itemUuid);
 }

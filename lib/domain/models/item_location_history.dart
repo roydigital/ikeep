@@ -5,12 +5,16 @@ class ItemLocationHistory {
     required this.locationName,
     required this.movedAt,
     this.locationUuid,
+    this.movedByMemberUuid,
+    this.movedByName,
     this.note,
   });
 
   final String uuid;
   final String itemUuid;
   final String? locationUuid;
+  final String? movedByMemberUuid;
+  final String? movedByName;
 
   /// Snapshot of the location name at the time of the move.
   /// Stored separately so renames don't break history display.
@@ -25,6 +29,8 @@ class ItemLocationHistory {
       'location_uuid': locationUuid,
       'location_name': locationName,
       'moved_at': movedAt.millisecondsSinceEpoch,
+      'moved_by_member_uuid': movedByMemberUuid,
+      'moved_by_name': movedByName,
       'note': note,
     };
   }
@@ -36,6 +42,8 @@ class ItemLocationHistory {
       locationUuid: map['location_uuid'] as String?,
       locationName: map['location_name'] as String,
       movedAt: DateTime.fromMillisecondsSinceEpoch(map['moved_at'] as int),
+      movedByMemberUuid: map['moved_by_member_uuid'] as String?,
+      movedByName: map['moved_by_name'] as String?,
       note: map['note'] as String?,
     );
   }

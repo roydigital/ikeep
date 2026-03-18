@@ -1,8 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../services/appwrite_sync_service.dart';
+import 'database_provider.dart';
+import '../services/firebase_sync_service.dart';
+import '../services/household_cloud_service.dart';
 import '../services/image_service.dart';
+import '../services/location_service.dart';
 import '../services/ml_label_service.dart';
+import '../services/nearby_cloud_service.dart';
 import '../services/notification_service.dart';
 import '../services/sync_service.dart';
 
@@ -19,9 +25,40 @@ final mlLabelServiceProvider = Provider<MlLabelService>(
 );
 
 final syncServiceProvider = Provider<SyncService>(
-  (ref) => AppwriteSyncService(),
+  (ref) => FirebaseSyncService(
+    auth: ref.watch(firebaseAuthProvider),
+    firestore: ref.watch(firebaseFirestoreProvider),
+    itemDao: ref.watch(itemDaoProvider),
+    locationDao: ref.watch(locationDaoProvider),
+  ),
+);
+
+final firebaseAuthProvider = Provider<FirebaseAuth>(
+  (ref) => FirebaseAuth.instance,
+);
+
+final firebaseFirestoreProvider = Provider<FirebaseFirestore>(
+  (ref) => FirebaseFirestore.instance,
+);
+
+final householdCloudServiceProvider = Provider<HouseholdCloudService>(
+  (ref) => HouseholdCloudService(
+    auth: ref.watch(firebaseAuthProvider),
+    firestore: ref.watch(firebaseFirestoreProvider),
+  ),
 );
 
 final notificationServiceProvider = Provider<NotificationService>(
   (ref) => NotificationService(),
+);
+
+final locationServiceProvider = Provider<LocationService>(
+  (ref) => LocationService(),
+);
+
+final nearbyCloudServiceProvider = Provider<NearbyCloudService>(
+  (ref) => NearbyCloudService(
+    auth: ref.watch(firebaseAuthProvider),
+    firestore: ref.watch(firebaseFirestoreProvider),
+  ),
 );

@@ -10,26 +10,24 @@ import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends ConsumerState<HomeScreen> {
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final user = ref.watch(authStateProvider).valueOrNull;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+      backgroundColor: Colors.transparent,
       body: Stack(
         children: [
           Positioned.fill(
-            child: _MainContent(bottomInset: bottomInset),
+            child: _MainContent(
+              bottomInset: bottomInset,
+              profilePhotoUrl: user?.photoURL,
+            ),
           ),
           Positioned(
             bottom: 0,
@@ -47,13 +45,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 // ── Main scrollable content ────────────────────────────────────────────────────
 
 class _MainContent extends ConsumerWidget {
-  const _MainContent({required this.bottomInset});
+  const _MainContent({
+    required this.bottomInset,
+    required this.profilePhotoUrl,
+  });
 
   final double bottomInset;
+  final String? profilePhotoUrl;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final itemsAsync = ref.watch(allItemsProvider);
+    final forgottenItemsAsync = ref.watch(forgottenItemsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
@@ -72,6 +75,15 @@ class _MainContent extends ConsumerWidget {
                 ),
                 child: _buildSearchBar(context, isDark),
               ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimensions.spacingMd,
+                ),
+                child: _LentPulseSection(),
+              ),
+              const SizedBox(height: 14),
+              _buildForgottenCarousel(context, forgottenItemsAsync, isDark),
             ],
           ),
         ),
@@ -82,7 +94,65 @@ class _MainContent extends ConsumerWidget {
     );
   }
 
+  Widget _buildForgottenCarousel(
+    BuildContext context,
+    AsyncValue<List<Item>> forgottenItemsAsync,
+    bool isDark,
+  ) {
+    final now = DateTime.now();
+    if (now.weekday != DateTime.sunday) {
+      return const SizedBox.shrink();
+    }
+
+    return forgottenItemsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        return Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: AppDimensions.spacingMd),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Did you Forget You Own This?',
+                style: TextStyle(
+                  color: isDark
+                      ? AppColors.textPrimaryDark
+                      : AppColors.textPrimaryLight,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Sunday throwback — rediscover things you parked and forgot.',
+                style: TextStyle(
+                  color: isDark
+                      ? AppColors.textSecondaryDark
+                      : AppColors.textSecondaryLight,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _ForgottenItemsCarousel(items: items),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildHeader(BuildContext context, bool isDark) {
+    final avatarBorderColor = isDark
+        ? AppColors.primary.withValues(alpha: 0.55)
+        : AppColors.borderLight;
+    final avatarShadowColor = isDark
+        ? AppColors.primary.withValues(alpha: 0.28)
+        : AppColors.primary.withValues(alpha: 0.16);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppDimensions.spacingMd,
@@ -92,25 +162,13 @@ class _MainContent extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-            ),
-            child: const Icon(Icons.push_pin, color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: AppDimensions.spacingSm),
-          Text(
-            'Ikeep',
-            style: TextStyle(
-              color: isDark
-                  ? AppColors.textPrimaryDark
-                  : AppColors.textPrimaryLight,
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.5,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+            child: Image.asset(
+              'assets/icon.png',
+              width: 42,
+              height: 42,
+              fit: BoxFit.cover,
             ),
           ),
           const Spacer(),
@@ -121,16 +179,41 @@ class _MainContent extends ConsumerWidget {
               height: 42,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.primary.withValues(alpha: 0.15),
+                border: Border.all(
+                  color: avatarBorderColor,
+                  width: 1.8,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: avatarShadowColor,
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              child: const Icon(
-                Icons.person_outline,
-                color: AppColors.primary,
-                size: 22,
+              child: ClipOval(
+                child: profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
+                    ? Image.network(
+                        profilePhotoUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _buildProfileFallback(),
+                      )
+                    : _buildProfileFallback(),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProfileFallback() {
+    return Container(
+      color: AppColors.primary.withValues(alpha: 0.14),
+      child: const Icon(
+        Icons.person_outline,
+        color: AppColors.primary,
+        size: 22,
       ),
     );
   }
@@ -203,7 +286,7 @@ class _MainContent extends ConsumerWidget {
                 ),
               ),
               TextButton(
-                onPressed: () {},
+                onPressed: () => context.push(AppRoutes.search),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   padding: EdgeInsets.zero,
@@ -225,7 +308,7 @@ class _MainContent extends ConsumerWidget {
         const SizedBox(height: AppDimensions.spacingSm),
         itemsAsync.when(
           data: (items) {
-            if (items.isEmpty) return _buildEmptyState(isDark);
+            if (items.isEmpty) return _buildEmptyState(context, isDark);
             final recent = [...items]
               ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
             final display = recent.take(10).toList();
@@ -253,40 +336,294 @@ class _MainContent extends ConsumerWidget {
               itemBuilder: (_, __) => const _SkeletonCard(),
             ),
           ),
-          error: (_, __) => const SizedBox.shrink(),
+          error: (_, __) => SizedBox(
+            height: 180,
+            child: Center(
+              child: Text(
+                'Could not load saved items',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark
+                      ? AppColors.textSecondaryDark
+                      : AppColors.textSecondaryLight,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildEmptyState(bool isDark) {
+  Widget _buildEmptyState(BuildContext context, bool isDark) {
     return SizedBox(
       height: 180,
       child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.camera_alt_outlined,
-              size: 44,
-              color: isDark
-                  ? AppColors.textDisabledDark
-                  : AppColors.textDisabledLight,
-            ),
-            const SizedBox(height: AppDimensions.spacingSm),
-            Text(
-              'Nothing saved yet.\nTap the camera to start!',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
+        child: GestureDetector(
+          onTap: () => context.push(AppRoutes.save),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.camera_alt_outlined,
+                size: 44,
                 color: isDark
-                    ? AppColors.textSecondaryDark
-                    : AppColors.textSecondaryLight,
+                    ? AppColors.textDisabledDark
+                    : AppColors.textDisabledLight,
               ),
-            ),
-          ],
+              const SizedBox(height: AppDimensions.spacingSm),
+              Text(
+                'Nothing saved yet.\nTap the camera to start!',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark
+                      ? AppColors.textSecondaryDark
+                      : AppColors.textSecondaryLight,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+// ── Household card ─────────────────────────────────────────────────────────────
+
+class _HouseholdCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primaryDark, AppColors.primary],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child:
+                    const Icon(Icons.groups_2, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Local-First Inventory',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Social sharing is parked for a future release.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Track where things live, tag them, and manage lending locally inside your own inventory.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push(AppRoutes.search),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('Browse Inventory',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Lent items pulse section ───────────────────────────────────────────────────
+
+class _LentPulseSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lentAsync = ref.watch(lentItemsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return lentAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (lentItems) {
+        if (lentItems.isEmpty) return const SizedBox.shrink();
+
+        return Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: AppDimensions.spacingMd),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.outbox, color: AppColors.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'I Lent It \u2022 ${lentItems.length} active',
+                        style: TextStyle(
+                          color: isDark
+                              ? AppColors.textPrimaryDark
+                              : AppColors.textPrimaryLight,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...lentItems.take(3).map((item) {
+                  final due = item.expectedReturnDate ?? item.lentOn;
+                  final dueText = due == null
+                      ? 'No return date'
+                      : 'Return ${due.day}/${due.month}/${due.year}';
+                  return GestureDetector(
+                    onTap: () =>
+                        context.push(AppRoutes.itemDetailPath(item.uuid)),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color:
+                                  AppColors.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: item.imagePaths.isNotEmpty
+                                ? Image.file(
+                                    File(item.imagePaths.first),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(
+                                        Icons.image_outlined,
+                                        color: AppColors.primary,
+                                        size: 18),
+                                  )
+                                : const Icon(Icons.image_outlined,
+                                    color: AppColors.primary, size: 18),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? AppColors.textPrimaryDark
+                                        : AppColors.textPrimaryLight,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  'with ${item.lentTo ?? 'someone'} \u2022 $dueText',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? AppColors.textSecondaryDark
+                                        : AppColors.textSecondaryLight,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.primary, size: 20),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                if (lentItems.length > 3) ...[
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      '+${lentItems.length - 3} more lent out',
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -323,9 +660,9 @@ class _ItemCard extends StatelessWidget {
                       File(item.imagePaths.first),
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _Placeholder(),
+                      errorBuilder: (_, __, ___) => const _Placeholder(),
                     )
-                  : _Placeholder(),
+                  : const _Placeholder(),
             ),
             Padding(
               padding: const EdgeInsets.all(AppDimensions.spacingSm),
@@ -333,21 +670,35 @@ class _ItemCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    item.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: isDark
-                          ? AppColors.textPrimaryDark
-                          : AppColors.textPrimaryLight,
-                    ),
+                  Row(
+                    children: [
+                      if (item.isLent)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(Icons.outbox,
+                              color: AppColors.primary, size: 12),
+                        ),
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: isDark
+                                ? AppColors.textPrimaryDark
+                                : AppColors.textPrimaryLight,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    _timeAgo(item.savedAt),
+                    item.isLent
+                        ? 'Lent to ${item.lentTo ?? 'someone'}'
+                        : _timeAgo(item.savedAt),
                     style: TextStyle(
                       fontSize: 11,
                       color: isDark
@@ -413,6 +764,165 @@ class _SkeletonCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ForgottenItemsCarousel extends StatefulWidget {
+  const _ForgottenItemsCarousel({required this.items});
+
+  final List<Item> items;
+
+  @override
+  State<_ForgottenItemsCarousel> createState() =>
+      _ForgottenItemsCarouselState();
+}
+
+class _ForgottenItemsCarouselState extends State<_ForgottenItemsCarousel> {
+  late final PageController _pageController;
+  int _currentPage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(viewportFraction: 0.88);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 210,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: widget.items.length,
+            onPageChanged: (index) => setState(() => _currentPage = index),
+            itemBuilder: (context, index) {
+              final item = widget.items[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _ForgottenItemCard(item: item),
+              );
+            },
+          ),
+        ),
+        if (widget.items.length > 1) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.items.length, (index) {
+              final active = _currentPage == index;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: active ? 16 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: active
+                      ? AppColors.primary
+                      : AppColors.primary.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ForgottenItemCard extends StatelessWidget {
+  const _ForgottenItemCard({required this.item});
+
+  final Item item;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: () => context.push(AppRoutes.itemDetailPath(item.uuid)),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+          border: Border.all(
+            color: isDark ? AppColors.borderDark : AppColors.borderLight,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 124,
+              child: item.imagePaths.isNotEmpty
+                  ? Image.file(
+                      File(item.imagePaths.first),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const _Placeholder(),
+                    )
+                  : const _Placeholder(),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(AppDimensions.spacingSm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: isDark
+                            ? AppColors.textPrimaryDark
+                            : AppColors.textPrimaryLight,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'You saved this ${_savedMonthsAgo(item.savedAt)} and haven\'t searched for it.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        color: isDark
+                            ? AppColors.textSecondaryDark
+                            : AppColors.textSecondaryLight,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Tap to revisit',
+                      style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _savedMonthsAgo(DateTime savedAt) {
+    final diffDays = DateTime.now().difference(savedAt).inDays;
+    final months = (diffDays / 30).floor();
+    if (months <= 1) return '1 month ago';
+    return '$months months ago';
   }
 }
 
@@ -498,7 +1008,7 @@ class _BottomNav extends StatelessWidget {
             active: false,
             onTap: () => context.go(AppRoutes.rooms),
           ),
-          const SizedBox(width: 64), // reserve space for FAB
+          const SizedBox(width: 64),
           _NavItem(
             label: 'SEARCH',
             icon: Icons.search,
@@ -535,9 +1045,7 @@ class _NavItem extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final color = active
         ? AppColors.primary
-        : (isDark
-            ? AppColors.textSecondaryDark
-            : AppColors.textSecondaryLight);
+        : (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight);
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -565,3 +1073,4 @@ class _NavItem extends StatelessWidget {
     );
   }
 }
+

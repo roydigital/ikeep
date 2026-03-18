@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/sync_status.dart';
 import '../../providers/item_providers.dart';
@@ -30,8 +34,6 @@ class _SettingsColors {
     required this.success,
     required this.switchOffTrack,
     required this.switchOffThumb,
-    required this.accountSwitchBg,
-    required this.accountSwitchFg,
   });
 
   final Color bg;
@@ -44,8 +46,6 @@ class _SettingsColors {
   final Color success;
   final Color switchOffTrack;
   final Color switchOffThumb;
-  final Color accountSwitchBg;
-  final Color accountSwitchFg;
 }
 
 const _darkColors = _SettingsColors(
@@ -59,8 +59,6 @@ const _darkColors = _SettingsColors(
   success: AppColors.success,
   switchOffTrack: AppColors.surfaceVariantDark,
   switchOffThumb: AppColors.textDisabledDark,
-  accountSwitchBg: AppColors.surfaceVariantDark,
-  accountSwitchFg: AppColors.primary,
 );
 
 const _lightColors = _SettingsColors(
@@ -74,13 +72,10 @@ const _lightColors = _SettingsColors(
   success: AppColors.success,
   switchOffTrack: AppColors.surfaceVariantLight,
   switchOffThumb: AppColors.surfaceLight,
-  accountSwitchBg: AppColors.surfaceVariantLight,
-  accountSwitchFg: AppColors.primary,
 );
 
 late _SettingsColors _activeColors;
 
-Color get _kBg => _activeColors.bg;
 Color get _kCard => _activeColors.card;
 Color get _kCardSoft => _activeColors.cardSoft;
 Color get _kBorder => _activeColors.border;
@@ -90,8 +85,6 @@ Color get _kSuccess => _activeColors.success;
 Color get _kIcon => _activeColors.icon;
 Color get _kSwitchOffTrack => _activeColors.switchOffTrack;
 Color get _kSwitchOffThumb => _activeColors.switchOffThumb;
-Color get _kAccountSwitchBg => _activeColors.accountSwitchBg;
-Color get _kAccountSwitchFg => _activeColors.accountSwitchFg;
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -105,14 +98,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _darkMode = true;
   bool _stillThere = true;
   bool _seasonal = true;
+  bool _lentReminders = true;
   bool _backupEnabled = false;
   bool _isSaving = false;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  GoogleSignInAccount? _googleUser;
+  StreamSubscription<GoogleSignInAccount?>? _googleAuthSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _googleAuthSubscription = _googleSignIn.onCurrentUserChanged.listen((user) {
+      if (!mounted) return;
+      setState(() => _googleUser = user);
+    });
+    _googleSignIn.signInSilently().then((user) {
+      if (!mounted) return;
+      setState(() => _googleUser = user ?? _googleSignIn.currentUser);
+    });
+  }
+
+  @override
+  void dispose() {
+    _googleAuthSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    try {
+      final account = await _googleSignIn.signIn();
+      if (account != null) {
+        final googleAuth = await account.authentication;
+        final credential = GoogleAuthProvider.credential(
+          idToken: googleAuth.idToken,
+          accessToken: googleAuth.accessToken,
+        );
+        await FirebaseAuth.instance.signInWithCredential(credential);
+      }
+      if (!mounted) return;
+      setState(() => _googleUser = account ?? _googleSignIn.currentUser);
+      if (account == null) {
+        _showInfo('Google sign-in cancelled');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _showInfo('Unable to sign in with Google');
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+      await _googleSignIn.signOut();
+      if (!mounted) return;
+      setState(() => _googleUser = null);
+      _showInfo('Logged out');
+    } catch (_) {
+      if (!mounted) return;
+      _showInfo('Unable to log out');
+    }
+  }
 
   void _initFromSettings(AppSettings settings) {
     if (_initialized) return;
     _darkMode = settings.themeMode == ThemeMode.dark;
     _stillThere = settings.stillThereRemindersEnabled;
     _seasonal = settings.expiryRemindersEnabled;
+    _lentReminders = settings.lentRemindersEnabled;
     _backupEnabled = settings.isBackupEnabled;
     _initialized = true;
   }
@@ -121,25 +173,69 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return _darkMode != (settings.themeMode == ThemeMode.dark) ||
         _stillThere != settings.stillThereRemindersEnabled ||
         _seasonal != settings.expiryRemindersEnabled ||
+        _lentReminders != settings.lentRemindersEnabled ||
         _backupEnabled != settings.isBackupEnabled;
   }
 
   Future<void> _save(AppSettings settings) async {
     if (_isSaving || !_hasChanges(settings)) return;
     setState(() => _isSaving = true);
-    final notifier = ref.read(settingsProvider.notifier);
-    await notifier.setThemeMode(_darkMode ? ThemeMode.dark : ThemeMode.light);
-    await notifier.setStillThereReminders(_stillThere);
-    await notifier.setExpiryReminders(_seasonal);
-    await notifier.setBackupEnabled(_backupEnabled);
-    if (!mounted) return;
-    setState(() => _isSaving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved')),
-    );
+    try {
+      final notifier = ref.read(settingsProvider.notifier);
+      final notificationService = ref.read(notificationServiceProvider);
+      await notifier.setThemeMode(_darkMode ? ThemeMode.dark : ThemeMode.light);
+      await notifier.setStillThereReminders(_stillThere);
+      await notifier.setExpiryReminders(_seasonal);
+      await notifier.setLentReminders(_lentReminders);
+      await notifier.setBackupEnabled(_backupEnabled);
+
+      final items = await ref.read(allItemsProvider.future);
+      if (_stillThere) {
+        await notificationService.scheduleStillThereDailyReminder();
+      } else {
+        await notificationService.cancelStillThereDailyReminder();
+      }
+
+      if (_seasonal) {
+        await notificationService.rescheduleExpiryReminders(
+          items.where((item) => !item.isArchived),
+        );
+      } else {
+        await notificationService.cancelExpiryReminders(items);
+      }
+
+      if (_lentReminders) {
+        await notificationService.rescheduleLentReminders(
+          items.where((item) => item.isLent && !item.isArchived),
+        );
+      } else {
+        for (final item in items) {
+          await notificationService.cancelLentReminder(item.uuid);
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Settings saved')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to update notification settings')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
   }
 
   Future<void> _runSync() async {
+    if (!_backupEnabled) {
+      _showInfo('Buy Data & Backup to enable cloud sync');
+      return;
+    }
+
     ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     final result = await ref.read(syncServiceProvider).fullSync();
     ref.read(syncStatusProvider.notifier).state = result;
@@ -153,19 +249,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _exportData() async {
+    if (!_backupEnabled) {
+      _showInfo('Buy Data & Backup to export your data');
+      return;
+    }
+
     final colors = _darkMode ? _darkColors : _lightColors;
     try {
       final items = await ref.read(allItemsProvider.future);
       final locations = await ref.read(allLocationsProvider.future);
+
+      final exportedItems = <Map<String, dynamic>>[];
+      for (final item in items) {
+        final imageExports = <Map<String, dynamic>>[];
+        for (final imagePath in item.imagePaths) {
+          String? base64Data;
+          try {
+            final file = File(imagePath);
+            if (await file.exists()) {
+              base64Data = base64Encode(await file.readAsBytes());
+            }
+          } catch (_) {
+            base64Data = null;
+          }
+
+          imageExports.add({
+            'path': imagePath,
+            'fileName': imagePath.split(RegExp(r'[/\\]')).last,
+            'base64': base64Data,
+          });
+        }
+
+        exportedItems.add({
+          ...item.toJson(),
+          'locationName': item.locationName,
+          'locationFullPath': item.locationFullPath,
+          'isArchived': item.isArchived,
+          'images': imageExports,
+        });
+      }
+
       final payload = {
         'exportedAt': DateTime.now().toIso8601String(),
+        'formatVersion': 1,
         'itemsCount': items.length,
         'locationsCount': locations.length,
-        'items': items.map((e) => e.toJson()).toList(),
+        'items': exportedItems,
         'locations': locations.map((e) => e.toJson()).toList(),
       };
-      final json = const JsonEncoder.withIndent('  ').convert(payload);
-      await Clipboard.setData(ClipboardData(text: json));
+
+      final exportJson = const JsonEncoder.withIndent('  ').convert(payload);
+      final exportDir = await getApplicationDocumentsDirectory();
+      final fileName =
+          'ikeep_export_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
+      final file = File('${exportDir.path}/$fileName');
+      await file.writeAsString(exportJson);
+
       if (!mounted) return;
       showDialog<void>(
         context: context,
@@ -176,7 +315,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           title:
               Text('Export Ready', style: TextStyle(color: colors.textPrimary)),
           content: Text(
-            'Copied ${items.length} items and ${locations.length} locations to clipboard as JSON.',
+            'Downloaded $fileName with ${items.length} items, ${locations.length} locations, and image data.',
             style: TextStyle(color: colors.textMuted),
           ),
           actions: [
@@ -221,16 +360,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _activeColors = _darkMode ? _darkColors : _lightColors;
 
     final canSave = _hasChanges(settings) && !_isSaving;
-    final statusColor = syncStatus.hasError ? AppColors.error : _kSuccess;
-    final statusText = syncStatus.isSyncing
-        ? 'Syncing...'
+    final statusColor = !_backupEnabled
+        ? _kTextMuted
         : syncStatus.hasError
-            ? 'Error'
-            : 'Connected';
+            ? AppColors.error
+            : _kSuccess;
+    final statusText = !_backupEnabled
+        ? 'Not Connected'
+        : syncStatus.isSyncing
+            ? 'Syncing...'
+            : syncStatus.hasError
+                ? 'Error'
+                : 'Connected';
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: Colors.transparent,
       body: Stack(
         children: [
           SafeArea(
@@ -259,9 +404,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         const SizedBox(height: 14),
                         _AccountCard(
                           backupEnabled: _backupEnabled,
-                          onSwitch: () {
-                            setState(() => _backupEnabled = !_backupEnabled);
-                          },
+                          displayName: _googleUser?.displayName,
+                          photoUrl: _googleUser?.photoUrl,
+                          isGoogleSignedIn: _googleUser != null,
+                          onGoogleSignInTap:
+                              _googleUser == null ? _handleGoogleSignIn : null,
                         ),
                         const SizedBox(height: 36),
                         _SectionLabel('PREFERENCES'),
@@ -270,17 +417,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           darkMode: _darkMode,
                           stillThere: _stillThere,
                           seasonal: _seasonal,
+                          lentReminders: _lentReminders,
                           onDarkModeChanged: (v) =>
                               setState(() => _darkMode = v),
                           onStillThereChanged: (v) =>
                               setState(() => _stillThere = v),
                           onSeasonalChanged: (v) =>
                               setState(() => _seasonal = v),
+                          onLentRemindersChanged: (v) =>
+                              setState(() => _lentReminders = v),
                         ),
                         const SizedBox(height: 36),
                         _SectionLabel('DATA & BACKUP'),
                         const SizedBox(height: 14),
                         _DataBackupCard(
+                          isPremium: _backupEnabled,
                           statusText: statusText,
                           statusColor: statusColor,
                           isSyncing: syncStatus.isSyncing,
@@ -312,7 +463,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         const SizedBox(height: 18),
                         Center(
                           child: TextButton(
-                            onPressed: () => _showInfo('Logged out'),
+                            onPressed: _handleLogout,
                             child: const Text(
                               'Log Out',
                               style: TextStyle(
@@ -425,14 +576,24 @@ class _SectionLabel extends StatelessWidget {
 class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.backupEnabled,
-    required this.onSwitch,
+    required this.displayName,
+    required this.photoUrl,
+    required this.isGoogleSignedIn,
+    this.onGoogleSignInTap,
   });
 
   final bool backupEnabled;
-  final VoidCallback onSwitch;
+  final String? displayName;
+  final String? photoUrl;
+  final bool isGoogleSignedIn;
+  final Future<void> Function()? onGoogleSignInTap;
 
   @override
   Widget build(BuildContext context) {
+    final isGuestUser =
+        displayName == null || displayName!.trim().isEmpty || !isGoogleSignedIn;
+    final googleSignInTap = onGoogleSignInTap;
+
     return Container(
       decoration: BoxDecoration(
         color: _kCard,
@@ -453,8 +614,17 @@ class _AccountCard extends StatelessWidget {
                     color: _kCardSoft,
                     border: Border.all(color: _kBorder, width: 2),
                   ),
-                  child: const Icon(Icons.person,
-                      color: Color(0xFF9A8E76), size: 42),
+                  child: ClipOval(
+                    child: photoUrl != null && photoUrl!.isNotEmpty
+                        ? Image.network(
+                            photoUrl!,
+                            width: 74,
+                            height: 74,
+                            fit: BoxFit.cover,
+                          )
+                        : const Icon(Icons.person,
+                            color: Color(0xFF9A8E76), size: 42),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -462,45 +632,35 @@ class _AccountCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Alex Johnson',
+                        isGuestUser ? 'Guest User' : displayName!,
                         style: TextStyle(
                           color: _kTextPrimary,
                           fontSize: 19,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.check_circle,
-                              color: AppColors.success, size: 18),
-                          SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Signed in with Google',
-                              style:
-                                  TextStyle(color: _kTextMuted, fontSize: 16),
+                      const SizedBox(height: 10),
+                      if (!isGoogleSignedIn && googleSignInTap != null)
+                        _GoogleSignInButton(onPressed: googleSignInTap)
+                      else
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              color: AppColors.success,
+                              size: 18,
                             ),
-                          ),
-                        ],
-                      ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Google account connected',
+                                style:
+                                    TextStyle(color: _kTextMuted, fontSize: 16),
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _kAccountSwitchBg,
-                    foregroundColor: _kAccountSwitchFg,
-                    shape: const StadiumBorder(),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 11),
-                  ),
-                  onPressed: onSwitch,
-                  child: const Text(
-                    'Switch',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5),
                   ),
                 ),
               ],
@@ -514,22 +674,35 @@ class _AccountCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Icon(Icons.cloud_done, color: _kAccent, size: 24),
+                Icon(
+                  Icons.cloud_done,
+                  color: backupEnabled ? _kAccent : AppColors.error,
+                  size: 24,
+                ),
                 const SizedBox(width: 10),
-                Text(
-                  backupEnabled
-                      ? 'Backup & Sync Active'
-                      : 'Backup & Sync Inactive',
-                  style: TextStyle(
-                    color: _kTextPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 17,
+                Expanded(
+                  child: Text(
+                    backupEnabled
+                        ? 'Backup & Sync Active'
+                        : 'Backup & Sync Inactive',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _kTextPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                    ),
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  backupEnabled ? 'Premium Member' : 'Free Member',
-                  style: TextStyle(color: _kTextMuted, fontSize: 15),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    backupEnabled ? 'Premium Member' : 'Free Member',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(color: _kTextMuted, fontSize: 15),
+                  ),
                 ),
               ],
             ),
@@ -540,22 +713,76 @@ class _AccountCard extends StatelessWidget {
   }
 }
 
+class _GoogleSignInButton extends StatelessWidget {
+  const _GoogleSignInButton({required this.onPressed});
+
+  final Future<void> Function() onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Colors.white,
+                  child: Text(
+                    'G',
+                    style: TextStyle(
+                      color: Color(0xFF4285F4),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                SizedBox(width: 10),
+                Text(
+                  'Google Sign In',
+                  style: TextStyle(
+                    color: Color(0xFF1F1F1F),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PreferencesCard extends StatelessWidget {
   const _PreferencesCard({
     required this.darkMode,
     required this.stillThere,
     required this.seasonal,
+    required this.lentReminders,
     required this.onDarkModeChanged,
     required this.onStillThereChanged,
     required this.onSeasonalChanged,
+    required this.onLentRemindersChanged,
   });
 
   final bool darkMode;
   final bool stillThere;
   final bool seasonal;
+  final bool lentReminders;
   final ValueChanged<bool> onDarkModeChanged;
   final ValueChanged<bool> onStillThereChanged;
   final ValueChanged<bool> onSeasonalChanged;
+  final ValueChanged<bool> onLentRemindersChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -612,6 +839,13 @@ class _PreferencesCard extends StatelessWidget {
               value: seasonal,
               onChanged: onSeasonalChanged,
             ),
+            const SizedBox(height: 16),
+            _NotificationRow(
+              title: '"I Lent It" Reminders',
+              subtitle: 'Nudge me for items I gave to someone',
+              value: lentReminders,
+              onChanged: onLentRemindersChanged,
+            ),
           ],
         ),
       ),
@@ -663,8 +897,159 @@ class _NotificationRow extends StatelessWidget {
   }
 }
 
+class _NearbyLendingCard extends ConsumerWidget {
+  const _NearbyLendingCard({
+    required this.nearbyEnabled,
+    this.cachedLocality,
+  });
+
+  final bool nearbyEnabled;
+  final String? cachedLocality;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.near_me, color: _kIcon, size: 32),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Nearby Discovery',
+                        style: TextStyle(
+                          color: _kTextPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Let neighbors discover your lendable items',
+                        style: TextStyle(
+                          color: _kTextMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Divider(color: _kBorder, height: 1),
+            const SizedBox(height: 16),
+
+            // Locality info
+            if (cachedLocality != null) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on,
+                        color: AppColors.primary, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Your Locality',
+                            style: TextStyle(
+                              color: _kTextMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            cachedLocality!,
+                            style: TextStyle(
+                              color: _kTextPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () async {
+                        final locationService =
+                            ref.read(locationServiceProvider);
+                        final locality =
+                            await locationService.refreshLocality();
+                        if (locality != null) {
+                          ref
+                              .read(settingsProvider.notifier)
+                              .setCachedLocality(locality);
+                        }
+                      },
+                      icon: const Icon(Icons.refresh,
+                          color: AppColors.primary, size: 20),
+                      tooltip: 'Refresh locality',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Privacy note
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.info.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: AppColors.info.withValues(alpha: 0.15)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.shield_outlined,
+                      color: AppColors.info, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Only your locality name is shared — never your GPS coordinates. '
+                      'Items are visible per-item, not globally. You control each item\'s visibility.',
+                      style: TextStyle(
+                        color: _kTextMuted,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DataBackupCard extends StatelessWidget {
   const _DataBackupCard({
+    required this.isPremium,
     required this.statusText,
     required this.statusColor,
     required this.isSyncing,
@@ -674,6 +1059,7 @@ class _DataBackupCard extends StatelessWidget {
     required this.onExportTap,
   });
 
+  final bool isPremium;
   final String statusText;
   final Color statusColor;
   final bool isSyncing;
@@ -705,7 +1091,7 @@ class _DataBackupCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Appwrite Sync Status',
+                          'Backup Sync Status',
                           style: TextStyle(
                             color: _kTextPrimary,
                             fontWeight: FontWeight.w700,
@@ -748,10 +1134,19 @@ class _DataBackupCard extends StatelessWidget {
           ),
           Divider(height: 1, color: _kBorder),
           _ActionRow(
-            icon: Icons.download,
-            title: 'Export Data',
+            icon: isPremium ? Icons.download : Icons.workspace_premium,
+            title: isPremium ? 'Export Data' : 'Buy Data & Backup',
             trailing: Icons.chevron_right,
-            onTap: onExportTap,
+            onTap: isPremium
+                ? onExportTap
+                : () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Upgrade required to use Data & Backup features'),
+                      ),
+                    );
+                  },
           ),
         ],
       ),
@@ -885,4 +1280,3 @@ class _IkeepSwitch extends StatelessWidget {
     );
   }
 }
-

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -20,54 +22,64 @@ class AppNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: EdgeInsets.fromLTRB(8, 10, 8, bottomInset + 10),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
-        border: Border(
-          top: BorderSide(
-            color: AppColors.primary.withValues(alpha: 0.35),
-            width: 0.6,
+
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(8, 10, 8, bottomInset + 10),
+          decoration: BoxDecoration(
+            color:
+                (isDark ? AppColors.backgroundDark : AppColors.backgroundLight)
+                    .withValues(alpha: 0.75),
+            border: Border(
+              top: BorderSide(
+                color: AppColors.primary.withValues(alpha: 0.35),
+                width: 0.6,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              _NavItem(
+                label: 'ITEMS',
+                icon: Icons.inventory_2,
+                active: activeTab == AppNavTab.items,
+                onTap: () {
+                  if (activeTab != AppNavTab.items) context.go(AppRoutes.home);
+                },
+              ),
+              _NavItem(
+                label: 'LOCATIONS',
+                icon: Icons.location_on,
+                active: activeTab == AppNavTab.locations,
+                onTap: () {
+                  if (activeTab != AppNavTab.locations)
+                    context.go(AppRoutes.rooms);
+                },
+              ),
+              _NavItem(
+                label: 'SEARCH',
+                icon: Icons.search,
+                active: activeTab == AppNavTab.search,
+                onTap: () {
+                  if (activeTab != AppNavTab.search)
+                    context.push(AppRoutes.search);
+                },
+              ),
+              _NavItem(
+                label: 'SETTINGS',
+                icon: Icons.settings,
+                active: activeTab == AppNavTab.settings,
+                onTap: () {
+                  if (activeTab != AppNavTab.settings) {
+                    context.go(AppRoutes.settings);
+                  }
+                },
+              ),
+            ],
           ),
         ),
-      ),
-      child: Row(
-        children: [
-          _NavItem(
-            label: 'ITEMS',
-            icon: Icons.inventory_2,
-            active: activeTab == AppNavTab.items,
-            onTap: () {
-              if (activeTab != AppNavTab.items) context.go(AppRoutes.home);
-            },
-          ),
-          _NavItem(
-            label: 'LOCATIONS',
-            icon: Icons.location_on,
-            active: activeTab == AppNavTab.locations,
-            onTap: () {
-              if (activeTab != AppNavTab.locations) context.go(AppRoutes.rooms);
-            },
-          ),
-          _NavItem(
-            label: 'SEARCH',
-            icon: Icons.search,
-            active: activeTab == AppNavTab.search,
-            onTap: () {
-              if (activeTab != AppNavTab.search) context.push(AppRoutes.search);
-            },
-          ),
-          _NavItem(
-            label: 'SETTINGS',
-            icon: Icons.settings,
-            active: activeTab == AppNavTab.settings,
-            onTap: () {
-              if (activeTab != AppNavTab.settings) {
-                context.go(AppRoutes.settings);
-              }
-            },
-          ),
-        ],
       ),
     );
   }

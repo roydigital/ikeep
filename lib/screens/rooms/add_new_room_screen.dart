@@ -16,7 +16,10 @@ class AddNewRoomScreen extends ConsumerStatefulWidget {
 class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
   final _roomNameController = TextEditingController();
 
+  static const String _customParentValue = '__custom_parent_location__';
+
   String? _selectedParentUuid;
+  String? _selectedParentDropdownValue;
   String _selectedIconKey = 'bed';
   bool _isSaving = false;
 
@@ -37,6 +40,92 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
         key: 'other', label: 'OTHER', icon: Icons.more_horiz_rounded),
   ];
 
+  static const List<_ParentLocationGroup> _parentLocationGroups = [
+    _ParentLocationGroup(
+      title: 'Home & Residential',
+      locations: [
+        'House',
+        'Apartment',
+        'Villa',
+        'Studio',
+        'Bedroom',
+        'Master Bedroom',
+        'Kids Room',
+        'Guest Room',
+        'Living Room',
+        'Family Room',
+        'Dining Room',
+        'Kitchen',
+        'Pantry',
+        'Bathroom',
+        'Powder Room',
+        'Laundry Room',
+        'Basement',
+        'Attic',
+        'Closet',
+        'Storage Room',
+      ],
+    ),
+    _ParentLocationGroup(
+      title: 'Office & Commercial',
+      locations: [
+        'Office',
+        'Cabin',
+        'Conference Room',
+        'Reception',
+        'Lobby',
+        'Break Room',
+        'Server Room',
+        'Warehouse',
+        'Retail Store',
+        'Shop Floor',
+        'Classroom',
+        'Laboratory',
+      ],
+    ),
+    _ParentLocationGroup(
+      title: 'Garage, Utility & Service',
+      locations: [
+        'Garage',
+        'Parking Spot',
+        'Workshop',
+        'Tool Shed',
+        'Utility Room',
+        'Electrical Room',
+        'Pump Room',
+        'Boiler Room',
+      ],
+    ),
+    _ParentLocationGroup(
+      title: 'Outdoor & Property',
+      locations: [
+        'Lawn',
+        'Garden',
+        'Backyard',
+        'Front Yard',
+        'Patio',
+        'Terrace',
+        'Balcony',
+        'Porch',
+        'Driveway',
+        'Rooftop',
+        'Gate Area',
+      ],
+    ),
+    _ParentLocationGroup(
+      title: 'Travel & Vehicles',
+      locations: [
+        'Car',
+        'SUV',
+        'Van',
+        'Truck',
+        'Motorcycle',
+        'Bicycle Storage',
+        'Camper',
+      ],
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -50,16 +139,18 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
   }
 
   List<_ZoneOption> _defaultZones() {
-    return const [
-      _ZoneOption(
+    return [
+      const _ZoneOption(
         name: 'Top Shelf',
         icon: Icons.table_rows_rounded,
         iconName: 'shelves',
+        selected: false,
       ),
-      _ZoneOption(
+      const _ZoneOption(
         name: 'Main Closet',
         icon: Icons.door_sliding_outlined,
         iconName: 'door',
+        selected: false,
       ),
     ];
   }
@@ -68,7 +159,10 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     if (_selectedParentUuid != null || roots.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _selectedParentUuid != null) return;
-      setState(() => _selectedParentUuid = roots.first.uuid);
+      setState(() {
+        _selectedParentUuid = roots.first.uuid;
+        _selectedParentDropdownValue = 'existing:${roots.first.uuid}';
+      });
     });
   }
 
@@ -76,12 +170,14 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     setState(() {
       _roomNameController.clear();
       _selectedParentUuid = roots.isNotEmpty ? roots.first.uuid : null;
+      _selectedParentDropdownValue =
+          roots.isNotEmpty ? 'existing:${roots.first.uuid}' : null;
       _selectedIconKey = 'bed';
       _zones = _defaultZones();
     });
   }
 
-  Future<void> _addParentLocation() async {
+  Future<String?> _addParentLocation() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = TextEditingController();
     final result = await showDialog<String>(
@@ -144,7 +240,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
       ),
     );
 
-    if (!mounted || result == null || result.isEmpty) return;
+    if (!mounted || result == null || result.isEmpty) return null;
 
     final location = LocationModel(
       uuid: generateUuid(),
@@ -156,6 +252,66 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     final error = await ref
         .read(locationsNotifierProvider.notifier)
         .saveLocation(location);
+    if (!mounted) return null;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: Colors.red.shade400),
+      );
+      return null;
+    }
+
+    setState(() {
+      _selectedParentUuid = location.uuid;
+      _selectedParentDropdownValue = 'existing:${location.uuid}';
+    });
+    return location.uuid;
+  }
+
+  Future<void> _onParentLocationChanged(
+    String? selectedValue,
+    List<LocationModel> roots,
+  ) async {
+    if (selectedValue == null) return;
+
+    if (selectedValue == _customParentValue) {
+      await _addParentLocation();
+      return;
+    }
+
+    if (selectedValue.startsWith('existing:')) {
+      final uuid = selectedValue.substring('existing:'.length);
+      setState(() {
+        _selectedParentUuid = uuid;
+        _selectedParentDropdownValue = selectedValue;
+      });
+      return;
+    }
+
+    if (!selectedValue.startsWith('preset:')) return;
+    final presetName = selectedValue.substring('preset:'.length);
+    final existing = roots.where((root) {
+      return root.name.trim().toLowerCase() == presetName.trim().toLowerCase();
+    }).firstOrNull;
+
+    if (existing != null) {
+      setState(() {
+        _selectedParentUuid = existing.uuid;
+        _selectedParentDropdownValue = 'existing:${existing.uuid}';
+      });
+      return;
+    }
+
+    final newLocation = LocationModel(
+      uuid: generateUuid(),
+      name: presetName,
+      parentUuid: null,
+      iconName: 'folder',
+      createdAt: DateTime.now(),
+    );
+    final error = await ref
+        .read(locationsNotifierProvider.notifier)
+        .saveLocation(newLocation);
     if (!mounted) return;
 
     if (error != null) {
@@ -165,7 +321,10 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
       return;
     }
 
-    setState(() => _selectedParentUuid = location.uuid);
+    setState(() {
+      _selectedParentUuid = newLocation.uuid;
+      _selectedParentDropdownValue = 'existing:${newLocation.uuid}';
+    });
   }
 
   Future<void> _addCustomZone() async {
@@ -239,7 +398,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
           name: result,
           icon: Icons.grid_view_rounded,
           iconName: 'folder',
-          selected: true,
+          selected: false,
         ),
       );
     });
@@ -250,6 +409,13 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     if (roomName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a room name')),
+      );
+      return;
+    }
+
+    if (_selectedParentUuid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a parent location')),
       );
       return;
     }
@@ -374,59 +540,125 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                         const SizedBox(height: 18),
                         _SectionLabel(label: 'Room Name', textMuted: textMuted),
                         const SizedBox(height: 10),
-                        Container(
-                          height: 76,
-                          decoration: BoxDecoration(
-                            color: kCardSoft,
-                            borderRadius: BorderRadius.circular(40),
+                        TextField(
+                          controller: _roomNameController,
+                          style: TextStyle(
+                            color: textPrimary,
+                            fontSize: 24 / 2,
+                            fontWeight: FontWeight.w600,
                           ),
-                          alignment: Alignment.centerLeft,
-                          child: TextField(
-                            controller: _roomNameController,
-                            style: TextStyle(
-                              color: textPrimary,
+                          decoration: InputDecoration(
+                            hintText: 'e.g., Master Bedroom',
+                            hintStyle: TextStyle(
+                              color: textMuted,
                               fontSize: 24 / 2,
                               fontWeight: FontWeight.w600,
                             ),
-                            decoration: InputDecoration(
-                              hintText: 'e.g., Master Bedroom',
-                              hintStyle: TextStyle(
-                                color: textMuted,
-                                fontSize: 24 / 2,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 32),
+                            filled: true,
+                            fillColor: kCardSoft,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(40),
+                              borderSide: BorderSide.none,
                             ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(40),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(40),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 32, vertical: 26),
                           ),
                         ),
                         const SizedBox(height: 28),
                         _SectionLabel(
                             label: 'Parent Location', textMuted: textMuted),
                         const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 10,
-                          children: [
-                            for (final root in roots)
-                              _parentChip(root, isDark, textPrimary,
-                                  kCardSoft),
-                            InkWell(
-                              onTap: _addParentLocation,
-                              borderRadius: BorderRadius.circular(28),
-                              child: Container(
-                                height: 62,
-                                width: 76,
-                                decoration: BoxDecoration(
-                                  color: kCardSoft,
-                                  borderRadius: BorderRadius.circular(28),
-                                ),
-                                child: const Icon(Icons.add,
-                                    color: AppColors.primary, size: 38 / 2),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: kCardSoft,
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 6),
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedParentDropdownValue,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                                color: AppColors.primary),
+                            dropdownColor: isDark
+                                ? AppColors.surfaceDark
+                                : AppColors.surfaceLight,
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                            ),
+                            style: TextStyle(
+                              color: textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            hint: Text(
+                              'Select parent location',
+                              style: TextStyle(
+                                color: textMuted,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ],
+                            selectedItemBuilder: (context) {
+                              return _buildParentDropdownItems(
+                                roots: roots,
+                                textPrimary: textPrimary,
+                                textMuted: textMuted,
+                              )
+                                  .map((item) => Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          item.label,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: item.isHeader
+                                                ? textMuted
+                                                : textPrimary,
+                                            fontSize: 16,
+                                            fontWeight: item.isHeader
+                                                ? FontWeight.w500
+                                                : FontWeight.w700,
+                                          ),
+                                        ),
+                                      ))
+                                  .toList();
+                            },
+                            items: _buildParentDropdownItems(
+                              roots: roots,
+                              textPrimary: textPrimary,
+                              textMuted: textMuted,
+                            )
+                                .map(
+                                  (item) => DropdownMenuItem<String>(
+                                    value: item.value,
+                                    enabled: !item.isHeader,
+                                    child: Text(
+                                      item.label,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: item.isHeader
+                                            ? textMuted
+                                            : textPrimary,
+                                        fontSize: item.isHeader ? 13 : 15,
+                                        fontWeight: item.isHeader
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
+                                        letterSpacing: item.isHeader ? 0.6 : 0,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) =>
+                                _onParentLocationChanged(value, roots),
+                          ),
                         ),
                         const SizedBox(height: 30),
                         _SectionLabel(label: 'Room Icon', textMuted: textMuted),
@@ -516,8 +748,8 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                         ),
                         const SizedBox(height: 14),
                         for (var i = 0; i < _zones.length; i++) ...[
-                          _zoneRow(_zones[i], i, isDark, kCardSoft,
-                              textPrimary, textMuted),
+                          _zoneRow(_zones[i], i, isDark, kCardSoft, textPrimary,
+                              textMuted),
                           const SizedBox(height: 10),
                         ],
                         InkWell(
@@ -644,39 +876,53 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     );
   }
 
-  Widget _parentChip(LocationModel root, bool isDark, Color textPrimary,
-      Color cardSoft) {
-    final selected = _selectedParentUuid == root.uuid;
-    return InkWell(
-      onTap: () => setState(() => _selectedParentUuid = root.uuid),
-      borderRadius: BorderRadius.circular(28),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primary : cardSoft,
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.42),
-                    blurRadius: 18,
-                    spreadRadius: 0,
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          root.name,
-          style: TextStyle(
-            color: selected ? Colors.white : textPrimary,
-            fontSize: 20 / 2,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+  List<_ParentDropdownEntry> _buildParentDropdownItems({
+    required List<LocationModel> roots,
+    required Color textPrimary,
+    required Color textMuted,
+  }) {
+    final entries = <_ParentDropdownEntry>[
+      const _ParentDropdownEntry(
+        value: _customParentValue,
+        label: '✍ Create Custom Location',
       ),
-    );
+    ];
+
+    if (roots.isNotEmpty) {
+      entries.add(const _ParentDropdownEntry(
+        value: '__header_saved__',
+        label: 'YOUR SAVED LOCATIONS',
+        isHeader: true,
+      ));
+      final sortedRoots = [...roots]
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      for (final root in sortedRoots) {
+        entries.add(_ParentDropdownEntry(
+          value: 'existing:${root.uuid}',
+          label: root.name,
+        ));
+      }
+    }
+
+    final rootNames = roots.map((r) => r.name.trim().toLowerCase()).toSet();
+    for (var i = 0; i < _parentLocationGroups.length; i++) {
+      final group = _parentLocationGroups[i];
+      entries.add(_ParentDropdownEntry(
+        value: '__header_group_$i',
+        label: group.title.toUpperCase(),
+        isHeader: true,
+      ));
+
+      for (final location in group.locations) {
+        if (rootNames.contains(location.trim().toLowerCase())) continue;
+        entries.add(_ParentDropdownEntry(
+          value: 'preset:$location',
+          label: location,
+        ));
+      }
+    }
+
+    return entries;
   }
 
   Widget _zoneRow(_ZoneOption zone, int index, bool isDark, Color cardSoft,
@@ -790,6 +1036,25 @@ class _ZoneOption {
       selected: selected ?? this.selected,
     );
   }
+}
+
+class _ParentLocationGroup {
+  const _ParentLocationGroup({required this.title, required this.locations});
+
+  final String title;
+  final List<String> locations;
+}
+
+class _ParentDropdownEntry {
+  const _ParentDropdownEntry({
+    required this.value,
+    required this.label,
+    this.isHeader = false,
+  });
+
+  final String value;
+  final String label;
+  final bool isHeader;
 }
 
 class _DashedRRectPainter extends CustomPainter {

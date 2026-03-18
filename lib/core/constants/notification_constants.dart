@@ -13,6 +13,11 @@ class NotificationConstants {
   static const String reminderChannelDesc =
       'Periodic check-ins for old items (e.g. "Is this still there?")';
 
+  static const String lentChannelId = 'ikeep_lent';
+  static const String lentChannelName = 'I Lent It Reminders';
+  static const String lentChannelDesc =
+      'Reminders for items you lent to someone';
+
   static const String syncChannelId = 'ikeep_sync';
   static const String syncChannelName = 'Sync Status';
   static const String syncChannelDesc = 'Cloud sync status notifications';
@@ -21,6 +26,8 @@ class NotificationConstants {
   // Expiry notifications use hash of itemUuid truncated to int range.
   // Reminder notifications use a fixed ID offset + index.
   static const int syncErrorNotificationId = 1;
+  static const int stillThereDailyNotificationId = 2;
   static const int expiryNotificationIdBase = 10000;
   static const int reminderNotificationIdBase = 20000;
+  static const int lentNotificationIdBase = 30000;
 }

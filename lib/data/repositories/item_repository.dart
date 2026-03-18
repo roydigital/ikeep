@@ -5,11 +5,19 @@ import '../../domain/models/item.dart';
 /// sync, notification scheduling, and history recording.
 abstract class ItemRepository {
   /// Saves a brand new item. Also records the initial location in history.
-  Future<Failure?> saveItem(Item item);
+  Future<Failure?> saveItem(
+    Item item, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  });
 
   /// Updates an existing item. If location changed, records it in history
   /// and updates the old location's usage count.
-  Future<Failure?> updateItem(Item item);
+  Future<Failure?> updateItem(
+    Item item, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  });
 
   /// Soft-deletes an item by setting [isArchived] = true.
   Future<Failure?> archiveItem(String uuid);

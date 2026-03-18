@@ -13,7 +13,11 @@ class DatabaseHelper {
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
 
+  static const String _defaultRootLocationUuid = 'root-home-local';
+
   Database? _db;
+
+  static int get _nowMs => DateTime.now().millisecondsSinceEpoch;
 
   Future<Database> get db async {
     _db ??= await _open();
@@ -22,7 +26,8 @@ class DatabaseHelper {
 
   Future<Database> _open() async {
     // Desktop platforms need the FFI factory.
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
@@ -35,6 +40,7 @@ class DatabaseHelper {
       version: DbConstants.dbVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
       onConfigure: (db) async {
         // Enable FK enforcement
         await db.execute('PRAGMA foreign_keys = ON');
@@ -62,7 +68,14 @@ class DatabaseHelper {
         ${DbConstants.colItemIsArchived} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemNotes} TEXT,
         ${DbConstants.colItemCloudId} TEXT,
-        ${DbConstants.colItemLastSyncedAt} INTEGER
+        ${DbConstants.colItemLastSyncedAt} INTEGER,
+        ${DbConstants.colItemIsLent} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colItemLentTo} TEXT,
+        ${DbConstants.colItemLentOn} INTEGER,
+        ${DbConstants.colItemExpectedReturnDate} INTEGER,
+        ${DbConstants.colItemLentReminderAfterDays} INTEGER,
+        ${DbConstants.colItemIsAvailableForLending} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private'
       )
     ''');
 
@@ -92,12 +105,39 @@ class DatabaseHelper {
         ${DbConstants.colHistLocationUuid} TEXT,
         ${DbConstants.colHistLocationName} TEXT NOT NULL,
         ${DbConstants.colHistMovedAt} INTEGER NOT NULL,
+        ${DbConstants.colHistMovedByMemberUuid} TEXT,
+        ${DbConstants.colHistMovedByName} TEXT,
         ${DbConstants.colHistNote} TEXT,
         FOREIGN KEY (${DbConstants.colHistItemUuid})
           REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
           ON DELETE CASCADE
       )
     ''');
+
+    // ── borrow_requests ─────────────────────────────────────────────────────
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableBorrowRequests} (
+        ${DbConstants.colBorrowRequestId} INTEGER PRIMARY KEY AUTOINCREMENT,
+        ${DbConstants.colBorrowRequestUuid} TEXT NOT NULL UNIQUE,
+        ${DbConstants.colBorrowItemUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowOwnerMemberUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowOwnerMemberName} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequesterMemberUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequesterMemberName} TEXT NOT NULL,
+        ${DbConstants.colBorrowStatus} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequestedAt} INTEGER NOT NULL,
+        ${DbConstants.colBorrowRespondedAt} INTEGER,
+        ${DbConstants.colBorrowRequestedReturnDate} INTEGER,
+        ${DbConstants.colBorrowNote} TEXT,
+        FOREIGN KEY (${DbConstants.colBorrowItemUuid})
+          REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
+          ON DELETE CASCADE
+      )
+    ''');
+
+    _createHouseholdMembersTable(batch);
+    _seedOwnerMember(batch);
+    _seedDefaultRootLocation(batch);
 
     // ── pending_sync_operations ─────────────────────────────────────────────
     batch.execute('''
@@ -120,13 +160,293 @@ class DatabaseHelper {
         'CREATE INDEX idx_items_saved_at ON ${DbConstants.tableItems}(${DbConstants.colItemSavedAt} DESC)');
     batch.execute(
         'CREATE INDEX idx_history_item ON ${DbConstants.tableHistory}(${DbConstants.colHistItemUuid})');
+    batch.execute(
+        'CREATE INDEX idx_borrow_item ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowItemUuid})');
+    batch.execute(
+        'CREATE INDEX idx_borrow_owner_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowOwnerMemberUuid}, ${DbConstants.colBorrowStatus})');
+    batch.execute(
+        'CREATE INDEX idx_borrow_requester_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowRequesterMemberUuid}, ${DbConstants.colBorrowStatus})');
 
     await batch.commit(noResult: true);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     // Future migrations go here as version increments.
-    // Example: if (oldVersion < 2) { ... }
+    if (oldVersion < 2) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemIsLent,
+        'INTEGER NOT NULL DEFAULT 0',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemLentTo,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemLentOn,
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemExpectedReturnDate,
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemLentReminderAfterDays,
+        'INTEGER',
+      );
+    }
+
+    if (oldVersion < 3) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHistory,
+        DbConstants.colHistMovedByMemberUuid,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHistory,
+        DbConstants.colHistMovedByName,
+        'TEXT',
+      );
+      await db.execute('''
+        UPDATE ${DbConstants.tableHistory}
+        SET ${DbConstants.colHistMovedByName} = 'You'
+        WHERE ${DbConstants.colHistMovedByName} IS NULL
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholdMembers} (
+          ${DbConstants.colMemberId} INTEGER PRIMARY KEY AUTOINCREMENT,
+          ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
+          ${DbConstants.colMemberName} TEXT NOT NULL,
+          ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
+          ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.insert(
+        DbConstants.tableHouseholdMembers,
+        {
+          DbConstants.colMemberUuid: 'owner-local',
+          DbConstants.colMemberName: 'You',
+          DbConstants.colMemberInvitedAt: _nowMs,
+          DbConstants.colMemberIsOwner: 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholdMembers} (
+          ${DbConstants.colMemberId} INTEGER PRIMARY KEY AUTOINCREMENT,
+          ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
+          ${DbConstants.colMemberName} TEXT NOT NULL,
+          ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
+          ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.insert(
+        DbConstants.tableHouseholdMembers,
+        {
+          DbConstants.colMemberUuid: 'owner-local',
+          DbConstants.colMemberName: 'You',
+          DbConstants.colMemberInvitedAt: _nowMs,
+          DbConstants.colMemberIsOwner: 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    if (oldVersion < 5) {
+      await db.insert(
+        DbConstants.tableLocations,
+        {
+          DbConstants.colLocUuid: _defaultRootLocationUuid,
+          DbConstants.colLocName: 'Home',
+          DbConstants.colLocFullPath: 'Home',
+          DbConstants.colLocParentUuid: null,
+          DbConstants.colLocIconName: 'folder',
+          DbConstants.colLocUsageCount: 0,
+          DbConstants.colLocCreatedAt: _nowMs,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    if (oldVersion < 6) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemIsAvailableForLending,
+        'INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DbConstants.tableBorrowRequests} (
+          ${DbConstants.colBorrowRequestId} INTEGER PRIMARY KEY AUTOINCREMENT,
+          ${DbConstants.colBorrowRequestUuid} TEXT NOT NULL UNIQUE,
+          ${DbConstants.colBorrowItemUuid} TEXT NOT NULL,
+          ${DbConstants.colBorrowOwnerMemberUuid} TEXT NOT NULL,
+          ${DbConstants.colBorrowOwnerMemberName} TEXT NOT NULL,
+          ${DbConstants.colBorrowRequesterMemberUuid} TEXT NOT NULL,
+          ${DbConstants.colBorrowRequesterMemberName} TEXT NOT NULL,
+          ${DbConstants.colBorrowStatus} TEXT NOT NULL,
+          ${DbConstants.colBorrowRequestedAt} INTEGER NOT NULL,
+          ${DbConstants.colBorrowRespondedAt} INTEGER,
+          ${DbConstants.colBorrowRequestedReturnDate} INTEGER,
+          ${DbConstants.colBorrowNote} TEXT,
+          FOREIGN KEY (${DbConstants.colBorrowItemUuid})
+            REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
+            ON DELETE CASCADE
+        )
+      ''');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_borrow_item ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowItemUuid})');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_borrow_owner_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowOwnerMemberUuid}, ${DbConstants.colBorrowStatus})');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_borrow_requester_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowRequesterMemberUuid}, ${DbConstants.colBorrowStatus})');
+    }
+
+    if (oldVersion < 7) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemVisibility,
+        "TEXT NOT NULL DEFAULT 'private'",
+      );
+      // Migrate: items already shared with household get 'household' visibility
+      await db.execute('''
+        UPDATE ${DbConstants.tableItems}
+        SET ${DbConstants.colItemVisibility} = 'household'
+        WHERE ${DbConstants.colItemIsAvailableForLending} = 1
+      ''');
+    }
+  }
+
+  Future<void> _onOpen(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholdMembers} (
+        ${DbConstants.colMemberId} INTEGER PRIMARY KEY AUTOINCREMENT,
+        ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
+        ${DbConstants.colMemberName} TEXT NOT NULL,
+        ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
+        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.insert(
+      DbConstants.tableHouseholdMembers,
+      {
+        DbConstants.colMemberUuid: 'owner-local',
+        DbConstants.colMemberName: 'You',
+        DbConstants.colMemberInvitedAt: _nowMs,
+        DbConstants.colMemberIsOwner: 1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    await db.insert(
+      DbConstants.tableLocations,
+      {
+        DbConstants.colLocUuid: _defaultRootLocationUuid,
+        DbConstants.colLocName: 'Home',
+        DbConstants.colLocFullPath: 'Home',
+        DbConstants.colLocParentUuid: null,
+        DbConstants.colLocIconName: 'folder',
+        DbConstants.colLocUsageCount: 0,
+        DbConstants.colLocCreatedAt: _nowMs,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableBorrowRequests} (
+        ${DbConstants.colBorrowRequestId} INTEGER PRIMARY KEY AUTOINCREMENT,
+        ${DbConstants.colBorrowRequestUuid} TEXT NOT NULL UNIQUE,
+        ${DbConstants.colBorrowItemUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowOwnerMemberUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowOwnerMemberName} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequesterMemberUuid} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequesterMemberName} TEXT NOT NULL,
+        ${DbConstants.colBorrowStatus} TEXT NOT NULL,
+        ${DbConstants.colBorrowRequestedAt} INTEGER NOT NULL,
+        ${DbConstants.colBorrowRespondedAt} INTEGER,
+        ${DbConstants.colBorrowRequestedReturnDate} INTEGER,
+        ${DbConstants.colBorrowNote} TEXT,
+        FOREIGN KEY (${DbConstants.colBorrowItemUuid})
+          REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
+          ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _addColumnIfMissing(
+    Database db,
+    String tableName,
+    String columnName,
+    String columnDefinition,
+  ) async {
+    final columns = await db.rawQuery('PRAGMA table_info($tableName)');
+    final hasColumn = columns.any((column) => column['name'] == columnName);
+
+    if (hasColumn) return;
+
+    await db.execute(
+      'ALTER TABLE $tableName ADD COLUMN $columnName $columnDefinition',
+    );
+  }
+
+  void _createHouseholdMembersTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableHouseholdMembers} (
+        ${DbConstants.colMemberId} INTEGER PRIMARY KEY AUTOINCREMENT,
+        ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
+        ${DbConstants.colMemberName} TEXT NOT NULL,
+        ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
+        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+  }
+
+  void _seedOwnerMember(Batch batch) {
+    batch.execute('''
+      INSERT INTO ${DbConstants.tableHouseholdMembers} (
+        ${DbConstants.colMemberUuid},
+        ${DbConstants.colMemberName},
+        ${DbConstants.colMemberInvitedAt},
+        ${DbConstants.colMemberIsOwner}
+      ) VALUES ('owner-local', 'You', $_nowMs, 1)
+    ''');
+  }
+
+  void _seedDefaultRootLocation(Batch batch) {
+    batch.execute('''
+      INSERT INTO ${DbConstants.tableLocations} (
+        ${DbConstants.colLocUuid},
+        ${DbConstants.colLocName},
+        ${DbConstants.colLocFullPath},
+        ${DbConstants.colLocParentUuid},
+        ${DbConstants.colLocIconName},
+        ${DbConstants.colLocUsageCount},
+        ${DbConstants.colLocCreatedAt}
+      ) VALUES (
+        '$_defaultRootLocationUuid',
+        'Home',
+        'Home',
+        NULL,
+        'folder',
+        0,
+        $_nowMs
+      )
+    ''');
   }
 
   Future<void> close() async {

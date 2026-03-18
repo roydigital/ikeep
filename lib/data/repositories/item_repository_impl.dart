@@ -20,7 +20,11 @@ class ItemRepositoryImpl implements ItemRepository {
   final HistoryDao historyDao;
 
   @override
-  Future<Failure?> saveItem(Item item) async {
+  Future<Failure?> saveItem(
+    Item item, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  }) async {
     try {
       await itemDao.insertItem(item);
 
@@ -33,6 +37,8 @@ class ItemRepositoryImpl implements ItemRepository {
           locationUuid: item.locationUuid,
           locationName: loc?.name ?? item.locationUuid!,
           movedAt: item.savedAt,
+          movedByMemberUuid: movedByMemberUuid,
+          movedByName: movedByName ?? 'You',
         ));
         await locationDao.incrementUsageCount(item.locationUuid!);
       }
@@ -45,7 +51,11 @@ class ItemRepositoryImpl implements ItemRepository {
   }
 
   @override
-  Future<Failure?> updateItem(Item item) async {
+  Future<Failure?> updateItem(
+    Item item, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  }) async {
     try {
       final existing = await itemDao.getItemByUuid(item.uuid);
       final locationChanged = existing?.locationUuid != item.locationUuid;
@@ -62,6 +72,8 @@ class ItemRepositoryImpl implements ItemRepository {
           locationUuid: item.locationUuid,
           locationName: loc?.name ?? item.locationUuid!,
           movedAt: DateTime.now(),
+          movedByMemberUuid: movedByMemberUuid,
+          movedByName: movedByName ?? 'You',
         ));
         await locationDao.incrementUsageCount(item.locationUuid!);
       }

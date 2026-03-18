@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'item_visibility.dart';
+
 class Item {
   const Item({
     required this.uuid,
@@ -16,6 +18,13 @@ class Item {
     this.notes,
     this.cloudId,
     this.lastSyncedAt,
+    this.isLent = false,
+    this.lentTo,
+    this.lentOn,
+    this.expectedReturnDate,
+    this.lentReminderAfterDays,
+    this.isAvailableForLending = false,
+    this.visibility = ItemVisibility.private_,
     // Denormalized for display — populated by joins
     this.locationName,
     this.locationFullPath,
@@ -35,6 +44,19 @@ class Item {
   final String? notes;
   final String? cloudId;
   final DateTime? lastSyncedAt;
+  final bool isLent;
+  final String? lentTo;
+  final DateTime? lentOn;
+  final DateTime? expectedReturnDate;
+  final int? lentReminderAfterDays;
+  final bool isAvailableForLending;
+  final ItemVisibility visibility;
+
+  /// Social sharing is currently disabled in the app.
+  bool get isShared => false;
+
+  /// Nearby sharing is currently disabled in the app.
+  bool get isNearby => false;
 
   // Joined display fields (not persisted in items table)
   final String? locationName;
@@ -55,16 +77,28 @@ class Item {
     String? notes,
     String? cloudId,
     DateTime? lastSyncedAt,
+    bool? isLent,
+    String? lentTo,
+    DateTime? lentOn,
+    DateTime? expectedReturnDate,
+    int? lentReminderAfterDays,
+    bool? isAvailableForLending,
+    ItemVisibility? visibility,
     String? locationName,
     String? locationFullPath,
     bool clearLocationUuid = false,
     bool clearExpiryDate = false,
     bool clearNotes = false,
+    bool clearLentTo = false,
+    bool clearLentOn = false,
+    bool clearExpectedReturnDate = false,
+    bool clearLentReminderAfterDays = false,
   }) {
     return Item(
       uuid: uuid ?? this.uuid,
       name: name ?? this.name,
-      locationUuid: clearLocationUuid ? null : (locationUuid ?? this.locationUuid),
+      locationUuid:
+          clearLocationUuid ? null : (locationUuid ?? this.locationUuid),
       imagePaths: imagePaths ?? this.imagePaths,
       tags: tags ?? this.tags,
       savedAt: savedAt ?? this.savedAt,
@@ -76,6 +110,18 @@ class Item {
       notes: clearNotes ? null : (notes ?? this.notes),
       cloudId: cloudId ?? this.cloudId,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      isLent: isLent ?? this.isLent,
+      lentTo: clearLentTo ? null : (lentTo ?? this.lentTo),
+      lentOn: clearLentOn ? null : (lentOn ?? this.lentOn),
+      expectedReturnDate: clearExpectedReturnDate
+          ? null
+          : (expectedReturnDate ?? this.expectedReturnDate),
+      lentReminderAfterDays: clearLentReminderAfterDays
+          ? null
+          : (lentReminderAfterDays ?? this.lentReminderAfterDays),
+      isAvailableForLending:
+          isAvailableForLending ?? this.isAvailableForLending,
+      visibility: visibility ?? this.visibility,
       locationName: locationName ?? this.locationName,
       locationFullPath: locationFullPath ?? this.locationFullPath,
     );
@@ -98,6 +144,13 @@ class Item {
       'notes': notes,
       'cloud_id': cloudId,
       'last_synced_at': lastSyncedAt?.millisecondsSinceEpoch,
+      'is_lent': isLent ? 1 : 0,
+      'lent_to': lentTo,
+      'lent_on': lentOn?.millisecondsSinceEpoch,
+      'expected_return_date': expectedReturnDate?.millisecondsSinceEpoch,
+      'lent_reminder_after_days': lentReminderAfterDays,
+      'is_available_for_lending': isAvailableForLending ? 1 : 0,
+      'visibility': visibility.value,
     };
   }
 
@@ -127,6 +180,21 @@ class Item {
       lastSyncedAt: map['last_synced_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['last_synced_at'] as int)
           : null,
+      isLent: (map['is_lent'] as int? ?? 0) == 1,
+      lentTo: map['lent_to'] as String?,
+      lentOn: map['lent_on'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['lent_on'] as int)
+          : null,
+      expectedReturnDate: map['expected_return_date'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              map['expected_return_date'] as int,
+            )
+          : null,
+      lentReminderAfterDays: map['lent_reminder_after_days'] as int?,
+      isAvailableForLending:
+          (map['is_available_for_lending'] as int? ?? 0) == 1,
+      visibility:
+          ItemVisibility.fromString(map['visibility'] as String?),
       // Joined fields from queries
       locationName: map['location_name'] as String?,
       locationFullPath: map['location_full_path'] as String?,
@@ -148,11 +216,19 @@ class Item {
       'expiryDate': expiryDate?.toIso8601String(),
       'isArchived': isArchived,
       'notes': notes,
+      'isLent': isLent,
+      'lentTo': lentTo,
+      'lentOn': lentOn?.toIso8601String(),
+      'expectedReturnDate': expectedReturnDate?.toIso8601String(),
+      'lentReminderAfterDays': lentReminderAfterDays,
+      'isAvailableForLending': isAvailableForLending,
+      'visibility': visibility.value,
     };
   }
 
   @override
-  String toString() => 'Item(uuid: $uuid, name: $name, location: $locationUuid)';
+  String toString() =>
+      'Item(uuid: $uuid, name: $name, location: $locationUuid)';
 
   @override
   bool operator ==(Object other) =>

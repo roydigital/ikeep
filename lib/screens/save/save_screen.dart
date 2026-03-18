@@ -34,6 +34,11 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   bool _showTagInput = false;
   final _tagController = TextEditingController();
   final _tagFocusNode = FocusNode();
+  bool _isLentFlow = false;
+  final _lentToController = TextEditingController();
+  DateTime _lentOnDate = DateTime.now();
+  DateTime? _expectedReturnDate;
+  int _lentReminderAfterDays = 7;
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     _nameController.dispose();
     _tagController.dispose();
     _tagFocusNode.dispose();
+    _lentToController.dispose();
     super.dispose();
   }
 
@@ -103,6 +109,15 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   Future<void> _saveEntry() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
+    if (_isLentFlow && _lentToController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tell us who you lent this item to'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
 
     final item = Item(
@@ -112,16 +127,25 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       imagePaths: _imagePath != null ? [_imagePath!] : [],
       tags: _tags,
       savedAt: DateTime.now(),
+      isLent: _isLentFlow,
+      lentTo: _isLentFlow ? _lentToController.text.trim() : null,
+      lentOn: _isLentFlow ? _lentOnDate : null,
+      expectedReturnDate: _isLentFlow ? _expectedReturnDate : null,
+      lentReminderAfterDays: _isLentFlow ? _lentReminderAfterDays : null,
     );
 
-    final error = await ref.read(itemsNotifierProvider.notifier).saveItem(item);
+    final failure =
+        await ref.read(itemsNotifierProvider.notifier).saveItemWithMover(
+              item,
+              movedByName: 'You',
+            );
 
     if (!mounted) return;
     setState(() => _isSaving = false);
 
-    if (error != null) {
+    if (failure != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        SnackBar(content: Text(failure), backgroundColor: AppColors.error),
       );
     } else {
       context.pop();
@@ -528,6 +552,13 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
 
         const SizedBox(height: 20),
 
+
+        // ── Metadata ────────────────────────────────────────────────────────
+        _buildLentSection(
+            isDark, inputBg, borderColor, textColor, secondaryColor),
+
+        const SizedBox(height: 20),
+
         // ── Metadata ────────────────────────────────────────────────────────
         _buildMetadataRow(secondaryColor),
 
@@ -850,6 +881,137 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildLentSection(
+    bool isDark,
+    Color inputBg,
+    Color borderColor,
+    Color textColor,
+    Color secondaryColor,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('I Lent It', secondaryColor),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _isLentFlow
+                    ? 'Track who has it + auto-remind me'
+                    : 'Turn on to log borrowed-away items',
+                style: TextStyle(color: secondaryColor, fontSize: 12),
+              ),
+            ),
+            Switch(
+              value: _isLentFlow,
+              activeThumbColor: AppColors.primary,
+              onChanged: (value) => setState(() => _isLentFlow = value),
+            ),
+          ],
+        ),
+        if (_isLentFlow) ...[
+          const SizedBox(height: 10),
+          TextField(
+            controller: _lentToController,
+            style: TextStyle(color: textColor, fontWeight: FontWeight.w500),
+            decoration: InputDecoration(
+              hintText: 'Lent to (name)',
+              hintStyle: TextStyle(color: secondaryColor),
+              filled: true,
+              fillColor: inputBg,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                borderSide: BorderSide(color: borderColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                borderSide: BorderSide(color: borderColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                borderSide:
+                    const BorderSide(color: AppColors.primary, width: 2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await _pickDate(_lentOnDate);
+                    if (picked == null) return;
+                    setState(() => _lentOnDate = picked);
+                  },
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label:
+                      Text('Lent: ${DateFormat('dd MMM').format(_lentOnDate)}'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await _pickDate(
+                      _expectedReturnDate ?? _lentOnDate,
+                    );
+                    if (picked == null) return;
+                    setState(() => _expectedReturnDate = picked);
+                  },
+                  icon: const Icon(Icons.event_available, size: 16),
+                  label: Text(
+                    _expectedReturnDate == null
+                        ? 'Expected return'
+                        : DateFormat('dd MMM').format(_expectedReturnDate!),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [3, 7, 14, 30].map((days) {
+              final active = _lentReminderAfterDays == days;
+              return ChoiceChip(
+                selected: active,
+                label: Text('Remind in $days d'),
+                onSelected: (_) =>
+                    setState(() => _lentReminderAfterDays = days),
+                selectedColor: AppColors.primary.withValues(alpha: 0.2),
+                labelStyle: TextStyle(
+                  color: active ? AppColors.primary : textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+                side: BorderSide(
+                  color: active ? AppColors.primary : borderColor,
+                ),
+                backgroundColor: isDark
+                    ? AppColors.surfaceVariantDark
+                    : AppColors.surfaceVariantLight,
+              );
+            }).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<DateTime?> _pickDate(DateTime initial) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime.now().subtract(const Duration(days: 3650)),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+    );
+    return picked;
   }
 
   Widget _buildSaveButton() {

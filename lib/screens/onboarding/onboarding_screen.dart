@@ -70,8 +70,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 child: TextButton(
                   onPressed: _skip,
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -199,18 +199,24 @@ class _WelcomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final illustrationHeight =
+        (screenHeight * 0.32).clamp(220.0, 300.0).toDouble();
+    final sectionSpacing = screenHeight < 760 ? 24.0 : 36.0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Illustration
-          _IllustrationCard()
+          _IllustrationCard(height: illustrationHeight)
               .animate()
               .fadeIn(duration: 500.ms)
-              .slideY(begin: 0.06, end: 0, duration: 500.ms, curve: Curves.easeOut),
+              .slideY(
+                  begin: 0.06, end: 0, duration: 500.ms, curve: Curves.easeOut),
 
-          const SizedBox(height: 36),
+          SizedBox(height: sectionSpacing),
 
           // Text
           Text(
@@ -224,10 +230,7 @@ class _WelcomePage extends StatelessWidget {
               height: 1.2,
             ),
           ).animate(delay: 100.ms).fadeIn(duration: 400.ms).slideY(
-              begin: 0.05,
-              end: 0,
-              duration: 400.ms,
-              curve: Curves.easeOut),
+              begin: 0.05, end: 0, duration: 400.ms, curve: Curves.easeOut),
 
           const SizedBox(height: 14),
 
@@ -240,10 +243,7 @@ class _WelcomePage extends StatelessWidget {
               height: 1.55,
             ),
           ).animate(delay: 180.ms).fadeIn(duration: 400.ms).slideY(
-              begin: 0.05,
-              end: 0,
-              duration: 400.ms,
-              curve: Curves.easeOut),
+              begin: 0.05, end: 0, duration: 400.ms, curve: Curves.easeOut),
         ],
       ),
     );
@@ -263,22 +263,27 @@ class _AllSetPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final illustrationHeight =
+        (screenHeight * 0.32).clamp(220.0, 300.0).toDouble();
+    final sectionSpacing = screenHeight < 760 ? 24.0 : 36.0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Illustration
-          _IllustrationCard(icon: Icons.check_circle_rounded)
-              .animate()
-              .fadeIn(duration: 500.ms)
-              .scale(
-                  begin: const Offset(0.92, 0.92),
-                  end: const Offset(1, 1),
-                  duration: 500.ms,
-                  curve: Curves.easeOut),
+          _IllustrationCard(
+            icon: Icons.check_circle_rounded,
+            height: illustrationHeight,
+          ).animate().fadeIn(duration: 500.ms).scale(
+              begin: const Offset(0.92, 0.92),
+              end: const Offset(1, 1),
+              duration: 500.ms,
+              curve: Curves.easeOut),
 
-          const SizedBox(height: 36),
+          SizedBox(height: sectionSpacing),
 
           Text(
             "You're all set!",
@@ -312,15 +317,19 @@ class _AllSetPage extends StatelessWidget {
 // ── Illustration Card ─────────────────────────────────────────────────────────
 
 class _IllustrationCard extends StatelessWidget {
-  const _IllustrationCard({this.icon = Icons.inventory_2_rounded});
+  const _IllustrationCard({
+    this.icon = Icons.inventory_2_rounded,
+    this.height = 300,
+  });
 
   final IconData icon;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 300,
+      height: height,
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         gradient: LinearGradient(

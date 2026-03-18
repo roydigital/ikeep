@@ -5,8 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/utils/uuid_generator.dart';
+import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/item.dart';
+import '../../domain/models/location_model.dart';
 import '../../providers/history_providers.dart';
+import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
@@ -33,8 +37,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+      backgroundColor: Colors.transparent,
       body: itemAsync.when(
         loading: () => const Center(
             child: CircularProgressIndicator(color: AppColors.primary)),
@@ -91,73 +94,57 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                       ),
                     ),
                   ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 130),
-                    sliver: SliverToBoxAdapter(
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _MainCard(
-                                imagePath: selected,
-                                onZoom: () => _zoom(selected, isDark)),
-                            const SizedBox(height: 16),
-                            SizedBox(
-                              height: 102,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: images.length + 1,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 14),
-                                itemBuilder: (_, i) {
-                                  if (i == images.length) {
-                                    return InkWell(
-                                      onTap: () => _addImage(item),
-                                      borderRadius: BorderRadius.circular(22),
-                                      child: Ink(
-                                        width: 102,
-                                        decoration: BoxDecoration(
-                                          color: isDark
-                                              ? AppColors.surfaceVariantDark
-                                              : AppColors.surfaceVariantLight,
-                                          borderRadius:
-                                              BorderRadius.circular(22),
-                                        ),
-                                        child: const Icon(Icons.add_a_photo,
-                                            color: AppColors.primary),
-                                      ),
-                                    );
-                                  }
-                                  final active = i == _selectedImage;
-                                  return InkWell(
-                                    onTap: () =>
-                                        setState(() => _selectedImage = i),
-                                    borderRadius: BorderRadius.circular(22),
-                                    child: Container(
-                                      width: 102,
-                                      padding: const EdgeInsets.all(2),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(22),
-                                        border: Border.all(
-                                            color: active
-                                                ? AppColors.primary
-                                                : Colors.transparent,
-                                            width: 2),
-                                      ),
-                                      child: ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                          child: _img(
-                                              images[i], BoxFit.cover, isDark)),
-                                    ),
-                                  );
-                                },
+                            // ── Image gallery ────────────────────────
+                            if (images.isNotEmpty) ...[
+                              GestureDetector(
+                                onTap: () => _zoom(selected, isDark),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: AspectRatio(
+                                    aspectRatio: 1,
+                                    child: _img(
+                                        selected!, BoxFit.cover, isDark),
+                                  ),
+                                ),
                               ),
-                            ),
+                              if (images.length > 1) ...[
+                                const SizedBox(height: 14),
+                                SizedBox(
+                                  height: 72,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: images.length + 1,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(width: 10),
+                                    itemBuilder: (_, i) {
+                                      if (i == images.length) {
+                                        return _addImageButton(item);
+                                      }
+                                      return _thumb(images[i], i, isDark);
+                                    },
+                                  ),
+                                ),
+                              ] else ...[
+                                const SizedBox(height: 10),
+                                _addImageButton(item),
+                              ],
+                            ] else ...[
+                              _addImageButton(item),
+                            ],
+
                             const SizedBox(height: 22),
+
+                            // ── Title + location ──────────────────────
                             Text(item.name,
                                 style: TextStyle(
                                     color: textPrimary,
-                                    fontSize: 27,
+                                    fontSize: 28,
                                     fontWeight: FontWeight.w800,
                                     height: 1.05)),
                             const SizedBox(height: 8),
@@ -175,6 +162,17 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                 ),
                               ),
                             ]),
+
+                            const SizedBox(height: 14),
+
+                            // ── Lending status ──────────────────────
+                            _buildLendingSection(
+                              context,
+                              item,
+                              isDark,
+                              textPrimary,
+                            ),
+
                             if (item.tags.isNotEmpty) ...[
                               const SizedBox(height: 18),
                               Wrap(
@@ -187,28 +185,39 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                           decoration: BoxDecoration(
                                             color: isDark
                                                 ? AppColors.surfaceVariantDark
-                                                : AppColors.surfaceVariantLight,
+                                                : AppColors
+                                                    .surfaceVariantLight,
                                             borderRadius:
                                                 BorderRadius.circular(999),
                                           ),
                                           child: Text('#$t',
                                               style: const TextStyle(
                                                   color: AppColors.primary,
-                                                  fontWeight: FontWeight.w600)),
+                                                  fontWeight:
+                                                      FontWeight.w600)),
                                         ))
                                     .toList(),
                               ),
                             ],
+
                             const SizedBox(height: 24),
                             historyAsync.when(
-                              data: (h) => _meta(context, isDark, item.savedAt,
-                                  h.isEmpty ? item.updatedAt : h.first.movedAt),
+                              data: (h) => _meta(
+                                  context,
+                                  isDark,
+                                  item.savedAt,
+                                  h.isEmpty
+                                      ? item.updatedAt
+                                      : h.first.movedAt),
                               loading: () => _meta(context, isDark,
                                   item.savedAt, item.updatedAt),
                               error: (_, __) => _meta(context, isDark,
                                   item.savedAt, item.updatedAt),
                             ),
+
                             const SizedBox(height: 24),
+
+                            // ── Action buttons ────────────────────────
                             Row(children: [
                               Expanded(
                                   child: _Action(
@@ -219,12 +228,21 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                               const SizedBox(width: 14),
                               Expanded(
                                   child: _Action(
-                                      label: 'Found /\nRemove',
+                                      label: item.isLent
+                                          ? 'Mark\nReturned'
+                                          : 'Found /\nRemove',
                                       filled: true,
-                                      icon: Icons.check_circle,
-                                      onTap: () => _foundRemove(item))),
+                                      icon: item.isLent
+                                          ? Icons.assignment_turned_in
+                                          : Icons.check_circle,
+                                      onTap: () => item.isLent
+                                          ? _markReturned(item)
+                                          : _foundRemove(item))),
                             ]),
+
                             const SizedBox(height: 44),
+
+                            // ── History ───────────────────────────────
                             Text('Location History',
                                 style: TextStyle(
                                     color: textPrimary,
@@ -235,29 +253,38 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                               loading: () => const Center(
                                   child: CircularProgressIndicator(
                                       color: AppColors.primary)),
-                              error: (_, __) => Text('Could not load history',
+                              error: (_, __) => Text(
+                                  'Could not load history',
                                   style: TextStyle(
                                       color: isDark
                                           ? AppColors.textSecondaryDark
-                                          : AppColors.textSecondaryLight)),
+                                          : AppColors
+                                              .textSecondaryLight)),
                               data: (h) {
                                 if (h.isEmpty) {
-                                  return Text('No movement history yet.',
+                                  return Text(
+                                      'No movement history yet.',
                                       style: TextStyle(
                                           color: isDark
                                               ? AppColors.textSecondaryDark
-                                              : AppColors.textSecondaryLight));
+                                              : AppColors
+                                                  .textSecondaryLight));
                                 }
                                 return Column(
-                                  children: List.generate(h.length, (i) {
+                                  children:
+                                      List.generate(h.length, (i) {
                                     final e = h[i];
                                     final first = i == 0;
+                                    final actor =
+                                        (e.movedByName?.trim().isNotEmpty ??
+                                                false)
+                                            ? e.movedByName!
+                                            : 'You';
                                     return _HistoryRow(
                                       title: e.locationName,
                                       subtitle: first
-                                          ? 'Moved ${_ago(e.movedAt)}'
-                                          : DateFormat('MMMM dd, yyyy')
-                                              .format(e.movedAt),
+                                          ? '$actor moved it ${_ago(e.movedAt)}'
+                                          : '$actor \u2022 ${DateFormat('MMMM dd, yyyy').format(e.movedAt)}',
                                       first: first,
                                       tail: i != h.length - 1,
                                     );
@@ -284,191 +311,295 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  Widget _meta(
-      BuildContext context, bool isDark, DateTime savedAt, DateTime? movedAt) {
-    final textPrimary =
-        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: AppColors.primary.withValues(alpha: 0.15)),
-          bottom: BorderSide(color: AppColors.primary.withValues(alpha: 0.15)),
-        ),
-      ),
-      child: Row(children: [
-        Expanded(child: _metaCell(isDark, 'SAVED', _ago(savedAt), textPrimary)),
-        Container(
-            width: 1,
-            height: 52,
-            color: AppColors.primary.withValues(alpha: 0.15)),
-        Expanded(
-            child: Padding(
-                padding: const EdgeInsets.only(left: 22),
-                child: _metaCell(isDark, 'LAST MOVED',
-                    movedAt == null ? '-' : _ago(movedAt), textPrimary))),
-      ]),
+  // ── Lending section ──────────────────────────────────────────────────────
+
+  Widget _buildLendingSection(
+    BuildContext context,
+    Item item,
+    bool isDark,
+    Color textPrimary,
+  ) {
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Lent status card
+        if (item.isLent) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.outbox,
+                        color: AppColors.primary, size: 20),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Currently Lent Out',
+                      style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'To: ${item.lentTo ?? 'Unknown'}',
+                  style: TextStyle(color: textPrimary, fontSize: 14),
+                ),
+                if (item.lentOn != null)
+                  Text(
+                    'Since: ${DateFormat('dd MMM yyyy').format(item.lentOn!)}',
+                    style: TextStyle(color: textSecondary, fontSize: 13),
+                  ),
+                if (item.expectedReturnDate != null)
+                  Text(
+                    'Expected return: ${DateFormat('dd MMM yyyy').format(item.expectedReturnDate!)}',
+                    style: TextStyle(color: textSecondary, fontSize: 13),
+                  ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => _markReturned(item),
+                    icon: const Icon(Icons.assignment_turned_in, size: 18),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary),
+                    label: const Text('Mark as Returned'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // Not lent — show "Lend This Item" button
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _lendItem(item),
+              icon: const Icon(Icons.outbox, size: 18),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.5)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              label: const Text('Lend This Item',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
-  Widget _metaCell(bool isDark, String title, String value, Color textPrimary) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title,
-          style: TextStyle(
-              color: isDark
-                  ? AppColors.textSecondaryDark
-                  : AppColors.textSecondaryLight,
-              fontSize: 15.5,
-              letterSpacing: 1.2)),
-      const SizedBox(height: 4),
-      Text(value,
-          style: TextStyle(
-              color: textPrimary, fontSize: 19.5, fontWeight: FontWeight.w600)),
-    ]);
-  }
+  // ── Actions ──────────────────────────────────────────────────────────────
 
-  Future<void> _addImage(Item item) async {
-    final picked = await ref.read(imageServiceProvider).pickFromGallery();
-    if (!mounted) return;
-    final updated = item.copyWith(imagePaths: [...item.imagePaths, picked]);
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
-    if (!mounted || error != null) return;
-    setState(() => _selectedImage = updated.imagePaths.length - 1);
-    ref.invalidate(singleItemProvider(widget.uuid));
-  }
-
-  void _zoom(String? path, bool isDark) {
-    if (path == null || path.isEmpty) return;
-    showDialog<void>(
-      context: context,
-      builder: (_) => Dialog(
-        insetPadding: const EdgeInsets.all(12),
-        backgroundColor: Colors.black,
-        child: Stack(children: [
-          InteractiveViewer(
-              child: AspectRatio(
-                  aspectRatio: 1, child: _img(path, BoxFit.contain, isDark))),
-          Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, color: Colors.white))),
-        ]),
-      ),
-    );
-  }
-
-  Future<void> _updateLocation(Item item) async {
+  Future<void> _lendItem(Item item) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final locations = await ref.read(allLocationsProvider.future);
-    if (!mounted) return;
-    String? selected = item.locationUuid;
+    final lentToController = TextEditingController();
+    DateTime? expectedReturn;
 
-    final result = await showModalBottomSheet<String>(
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      backgroundColor:
+          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setInner) => SafeArea(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                  width: 48,
-                  height: 5,
-                  decoration: BoxDecoration(
+            padding: EdgeInsets.fromLTRB(
+              20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
                       color: isDark ? Colors.white24 : Colors.black12,
-                      borderRadius: BorderRadius.circular(99))),
-              const SizedBox(height: 18),
-              Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Update Location',
-                      style: TextStyle(
-                          color: isDark
-                              ? AppColors.textPrimaryDark
-                              : AppColors.textPrimaryLight,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 20))),
-              const SizedBox(height: 12),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: locations.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final l = locations[i];
-                    final active = l.uuid == selected;
-                    return InkWell(
-                      onTap: () => setInner(() => selected = l.uuid),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? AppColors.primary.withValues(alpha: 0.2)
-                              : (isDark
-                                  ? AppColors.surfaceVariantDark
-                                  : AppColors.surfaceVariantLight),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: active
-                                  ? AppColors.primary
-                                  : Colors.transparent),
-                        ),
-                        child: Row(children: [
-                          Icon(Icons.place_outlined,
-                              color: active
-                                  ? AppColors.primary
-                                  : (isDark
-                                      ? AppColors.textSecondaryDark
-                                      : AppColors.textSecondaryLight)),
-                          const SizedBox(width: 10),
-                          Expanded(
-                              child: Text(l.fullPath ?? l.name,
-                                  style: TextStyle(
-                                      color: isDark
-                                          ? AppColors.textPrimaryDark
-                                          : AppColors.textPrimaryLight))),
-                          if (active)
-                            const Icon(Icons.check_circle,
-                                color: AppColors.primary),
-                        ]),
-                      ),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Lend "${item.name}"',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: lentToController,
+                  autofocus: true,
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Who are you lending to?',
+                    hintStyle: TextStyle(
+                      color: isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textSecondaryLight,
+                    ),
+                    prefixIcon: const Icon(Icons.person_outline,
+                        color: AppColors.primary),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: DateTime.now().add(
+                          const Duration(days: 7)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now()
+                          .add(const Duration(days: 365)),
                     );
+                    if (picked != null) {
+                      setSheet(() => expectedReturn = picked);
+                    }
                   },
+                  icon: const Icon(Icons.event_available, size: 18),
+                  label: Text(
+                    expectedReturn == null
+                        ? 'Expected return date (optional)'
+                        : 'Return by ${DateFormat('dd MMM yyyy').format(expectedReturn!)}',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: selected == null
-                      ? null
-                      : () => Navigator.of(ctx).pop(selected),
-                  style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      minimumSize: const Size.fromHeight(50)),
-                  child: const Text('Save Location'),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      if (lentToController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                            content: Text('Enter who you\'re lending to'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                        return;
+                      }
+                      Navigator.of(ctx).pop(true);
+                    },
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary),
+                    child: const Text('Lend Item'),
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
         ),
       ),
     );
 
-    if (result == null || result == item.locationUuid) return;
-    final error = await ref
-        .read(itemsNotifierProvider.notifier)
-        .updateItem(item.copyWith(locationUuid: result));
-    if (!mounted || error != null) return;
-    ref.invalidate(singleItemProvider(widget.uuid));
-    ref.invalidate(itemHistoryProvider(widget.uuid));
+    final lentTo = lentToController.text.trim();
+    lentToController.dispose();
+    if (confirmed != true || lentTo.isEmpty) return;
+
+    final updated = item.copyWith(
+      isLent: true,
+      lentTo: lentTo,
+      lentOn: DateTime.now(),
+      expectedReturnDate: expectedReturn,
+      lentReminderAfterDays: 7,
+    );
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    } else {
+      ref.invalidate(singleItemProvider(widget.uuid));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lent to $lentTo')),
+      );
+    }
+  }
+
+  Future<void> _markReturned(Item item) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor:
+                isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+            title: Text('Mark as Returned',
+                style: TextStyle(
+                    color: isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight)),
+            content: Text(
+                'Confirm that "${item.name}" has been returned by ${item.lentTo ?? 'the borrower'}?',
+                style: TextStyle(
+                    color: isDark
+                        ? AppColors.textSecondaryDark
+                        : AppColors.textSecondaryLight)),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary),
+                  child: const Text('Confirm Return')),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed) return;
+
+    final updated = item.copyWith(
+      isLent: false,
+      clearLentTo: true,
+      clearLentOn: true,
+      clearExpectedReturnDate: true,
+      clearLentReminderAfterDays: true,
+    );
+    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error ?? '${item.name} marked as returned'),
+        backgroundColor: error != null ? AppColors.error : null,
+      ),
+    );
   }
 
   Future<void> _foundRemove(Item item) async {
@@ -509,131 +640,601 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     context.pop();
   }
 
-  String _location(Item item) {
-    final full = item.locationFullPath?.trim();
-    if (full != null && full.isNotEmpty) return full.replaceAll('>', ',');
-    return item.locationName?.trim().isNotEmpty == true
-        ? item.locationName!
-        : 'No location selected';
-  }
-
-  static String _ago(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inHours < 1) {
-      return '${diff.inMinutes} ${diff.inMinutes == 1 ? 'minute' : 'minutes'} ago';
-    }
-    if (diff.inDays < 1) {
-      return '${diff.inHours} ${diff.inHours == 1 ? 'hour' : 'hours'} ago';
-    }
-    if (diff.inDays < 7) {
-      return '${diff.inDays} ${diff.inDays == 1 ? 'day' : 'days'} ago';
-    }
-    if (diff.inDays < 30) {
-      final w = (diff.inDays / 7).floor();
-      return '$w ${w == 1 ? 'week' : 'weeks'} ago';
-    }
-    if (diff.inDays < 365) {
-      final m = (diff.inDays / 30).floor();
-      return '$m ${m == 1 ? 'month' : 'months'} ago';
-    }
-    final y = (diff.inDays / 365).floor();
-    return '$y ${y == 1 ? 'year' : 'years'} ago';
-  }
-
-  Widget _img(String path, BoxFit fit, bool isDark) {
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      return Image.network(path,
-          fit: fit, errorBuilder: (_, __, ___) => _fallback(isDark));
-    }
-    return Image.file(File(path),
-        fit: fit, errorBuilder: (_, __, ___) => _fallback(isDark));
-  }
-
-  Widget _fallback(bool isDark) => ColoredBox(
-      color:
-          isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight,
-      child: Center(
-          child: Icon(Icons.broken_image_outlined,
-              color: isDark ? Colors.white54 : AppColors.textDisabledLight)));
-}
-
-class _MainCard extends StatelessWidget {
-  const _MainCard({required this.imagePath, required this.onZoom});
-  final String? imagePath;
-  final VoidCallback onZoom;
-
-  @override
-  Widget build(BuildContext context) {
+  Future<void> _updateLocation(Item item) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      height: MediaQuery.of(context).size.width - 40,
-      width: double.infinity,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            isDark
-                ? AppColors.surfaceVariantDark
-                : AppColors.surfaceVariantLight,
-            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-            AppColors.primary.withValues(alpha: 0.25),
-          ],
-        ),
-      ),
-      child: Stack(children: [
-        Positioned.fill(
-          child: imagePath == null
-              ? Icon(Icons.image_outlined,
-                  color: isDark ? Colors.white70 : AppColors.textDisabledLight,
-                  size: 56)
-              : imagePath!.startsWith('http')
-                  ? Image.network(imagePath!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Icon(
-                          Icons.broken_image_outlined,
-                          color: isDark
-                              ? Colors.white70
-                              : AppColors.textDisabledLight))
-                  : Image.file(File(imagePath!),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Icon(
-                          Icons.broken_image_outlined,
-                          color: isDark
-                              ? Colors.white70
-                              : AppColors.textDisabledLight)),
-        ),
-        Positioned(
-          right: 16,
-          bottom: 16,
-          child: InkWell(
-            onTap: onZoom,
-            borderRadius: BorderRadius.circular(20),
-            child: Ink(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                color: AppColors.surfaceDark.withValues(alpha: 0.85),
+    final locations = await ref.read(allLocationsProvider.future);
+    if (!mounted) return;
+    String? selected = item.locationUuid;
+    final newLocationController = TextEditingController();
+
+    Future<void> saveNewLocation(BuildContext modalCtx) async {
+      final name = newLocationController.text.trim();
+      if (name.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a location name'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
+
+      final newLocation = LocationModel(
+        uuid: generateUuid(),
+        name: name,
+        createdAt: DateTime.now(),
+      );
+
+      final error = await ref
+          .read(locationsNotifierProvider.notifier)
+          .saveLocation(newLocation);
+      if (!mounted) return;
+
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        );
+        return;
+      }
+
+      if (modalCtx.mounted) {
+        Navigator.of(modalCtx).pop(newLocation.uuid);
+      }
+    }
+
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor:
+          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setInner) => SafeArea(
+          top: false,
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                      width: 48,
+                      height: 5,
+                      decoration: BoxDecoration(
+                          color: isDark ? Colors.white24 : Colors.black12,
+                          borderRadius: BorderRadius.circular(99))),
+                  const SizedBox(height: 18),
+                  Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Update Location',
+                          style: TextStyle(
+                              color: isDark
+                                  ? AppColors.textPrimaryDark
+                                  : AppColors.textPrimaryLight,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 20))),
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(ctx).size.height * 0.42,
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: locations.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final l = locations[i];
+                        final active = l.uuid == selected;
+                        return InkWell(
+                          onTap: () =>
+                              setInner(() => selected = l.uuid),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? AppColors.primary
+                                      .withValues(alpha: 0.2)
+                                  : (isDark
+                                      ? AppColors.surfaceVariantDark
+                                      : AppColors.surfaceVariantLight),
+                              borderRadius:
+                                  BorderRadius.circular(14),
+                              border: Border.all(
+                                  color: active
+                                      ? AppColors.primary
+                                      : Colors.transparent),
+                            ),
+                            child: Row(children: [
+                              Icon(Icons.place_outlined,
+                                  color: active
+                                      ? AppColors.primary
+                                      : (isDark
+                                          ? AppColors
+                                              .textSecondaryDark
+                                          : AppColors
+                                              .textSecondaryLight)),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                  child: Text(
+                                      (l.fullPath
+                                                  ?.trim()
+                                                  .isNotEmpty ??
+                                              false)
+                                          ? l.fullPath!
+                                          : l.name,
+                                      maxLines: 1,
+                                      overflow:
+                                          TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: isDark
+                                              ? AppColors
+                                                  .textPrimaryDark
+                                              : AppColors
+                                                  .textPrimaryLight))),
+                              if (active)
+                                const Icon(
+                                    Icons.check_circle,
+                                    color: AppColors.primary),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: newLocationController,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => saveNewLocation(ctx),
+                    style: TextStyle(
+                      color: isDark
+                          ? AppColors.textPrimaryDark
+                          : AppColors.textPrimaryLight,
+                    ),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(
+                          Icons.add_location_alt,
+                          color: AppColors.primary),
+                      hintText:
+                          'Add new location (e.g. Kitchen Drawer)',
+                      hintStyle: TextStyle(
+                        color: isDark
+                            ? AppColors.textSecondaryDark
+                            : AppColors.textSecondaryLight,
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? AppColors.surfaceVariantDark
+                          : AppColors.surfaceVariantLight,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: AppColors.primary
+                              .withValues(alpha: 0.35),
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: AppColors.primary
+                              .withValues(alpha: 0.25),
+                        ),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(
+                            Radius.circular(14)),
+                        borderSide: BorderSide(
+                            color: AppColors.primary),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: selected == null
+                          ? null
+                          : () =>
+                              Navigator.of(ctx).pop(selected),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          minimumSize:
+                              const Size.fromHeight(50)),
+                      child: const Text('Save Location'),
+                    ),
+                  ),
+                ]),
               ),
-              child: const Icon(Icons.zoom_in, color: Colors.white),
             ),
           ),
         ),
+      ),
+    );
+
+    newLocationController.dispose();
+
+    if (result == null || result == item.locationUuid) return;
+    final error = await ref
+        .read(itemsNotifierProvider.notifier)
+        .updateItem(item.copyWith(locationUuid: result));
+    if (!mounted || error != null) return;
+    ref.invalidate(singleItemProvider(widget.uuid));
+    ref.invalidate(itemHistoryProvider(widget.uuid));
+  }
+
+  Future<void> _addImage(Item item) async {
+    final source = await _chooseImageSource();
+    if (source == null) return;
+
+    String picked;
+    try {
+      picked = source == ImageSourceOption.camera
+          ? await ref.read(imageServiceProvider).pickFromCamera()
+          : await ref.read(imageServiceProvider).pickFromGallery();
+    } catch (_) {
+      return;
+    }
+
+    if (!mounted) return;
+    final updated = item.copyWith(imagePaths: [...item.imagePaths, picked]);
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    if (!mounted || error != null) return;
+    setState(() => _selectedImage = updated.imagePaths.length - 1);
+    ref.invalidate(singleItemProvider(widget.uuid));
+  }
+
+  Future<ImageSourceOption?> _chooseImageSource() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    return showModalBottomSheet<ImageSourceOption>(
+      context: context,
+      backgroundColor:
+          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Add Photo',
+                  style: TextStyle(
+                    color: textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _imageSourceTile(
+                context: ctx,
+                icon: Icons.photo_camera,
+                title: 'Camera',
+                subtitle: 'Take a new photo',
+                textPrimary: textPrimary,
+                textSecondary: textSecondary,
+                value: ImageSourceOption.camera,
+              ),
+              const SizedBox(height: 10),
+              _imageSourceTile(
+                context: ctx,
+                icon: Icons.photo_library,
+                title: 'Gallery',
+                subtitle: 'Choose from your photos',
+                textPrimary: textPrimary,
+                textSecondary: textSecondary,
+                value: ImageSourceOption.gallery,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imageSourceTile({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color textPrimary,
+    required Color textSecondary,
+    required ImageSourceOption value,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: () => Navigator.of(context).pop(value),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark
+              ? AppColors.surfaceVariantDark
+              : AppColors.surfaceVariantLight,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: textPrimary, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(color: textSecondary, fontSize: 13)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.primary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _zoom(String? path, bool isDark) {
+    if (path == null || path.isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Colors.black,
+        child: Stack(children: [
+          InteractiveViewer(
+              child: AspectRatio(
+                  aspectRatio: 1,
+                  child: _img(path, BoxFit.contain, isDark))),
+          Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.white))),
+        ]),
+      ),
+    );
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  Widget _img(String path, BoxFit fit, bool isDark) {
+    return Image.file(
+      File(path),
+      fit: fit,
+      errorBuilder: (_, __, ___) => Container(
+        color: isDark
+            ? AppColors.surfaceVariantDark
+            : AppColors.surfaceVariantLight,
+        child: const Center(
+            child:
+                Icon(Icons.broken_image, color: AppColors.primary, size: 48)),
+      ),
+    );
+  }
+
+  Widget _thumb(String path, int index, bool isDark) {
+    final active = index == _selectedImage;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedImage = index),
+      child: Container(
+        width: 72,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: active ? AppColors.primary : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: _img(path, BoxFit.cover, isDark),
+      ),
+    );
+  }
+
+  Widget _addImageButton(Item item) {
+    return GestureDetector(
+      onTap: () => _addImage(item),
+      child: Container(
+        width: 72,
+        height: 72,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: AppColors.primary.withValues(alpha: 0.12),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.3)),
+        ),
+        child: const Icon(Icons.add_a_photo,
+            color: AppColors.primary, size: 24),
+      ),
+    );
+  }
+
+  String _location(Item item) {
+    if (item.locationFullPath?.trim().isNotEmpty ?? false) {
+      return item.locationFullPath!;
+    }
+    if (item.locationName?.trim().isNotEmpty ?? false) {
+      return item.locationName!;
+    }
+    return 'No location set';
+  }
+
+  Widget _meta(
+      BuildContext context, bool isDark, DateTime savedAt, DateTime? movedAt) {
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+              color: AppColors.primary.withValues(alpha: 0.15)),
+          bottom: BorderSide(
+              color: AppColors.primary.withValues(alpha: 0.15)),
+        ),
+      ),
+      child: Row(children: [
+        Expanded(
+            child: _metaCell(isDark, 'SAVED', _ago(savedAt), textPrimary)),
+        Container(
+            width: 1,
+            height: 52,
+            color: AppColors.primary.withValues(alpha: 0.15)),
+        Expanded(
+            child: Padding(
+                padding: const EdgeInsets.only(left: 22),
+                child: _metaCell(isDark, 'LAST MOVED',
+                    movedAt == null ? '-' : _ago(movedAt), textPrimary))),
       ]),
+    );
+  }
+
+  Widget _metaCell(
+      bool isDark, String title, String value, Color textPrimary) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title,
+          style: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+              fontSize: 15.5,
+              letterSpacing: 1.2)),
+      const SizedBox(height: 4),
+      Text(value,
+          style: TextStyle(
+              color: textPrimary,
+              fontSize: 19.5,
+              fontWeight: FontWeight.w600)),
+    ]);
+  }
+
+  String _ago(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w ago';
+    return '${(diff.inDays / 30).floor()}mo ago';
+  }
+}
+
+// ── Supporting widgets ─────────────────────────────────────────────────────────
+
+enum ImageSourceOption { camera, gallery }
+
+class _BorrowRequestTile extends StatelessWidget {
+  const _BorrowRequestTile({
+    required this.request,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.onApprove,
+    required this.onDeny,
+  });
+
+  final FirestoreBorrowRequest request;
+  final Color textPrimary;
+  final Color textSecondary;
+  final VoidCallback onApprove;
+  final VoidCallback onDeny;
+
+  @override
+  Widget build(BuildContext context) {
+    final returnText = request.requestedReturnDate == null
+        ? 'No return date suggested'
+        : 'Wants it back by ${DateFormat('dd MMM').format(request.requestedReturnDate!)}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            request.requesterName,
+            style:
+                TextStyle(color: textPrimary, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(returnText,
+              style: TextStyle(color: textSecondary, fontSize: 12)),
+          if (request.note?.trim().isNotEmpty ?? false) ...[
+            const SizedBox(height: 4),
+            Text(
+              '"${request.note!.trim()}"',
+              style: TextStyle(
+                  color: textSecondary, fontSize: 12, height: 1.35),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onDeny,
+                  child: const Text('Deny'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  onPressed: onApprove,
+                  style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary),
+                  child: const Text('Approve'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _Action extends StatelessWidget {
-  const _Action(
-      {required this.label,
-      required this.filled,
-      required this.icon,
-      required this.onTap});
+  const _Action({
+    required this.label,
+    required this.filled,
+    required this.icon,
+    required this.onTap,
+  });
+
   final String label;
   final bool filled;
   final IconData icon;
@@ -641,48 +1242,45 @@ class _Action extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(32),
-      child: Ink(
-        height: 100,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          border:
-              filled ? null : Border.all(color: AppColors.primary, width: 2),
-          gradient: filled
-              ? const LinearGradient(
-                  colors: [AppColors.primaryDark, AppColors.primary],
-                )
-              : null,
-          boxShadow: filled
-              ? [
-                  BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 5))
-                ]
-              : null,
+          color: filled
+              ? AppColors.primary
+              : (isDark
+                  ? AppColors.surfaceVariantDark
+                  : AppColors.surfaceVariantLight),
+          borderRadius: BorderRadius.circular(16),
+          border: filled
+              ? null
+              : Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.3)),
         ),
-        child: Center(
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: filled ? Colors.white : AppColors.primary),
-              child: Icon(icon,
-                  color: filled ? AppColors.primary : Colors.black, size: 21),
+        child: Column(
+          children: [
+            Icon(icon,
+                color: filled
+                    ? Colors.white
+                    : AppColors.primary,
+                size: 26),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: filled
+                    ? Colors.white
+                    : (isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight),
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
             ),
-            const SizedBox(width: 12),
-            Flexible(
-                child: Text(label,
-                    style: TextStyle(
-                        color: filled ? Colors.white : AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 20.5))),
-          ]),
+          ],
         ),
       ),
     );
@@ -690,11 +1288,13 @@ class _Action extends StatelessWidget {
 }
 
 class _HistoryRow extends StatelessWidget {
-  const _HistoryRow(
-      {required this.title,
-      required this.subtitle,
-      required this.first,
-      required this.tail});
+  const _HistoryRow({
+    required this.title,
+    required this.subtitle,
+    required this.first,
+    required this.tail,
+  });
+
   final String title;
   final String subtitle;
   final bool first;
@@ -703,65 +1303,80 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textPrimary =
-        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
-    final textSecondary =
-        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(
-        width: 32,
-        child: Column(children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-                color: first
-                    ? AppColors.primary
-                    : AppColors.primary.withValues(alpha: 0.3),
-                shape: BoxShape.circle),
-            child: Icon(first ? Icons.location_on : Icons.history,
-                size: 14, color: first ? Colors.white : AppColors.primary),
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 20,
+            child: Column(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: first
+                        ? AppColors.primary
+                        : AppColors.primary.withValues(alpha: 0.3),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                if (tail)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: AppColors.primary.withValues(alpha: 0.2),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          if (tail)
-            Container(
-                width: 2,
-                height: 48,
-                margin: const EdgeInsets.only(top: 4),
-                color: AppColors.primary.withValues(alpha: 0.22)),
-        ]),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isDark
+                          ? AppColors.textPrimaryDark
+                          : AppColors.textPrimaryLight,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textSecondaryLight,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 18),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title,
-                style: TextStyle(
-                    color: textPrimary,
-                    fontSize: 20,
-                    fontWeight: first ? FontWeight.w700 : FontWeight.w600)),
-            Text(subtitle,
-                style: TextStyle(color: textSecondary, fontSize: 18)),
-          ]),
-        ),
-      ),
-    ]);
+    );
   }
 }
 
-/// Floating camera FAB that sits above the unified bottom nav bar.
 class _DetailFab extends StatelessWidget {
   const _DetailFab();
 
   @override
   Widget build(BuildContext context) {
-    final inset = MediaQuery.of(context).padding.bottom;
     return Positioned(
+      bottom: MediaQuery.of(context).padding.bottom + 58.0 - 14.0,
       left: 0,
       right: 0,
-      bottom: inset + 58.0 - 14.0,
       child: Center(
         child: GestureDetector(
           onTap: () => context.push(AppRoutes.save),
@@ -794,3 +1409,4 @@ class _DetailFab extends StatelessWidget {
     );
   }
 }
+
