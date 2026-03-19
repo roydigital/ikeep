@@ -73,6 +73,8 @@ lib/
 │       ├── item_visibility.dart  # ItemVisibility enum: private_, household, nearby
 │       ├── household.dart        # Household (local SQLite model — id, ownerId, name, memberIds)
 │       ├── household_member.dart # HouseholdMember (local SQLite model)
+│       ├── household_member_lookup_state.dart # HouseholdMemberLookupState — state for email-based member search UI
+│       ├── app_user.dart         # AppUser — minimal Firestore user model (uid, email, displayName, householdId)
 │       ├── borrow_request.dart   # BorrowRequest (local SQLite model)
 │       ├── shared_item.dart      # SharedItem (Firestore model — household catalog)
 │       ├── nearby_item.dart      # NearbyItem (Firestore model — geo-based public catalog)
@@ -141,7 +143,7 @@ lib/
 │   ├── rooms/add_new_room_screen.dart
 │   ├── onboarding/onboarding_screen.dart
 │   ├── settings/settings_screen.dart
-│   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members (route: /settings/manage-family)
+│   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
 │   └── network/network_screen.dart  # Network tab: Catalog, Activity, My Lends
 │
 └── widgets/
@@ -206,9 +208,14 @@ Screens / Widgets
 | `householdSyncServiceProvider` | `Provider<HouseholdSyncService>` | Real-time Firestore sync; call `startSync(householdId)` to activate |
 | `authStateProvider` | `StreamProvider<User?>` | Firebase Auth state stream |
 | `isSignedInProvider` | `Provider<bool>` | Whether user is authenticated |
+| `hasHouseholdProvider` | `Provider<bool>` | Whether current user belongs to a household |
+| `currentHouseholdProvider` | `FutureProvider<Household?>` | Full Household model for current user |
 | `currentHouseholdIdProvider` | `FutureProvider<String?>` | Current user's household ID |
 | `householdMembersProvider` | `FutureProvider<List<HouseholdMember>>` | All household members |
-| `householdSharedItemsProvider` | `FutureProvider<List<SharedItem>>` | Items shared by other household members |
+| `householdSharedItemsProvider` | `StreamProvider<List<SharedItem>>` | Items shared in household; re-emits on every local Firestore sync write |
+| `householdSyncBootstrapProvider` | `FutureProvider<SyncResult>` | Starts/stops Firestore listeners based on household membership |
+| `householdLocalChangesProvider` | `StreamProvider<void>` | Emits void whenever HouseholdSyncService writes a local change |
+| `householdMemberLookupProvider` | `StateNotifierProvider<HouseholdMemberLookupController, HouseholdMemberLookupState>` | Email-based user search for adding household members |
 | `allIncomingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby incoming requests |
 | `allOutgoingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby outgoing requests |
 | `allPendingIncomingCountProvider` | `Provider<int>` | Badge count for Network tab |
@@ -256,7 +263,7 @@ Never hardcode colors — use `app_colors.dart` constants, then reference via `A
 | Item Detail | Built |
 | Rooms / Add Room | Built |
 | Settings | Built |
-| Household Settings | Built (`/settings/manage-family`) — create household, add members, view members list |
+| Household Settings | Built (`/settings/manage-family`) — create household, add members via email lookup, view members list |
 | Network | Future aspect only for now; detailed notes retained below for later implementation |
 | Login / Auth | Built (currently used for account/backup flows; previous Network-related notes remain below for future reference) |
 | History Timeline | **Not built** |
@@ -312,7 +319,7 @@ Shows a sign-in prompt if the user is not authenticated.
 ### Item Visibility (ItemVisibility enum)
 - `private_` (default) — Only visible on owner's device
 - `household` — Shared with household members
-- `nearby` — Publicly visible to anyone in same locality
+> Note: `nearby` (geo-based public) was removed from the enum. Only `private_` and `household` exist.
 
 ### Locality Strategy
 - Never stores raw GPS coordinates (privacy)
@@ -326,10 +333,13 @@ Shows a sign-in prompt if the user is not authenticated.
 4. Requester can cancel → status: `cancelled`
 5. (Firestore only) Item returned → status: `returned`
 
-### Item Lending Fields (on Item model)
+### Item Lending / Sharing Fields (on Item model)
 - `isLent`, `lentTo`, `lentOn`, `expectedReturnDate`, `lentReminderAfterDays` — track active lends
 - `isAvailableForLending` — whether the item can be requested by others
-- `visibility` — controls sharing scope (private/household/nearby)
+- `seasonCategory` — string tag for seasonal classification (default: `'all_year'`)
+- `visibility` — controls sharing scope (`private_` or `household`; `nearby` was removed)
+- `householdId` — ID of the household this item is shared with (null for private items)
+- `sharedWithMemberUuids` — list of member UUIDs this item is explicitly shared with (empty = all household members); cleared when item goes private
 
 ### Notification Channels
 - `ikeep_expiry` — Expiry reminders

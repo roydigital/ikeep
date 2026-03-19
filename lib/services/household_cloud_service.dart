@@ -336,11 +336,9 @@ class HouseholdCloudService {
         .collection(_householdsCol)
         .doc(householdId)
         .collection(_membersSubcol)
-        .orderBy('isOwner', descending: true)
-        .orderBy('joinedAt')
         .get();
 
-    return snapshot.docs.map((doc) {
+    final members = snapshot.docs.map((doc) {
       final d = doc.data();
       final joinedAt = d['joinedAt'];
       DateTime invitedAt = DateTime.now();
@@ -358,6 +356,18 @@ class HouseholdCloudService {
         joinedAt: joinedAt is Timestamp ? joinedAt.toDate() : null,
       );
     }).toList();
+
+    members.sort((a, b) {
+      if (a.isOwner != b.isOwner) {
+        return a.isOwner ? -1 : 1;
+      }
+
+      final aJoined = a.joinedAt ?? a.invitedAt;
+      final bJoined = b.joinedAt ?? b.invitedAt;
+      return aJoined.compareTo(bJoined);
+    });
+
+    return members;
   }
 
   // ── Shared items catalog ────────────────────────────────────────────────
