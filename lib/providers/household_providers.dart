@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/firestore_borrow_request.dart';
 import '../domain/models/household.dart';
 import '../domain/models/household_member.dart';
+import '../domain/models/household_member_lookup_state.dart';
 import '../domain/models/item.dart';
 import '../domain/models/item_visibility.dart';
 import '../domain/models/shared_item.dart';
@@ -209,6 +210,9 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
       final updated = item.copyWith(
         visibility: targetVisibility,
         householdId: targetVisibility.isHousehold ? householdId : null,
+        clearHouseholdId: !targetVisibility.isHousehold,
+        sharedWithMemberUuids:
+            targetVisibility.isHousehold ? item.sharedWithMemberUuids : const [],
         updatedAt: DateTime.now(),
       );
 
@@ -363,4 +367,116 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
 final householdNotifierProvider =
     StateNotifierProvider<HouseholdNotifier, HouseholdActionState>((ref) {
   return HouseholdNotifier(ref);
+});
+
+class HouseholdMemberLookupController
+    extends StateNotifier<HouseholdMemberLookupState> {
+  HouseholdMemberLookupController(this._ref)
+      : super(const HouseholdMemberLookupState());
+
+  static final RegExp _emailPattern = RegExp(
+    r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+    caseSensitive: false,
+  );
+
+  final Ref _ref;
+
+  Future<void> searchUser(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      state = state.copyWith(
+        searchedEmail: '',
+        isLoading: false,
+        errorMessage: 'Enter an email address.',
+        clearFoundUser: true,
+      );
+      return;
+    }
+    if (!_emailPattern.hasMatch(normalizedEmail)) {
+      state = state.copyWith(
+        searchedEmail: normalizedEmail,
+        isLoading: false,
+        errorMessage: 'Enter a valid email address.',
+        clearFoundUser: true,
+      );
+      return;
+    }
+
+    final authUser = _ref.read(authStateProvider).valueOrNull;
+    final ownEmail = authUser?.email?.trim().toLowerCase();
+    if (ownEmail != null && ownEmail == normalizedEmail) {
+      state = state.copyWith(
+        searchedEmail: normalizedEmail,
+        isLoading: false,
+        errorMessage: 'You cannot add your own account to the household.',
+        clearFoundUser: true,
+      );
+      return;
+    }
+
+    state = state.copyWith(
+      isLoading: true,
+      searchedEmail: normalizedEmail,
+      clearError: true,
+      clearFoundUser: true,
+    );
+
+    try {
+      final user =
+          await _ref.read(householdRepositoryProvider).getUserByEmail(normalizedEmail);
+      if (user == null) {
+        state = state.copyWith(
+          isLoading: false,
+          errorMessage:
+              'No Ikeep account found with this email. Ask them to sign up first.',
+          clearFoundUser: true,
+        );
+        return;
+      }
+
+      final household = await _ref.read(currentHouseholdProvider.future);
+      if (household != null && household.memberIds.contains(user.uid)) {
+        state = state.copyWith(
+          isLoading: false,
+          errorMessage: 'This person is already in your household.',
+          clearFoundUser: true,
+        );
+        return;
+      }
+
+      state = state.copyWith(
+        isLoading: false,
+        foundUserId: user.uid,
+        foundUser: user,
+        clearError: true,
+      );
+    } on FormatException {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Enter a valid email address.',
+        clearFoundUser: true,
+      );
+    } on StateError catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: '${e.message}',
+        clearFoundUser: true,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Failed to verify that email: $e',
+        clearFoundUser: true,
+      );
+    }
+  }
+
+  void resetForm() {
+    state = const HouseholdMemberLookupState();
+  }
+}
+
+final householdMemberLookupProvider = StateNotifierProvider.autoDispose<
+    HouseholdMemberLookupController, HouseholdMemberLookupState>((ref) {
+  return HouseholdMemberLookupController(ref);
 });

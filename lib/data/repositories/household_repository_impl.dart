@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../core/errors/failure.dart';
+import '../../domain/models/app_user.dart';
 import '../../domain/models/household.dart';
 import '../../domain/models/household_member.dart';
 import '../database/household_dao.dart';
@@ -19,6 +20,22 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
   final HouseholdDao householdDao;
   final HouseholdMemberDao memberDao;
   final HouseholdCloudService cloudService;
+
+  @override
+  Future<AppUser?> getUserByEmail(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      throw const FormatException('Email is required');
+    }
+
+    try {
+      return await cloudService.getUserByEmail(normalizedEmail);
+    } on FirebaseAuthException catch (e) {
+      throw StateError(e.message ?? 'Authentication failed: ${e.code}');
+    } on FirebaseException catch (e) {
+      throw StateError(e.message ?? 'Cloud lookup failed: ${e.code}');
+    }
+  }
 
   @override
   Future<Household?> getCurrentHousehold() async {

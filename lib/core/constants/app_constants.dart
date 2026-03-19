@@ -19,6 +19,9 @@ class AppConstants {
   // Image quality
   static const int imageCompressionQuality = 80; // 0-100
   static const int thumbnailSize = 200; // pixels
+  static const int uploadImageQuality = 80; // 0-100
+  static const int uploadImageMaxDimension = 1280; // pixels
+  static const int uploadImageTargetBytes = 250 * 1024; // 250 KB
 
   // Search
   static const int searchDebounceMs = 300;

@@ -168,7 +168,10 @@ class ItemRepositoryImpl implements ItemRepository {
 
   Future<Item> _normalizeHouseholdItem(Item item) async {
     if (!item.visibility.isHousehold) {
-      return item.copyWith(householdId: null);
+      return item.copyWith(
+        clearHouseholdId: true,
+        sharedWithMemberUuids: const [],
+      );
     }
 
     final householdId = await _resolveHouseholdId(item);

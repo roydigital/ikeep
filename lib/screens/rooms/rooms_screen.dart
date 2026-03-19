@@ -584,7 +584,6 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
   @override
   Widget build(BuildContext context) {
     final locationsAsync = ref.watch(allLocationsProvider);
-    final bottomInset = MediaQuery.of(context).padding.bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kBg = isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
     final kCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
@@ -648,7 +647,9 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                     : _areaImages;
 
                 return ListView(
-                  padding: EdgeInsets.only(bottom: bottomInset + 90),
+                  padding: EdgeInsets.only(
+                    bottom: AppNavBar.contentBottomSpacing(context),
+                  ),
                   children: [
                     const SizedBox(height: AppDimensions.spacingMd),
                     _SectionTitle(

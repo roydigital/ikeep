@@ -27,4 +27,11 @@ class PathUtils {
     if (parts.isEmpty) return newName;
     return [...parts.take(parts.length - 1), newName].join(separator);
   }
+
+  static bool isRemotePath(String path) {
+    final normalized = path.trim().toLowerCase();
+    return normalized.startsWith('http://') ||
+        normalized.startsWith('https://') ||
+        normalized.startsWith('gs://');
+  }
 }

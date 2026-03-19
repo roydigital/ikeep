@@ -1,11 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../domain/models/app_user.dart';
 import '../domain/models/household.dart';
 import '../domain/models/household_member.dart';
 import '../domain/models/item.dart';
 import '../domain/models/item_location_history.dart';
 import '../domain/models/shared_item.dart';
+import 'firebase_image_upload_service.dart';
 
 /// Manages all Firestore operations for household sharing:
 /// - Household creation, member invites, member fetching
@@ -15,11 +17,14 @@ class HouseholdCloudService {
   HouseholdCloudService({
     required FirebaseAuth auth,
     required FirebaseFirestore firestore,
+    required FirebaseImageUploadService imageUploadService,
   })  : _auth = auth,
-        _firestore = firestore;
+        _firestore = firestore,
+        _imageUploadService = imageUploadService;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
+  final FirebaseImageUploadService _imageUploadService;
 
   static const _usersCol = 'users';
   static const _householdsCol = 'households';
@@ -30,6 +35,35 @@ class HouseholdCloudService {
   static const _borrowRequestsSubcol = 'borrow_requests';
 
   User? get currentUser => _auth.currentUser;
+
+  Future<AppUser?> getUserByEmail(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      throw StateError('Email is required');
+    }
+
+    try {
+      final snapshot = await _firestore
+          .collection(_usersCol)
+          .where('email', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return null;
+      }
+
+      final doc = snapshot.docs.first;
+      return AppUser.fromJson(doc.id, doc.data());
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        throw StateError(
+          'Firestore rules are blocking user lookup. Allow authenticated reads on users.',
+        );
+      }
+      throw StateError(e.message ?? 'Failed to look up user');
+    }
+  }
 
   Future<Household> createHousehold({required String name}) async {
     final user = _auth.currentUser;
@@ -138,7 +172,6 @@ class HouseholdCloudService {
     await _firestore.collection(_usersCol).doc(userId).set({
       'uid': userId,
       'email': email?.trim().toLowerCase(),
-      'displayName': memberName,
       'householdId': householdId,
       'isOwner': false,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -337,6 +370,11 @@ class HouseholdCloudService {
   }) async {
     final user = _auth.currentUser;
     if (user == null) return;
+    final uploadedImageUrls = await _imageUploadService.uploadItemImages(
+      userId: user.uid,
+      itemUuid: item.uuid,
+      imagePaths: item.imagePaths,
+    );
 
     await _firestore
         .collection(_householdsCol)
@@ -344,7 +382,7 @@ class HouseholdCloudService {
         .collection(_sharedItemsSubcol)
         .doc(item.uuid)
         .set({
-      ...item.toJson(),
+      ...item.copyWith(imagePaths: uploadedImageUrls).toJson(),
       'ownerUid': user.uid,
       'ownerName': _displayName(user),
       'householdId': householdId,

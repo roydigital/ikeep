@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,8 +5,10 @@ import 'package:intl/intl.dart';
 
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/firestore_borrow_request.dart';
+import '../../domain/models/household_member.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/item_location_history.dart';
+import '../../domain/models/item_visibility.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/household_providers.dart';
@@ -17,9 +17,9 @@ import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/adaptive_image.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/item_activity_timeline.dart';
-import '../../widgets/item_visibility_toggle.dart';
 
 class ItemDetailScreen extends ConsumerStatefulWidget {
   const ItemDetailScreen({super.key, required this.uuid});
@@ -87,9 +87,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                               color: isDark
                                   ? AppColors.surfaceVariantDark
                                   : AppColors.surfaceVariantLight,
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _editItemName(item);
+                                }
+                              },
                               itemBuilder: (_) => const [
                                 PopupMenuItem(
-                                    value: 'a', child: Text('Details'))
+                                  value: 'edit',
+                                  child: Text('Edit'),
+                                ),
                               ],
                             ),
                           ],
@@ -198,7 +205,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                             ),
 
                             const SizedBox(height: 18),
-                            ItemVisibilityToggle(item: item),
+                            _ItemVisibilitySection(item: item),
 
                             if (item.tags.isNotEmpty) ...[
                               const SizedBox(height: 18),
@@ -265,7 +272,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                             // ── History ───────────────────────────────
                             ItemActivityTimeline(
                               itemUuid: item.uuid,
+                              showUserAttribution:
+                                  item.visibility == ItemVisibility.household,
                               title: 'Location History',
+                            ),
+                            SizedBox(
+                              height: AppNavBar.contentBottomSpacing(
+                                context,
+                                includeFab: true,
+                              ),
                             ),
                           ]),
                     ),
@@ -384,6 +399,101 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
+
+  Future<void> _editItemName(Item item) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final controller = TextEditingController(text: item.name);
+    final updatedName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        title: Text(
+          'Edit Item Name',
+          style: TextStyle(
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (value) => Navigator.pop(ctx, value.trim()),
+          style: TextStyle(
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Item name',
+            hintStyle: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+            ),
+            filled: true,
+            fillColor:
+                isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primary),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text(
+              'Save',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || updatedName == null || updatedName.isEmpty) return;
+    if (updatedName == item.name) return;
+
+    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+          item.copyWith(
+            name: updatedName,
+            updatedAt: DateTime.now(),
+          ),
+        );
+
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Item name updated')),
+    );
+  }
 
   Future<void> _lendItem(Item item) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -975,10 +1085,10 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   Widget _img(String path, BoxFit fit, bool isDark) {
-    return Image.file(
-      File(path),
+    return AdaptiveImage(
+      path: path,
       fit: fit,
-      errorBuilder: (_, __, ___) => Container(
+      errorBuilder: (_) => Container(
         color: isDark
             ? AppColors.surfaceVariantDark
             : AppColors.surfaceVariantLight,
@@ -1093,6 +1203,318 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 }
 
 // ── Supporting widgets ─────────────────────────────────────────────────────────
+
+class _ItemVisibilitySection extends ConsumerStatefulWidget {
+  const _ItemVisibilitySection({required this.item});
+
+  final Item item;
+
+  @override
+  ConsumerState<_ItemVisibilitySection> createState() =>
+      _ItemVisibilitySectionState();
+}
+
+class _ItemVisibilitySectionState
+    extends ConsumerState<_ItemVisibilitySection> {
+  bool _isSaving = false;
+
+  Item get _item => widget.item;
+
+  bool get _isShared => _item.visibility == ItemVisibility.household;
+
+  Future<void> _saveItem(Item updatedItem) async {
+    if (_isSaving) return;
+
+    setState(() => _isSaving = true);
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+
+    if (error == null) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error)));
+  }
+
+  Future<void> _toggleSharing(bool enabled) async {
+    if (!enabled) {
+      await _saveItem(
+        _item.copyWith(
+          visibility: ItemVisibility.private_,
+          clearHouseholdId: true,
+          sharedWithMemberUuids: const [],
+        ),
+      );
+      return;
+    }
+
+    final householdId = await ref.read(currentHouseholdIdProvider.future);
+    if (!mounted) return;
+    if (householdId == null || householdId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Create a household before sharing this item.'),
+        ),
+      );
+      return;
+    }
+
+    await _saveItem(
+      _item.copyWith(
+        visibility: ItemVisibility.household,
+        householdId: householdId,
+        sharedWithMemberUuids: const [],
+      ),
+    );
+  }
+
+  Future<void> _shareWithAll() async {
+    await _saveItem(
+      _item.copyWith(
+        visibility: ItemVisibility.household,
+        sharedWithMemberUuids: const [],
+      ),
+    );
+  }
+
+  Future<void> _toggleMember(String memberUuid, bool selected) async {
+    final next = {..._item.sharedWithMemberUuids};
+    if (selected) {
+      next.add(memberUuid);
+    } else {
+      next.remove(memberUuid);
+    }
+
+    await _saveItem(
+      _item.copyWith(
+        visibility: ItemVisibility.household,
+        sharedWithMemberUuids: next.toList(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final membersAsync = ref.watch(householdMembersProvider);
+    final hasHousehold = ref.watch(hasHouseholdProvider);
+    final allMembersSelected = _item.sharedWithMemberUuids.isEmpty;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.borderLight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Visibility',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _isShared
+                          ? 'Shared'
+                          : 'Private (Only visible to you)',
+                      style: TextStyle(
+                        color: _isShared ? AppColors.primary : textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                value: _isShared,
+                activeColor: AppColors.primary,
+                onChanged:
+                    _isSaving || (!hasHousehold && !_isShared) ? null : _toggleSharing,
+              ),
+            ],
+          ),
+          if (!hasHousehold && !_isShared) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Private by default. Create a household in Family Sharing Pool settings to enable sharing.',
+              style: TextStyle(
+                color: textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ],
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: membersAsync.when(
+                data: (members) => _VisibilityMembersList(
+                  members: members,
+                  selectedMemberUuids: _item.sharedWithMemberUuids,
+                  allMembersSelected: allMembersSelected,
+                  isSaving: _isSaving,
+                  textPrimary: textPrimary,
+                  textSecondary: textSecondary,
+                  onShareWithAll: _shareWithAll,
+                  onToggleMember: _toggleMember,
+                ),
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+                error: (error, _) => Text(
+                  'Could not load household members: $error',
+                  style: TextStyle(
+                    color: textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+            crossFadeState:
+                _isShared ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 180),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VisibilityMembersList extends StatelessWidget {
+  const _VisibilityMembersList({
+    required this.members,
+    required this.selectedMemberUuids,
+    required this.allMembersSelected,
+    required this.isSaving,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.onShareWithAll,
+    required this.onToggleMember,
+  });
+
+  final List<HouseholdMember> members;
+  final List<String> selectedMemberUuids;
+  final bool allMembersSelected;
+  final bool isSaving;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Future<void> Function() onShareWithAll;
+  final Future<void> Function(String memberUuid, bool selected) onToggleMember;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectableMembers = members
+        .where((member) => member.uuid != HouseholdMember.localOwnerUuid)
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Choose who can see this item',
+          style: TextStyle(
+            color: textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Select specific family members, or keep "All Household Members" enabled. An empty selection list is stored as shared with everyone.',
+          style: TextStyle(
+            color: textSecondary,
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _VisibilityOptionTile(
+          title: 'All Household Members',
+          subtitle: 'Everyone in the family pool can see this item.',
+          value: allMembersSelected,
+          enabled: !isSaving,
+          onChanged: (_) => onShareWithAll(),
+        ),
+        if (selectableMembers.isEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Add more household members to share with specific people.',
+            style: TextStyle(color: textSecondary, fontSize: 12),
+          ),
+        ] else
+          ...selectableMembers.map(
+            (member) => _VisibilityOptionTile(
+              title: member.name,
+              subtitle: member.email?.trim().isNotEmpty == true
+                  ? member.email!
+                  : 'Visible to this member only',
+              value: selectedMemberUuids.contains(member.uuid),
+              enabled: !isSaving,
+              onChanged: (selected) =>
+                  onToggleMember(member.uuid, selected ?? false),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _VisibilityOptionTile extends StatelessWidget {
+  const _VisibilityOptionTile({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return CheckboxListTile(
+      value: value,
+      onChanged: enabled ? onChanged : null,
+      activeColor: AppColors.primary,
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(subtitle),
+    );
+  }
+}
 
 enum ImageSourceOption { camera, gallery }
 
@@ -1311,7 +1733,7 @@ class _DetailFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      bottom: MediaQuery.of(context).padding.bottom + 58.0 - 14.0,
+      bottom: AppNavBar.fabBottom(context),
       left: 0,
       right: 0,
       child: Center(

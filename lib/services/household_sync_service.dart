@@ -235,7 +235,8 @@ class HouseholdSyncService {
       await _itemDao.updateItem(
         localItem.copyWith(
           visibility: ItemVisibility.private_,
-          householdId: null,
+          clearHouseholdId: true,
+          sharedWithMemberUuids: const [],
           updatedAt: DateTime.now(),
         ),
       );
@@ -323,6 +324,9 @@ class HouseholdSyncService {
           (data['isAvailableForLending'] as bool?) ?? true,
       visibility: ItemVisibility.household,
       householdId: householdId,
+      sharedWithMemberUuids: List<String>.from(
+        (data['sharedWithMemberUuids'] as List?) ?? const [],
+      ),
       locationName: data['locationName'] as String?,
     );
   }

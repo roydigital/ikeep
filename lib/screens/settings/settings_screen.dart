@@ -372,8 +372,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             : syncStatus.hasError
                 ? 'Error'
                 : 'Connected';
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
@@ -396,7 +394,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(20, 24, 20, bottomInset + 110),
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    24,
+                    20,
+                    AppNavBar.contentBottomSpacing(context),
+                  ),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate(
                       [

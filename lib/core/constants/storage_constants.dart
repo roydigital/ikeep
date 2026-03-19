@@ -5,6 +5,7 @@ class StorageConstants {
   // Local directories (relative to app documents directory)
   static const String itemImagesDir = 'item_images';
   static const String thumbnailsDir = 'thumbnails';
+  static const String optimizedUploadsDir = 'optimized_uploads';
 
   // Appwrite — fill these in from your Appwrite console
   static const String appwriteEndpoint = 'https://cloud.appwrite.io/v1';
@@ -13,4 +14,7 @@ class StorageConstants {
   static const String appwriteItemsCollectionId = 'items';
   static const String appwriteLocationsCollectionId = 'locations';
   static const String appwriteImagesBucketId = 'item_images';
+
+  // Firebase Storage
+  static const String firebaseItemImagesRoot = 'users';
 }

@@ -26,6 +26,7 @@ class Item {
     this.isAvailableForLending = false,
     this.visibility = ItemVisibility.private_,
     this.householdId,
+    this.sharedWithMemberUuids = const [],
     // Denormalized for display — populated by joins
     this.locationName,
     this.locationFullPath,
@@ -53,6 +54,7 @@ class Item {
   final bool isAvailableForLending;
   final ItemVisibility visibility;
   final String? householdId;
+  final List<String> sharedWithMemberUuids;
 
   /// Social sharing is currently disabled in the app.
   bool get isShared => false;
@@ -87,9 +89,11 @@ class Item {
     bool? isAvailableForLending,
     ItemVisibility? visibility,
     String? householdId,
+    List<String>? sharedWithMemberUuids,
     String? locationName,
     String? locationFullPath,
     bool clearLocationUuid = false,
+    bool clearHouseholdId = false,
     bool clearExpiryDate = false,
     bool clearNotes = false,
     bool clearLentTo = false,
@@ -125,7 +129,9 @@ class Item {
       isAvailableForLending:
           isAvailableForLending ?? this.isAvailableForLending,
       visibility: visibility ?? this.visibility,
-      householdId: householdId ?? this.householdId,
+      householdId: clearHouseholdId ? null : (householdId ?? this.householdId),
+      sharedWithMemberUuids:
+          sharedWithMemberUuids ?? this.sharedWithMemberUuids,
       locationName: locationName ?? this.locationName,
       locationFullPath: locationFullPath ?? this.locationFullPath,
     );
@@ -156,6 +162,7 @@ class Item {
       'is_available_for_lending': isAvailableForLending ? 1 : 0,
       'visibility': visibility.value,
       'household_id': householdId,
+      'shared_with_member_uuids': jsonEncode(sharedWithMemberUuids),
     };
   }
 
@@ -202,6 +209,13 @@ class Item {
           ItemVisibility.fromString(map['visibility'] as String?),
       householdId:
           map['household_id'] as String? ?? map['householdId'] as String?,
+      sharedWithMemberUuids: List<String>.from(
+        jsonDecode(
+          map['shared_with_member_uuids'] as String? ??
+              map['sharedWithMemberUuids'] as String? ??
+              '[]',
+        ) as List,
+      ),
       // Joined fields from queries
       locationName: map['location_name'] as String?,
       locationFullPath: map['location_full_path'] as String?,
@@ -231,6 +245,7 @@ class Item {
       'isAvailableForLending': isAvailableForLending,
       'visibility': visibility.value,
       'householdId': householdId,
+      'sharedWithMemberUuids': sharedWithMemberUuids,
     };
   }
 
@@ -262,6 +277,9 @@ class Item {
       isAvailableForLending: json['isAvailableForLending'] as bool? ?? false,
       visibility: ItemVisibility.fromString(json['visibility'] as String?),
       householdId: json['householdId'] as String?,
+      sharedWithMemberUuids: List<String>.from(
+        json['sharedWithMemberUuids'] as List<dynamic>? ?? const <dynamic>[],
+      ),
     );
   }
 

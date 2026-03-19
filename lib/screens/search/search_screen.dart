@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +11,7 @@ import '../../providers/item_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
+import '../../widgets/adaptive_image.dart';
 
 enum _FilterType { all, recent, location, tags }
 
@@ -1347,10 +1346,10 @@ class _RichResultCard extends ConsumerWidget {
                 child: SizedBox(
                   width: AppDimensions.thumbnailLarge + 8,
                   height: AppDimensions.thumbnailLarge + 8,
-                  child: Image.file(
-                    File(item.imagePaths.first),
+                  child: AdaptiveImage(
+                    path: item.imagePaths.first,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
+                    errorBuilder: (_) =>
                         _ThumbnailPlaceholder(isDark: isDark),
                   ),
                 ),

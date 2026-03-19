@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/item.dart';
+import '../../domain/models/item_visibility.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
@@ -132,6 +133,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       lentOn: _isLentFlow ? _lentOnDate : null,
       expectedReturnDate: _isLentFlow ? _expectedReturnDate : null,
       lentReminderAfterDays: _isLentFlow ? _lentReminderAfterDays : null,
+      visibility: ItemVisibility.private_,
     );
 
     final failure =

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_dimensions.dart';
 
 /// Which main tab is currently active.
 enum AppNavTab { items, locations, search, settings }
@@ -18,16 +19,63 @@ class AppNavBar extends StatelessWidget {
 
   final AppNavTab activeTab;
 
+  static const double _topPadding = 10;
+  static const double _bottomPadding = 10;
+  static const double _itemVerticalPadding = 6;
+  static const double _iconSize = 27;
+  static const double _iconLabelGap = 5;
+  static const double _labelFontSize = 10.5;
+  static const double _fabSize = 72;
+  static const double _fabBottomOffset = 44;
+  static const double _contentBuffer = AppDimensions.spacingLg;
+
+  static double navBarHeight(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return bottomInset +
+        _topPadding +
+        _bottomPadding +
+        (_itemVerticalPadding * 2) +
+        _iconSize +
+        _iconLabelGap +
+        _labelFontSize +
+        16;
+  }
+
+  static double fabClearance(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final fabTop = bottomInset + _fabBottomOffset + _fabSize;
+    return fabTop + _contentBuffer;
+  }
+
+  static double contentBottomSpacing(
+    BuildContext context, {
+    bool includeFab = false,
+  }) {
+    final navClearance = navBarHeight(context) + _contentBuffer;
+    if (!includeFab) return navClearance;
+    final fabClearanceValue = fabClearance(context);
+    return fabClearanceValue > navClearance ? fabClearanceValue : navClearance;
+  }
+
+  static double fabBottom(BuildContext context) {
+    return MediaQuery.paddingOf(context).bottom + _fabBottomOffset;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ClipRRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
-          padding: EdgeInsets.fromLTRB(8, 10, 8, bottomInset + 10),
+          padding: EdgeInsets.fromLTRB(
+            AppDimensions.spacingSm,
+            _topPadding,
+            AppDimensions.spacingSm,
+            bottomInset + _bottomPadding,
+          ),
           decoration: BoxDecoration(
             color:
                 (isDark ? AppColors.backgroundDark : AppColors.backgroundLight)
@@ -54,8 +102,9 @@ class AppNavBar extends StatelessWidget {
                 icon: Icons.location_on,
                 active: activeTab == AppNavTab.locations,
                 onTap: () {
-                  if (activeTab != AppNavTab.locations)
+                  if (activeTab != AppNavTab.locations) {
                     context.go(AppRoutes.rooms);
+                  }
                 },
               ),
               _NavItem(
@@ -63,8 +112,9 @@ class AppNavBar extends StatelessWidget {
                 icon: Icons.search,
                 active: activeTab == AppNavTab.search,
                 onTap: () {
-                  if (activeTab != AppNavTab.search)
+                  if (activeTab != AppNavTab.search) {
                     context.push(AppRoutes.search);
+                  }
                 },
               ),
               _NavItem(
@@ -109,17 +159,19 @@ class _NavItem extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            vertical: AppNavBar._itemVerticalPadding,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 27),
-              const SizedBox(height: 5),
+              Icon(icon, color: color, size: AppNavBar._iconSize),
+              const SizedBox(height: AppNavBar._iconLabelGap),
               Text(
                 label,
                 style: TextStyle(
                   color: color,
-                  fontSize: 10.5,
+                  fontSize: AppNavBar._labelFontSize,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1,
                 ),

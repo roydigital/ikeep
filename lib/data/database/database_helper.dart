@@ -87,7 +87,8 @@ class DatabaseHelper {
         ${DbConstants.colItemLentReminderAfterDays} INTEGER,
         ${DbConstants.colItemIsAvailableForLending} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private',
-        ${DbConstants.colItemHouseholdId} TEXT
+        ${DbConstants.colItemHouseholdId} TEXT,
+        ${DbConstants.colItemSharedWithMemberUuids} TEXT NOT NULL DEFAULT '[]'
       )
     ''');
 
@@ -415,6 +416,15 @@ class DatabaseHelper {
           'CREATE INDEX IF NOT EXISTS idx_items_visibility_household ON ${DbConstants.tableItems}(${DbConstants.colItemVisibility}, ${DbConstants.colItemHouseholdId})');
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_history_household_item ON ${DbConstants.tableHistory}(${DbConstants.colHistHouseholdId}, ${DbConstants.colHistItemUuid})');
+    }
+
+    if (oldVersion < 9) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemSharedWithMemberUuids,
+        "TEXT NOT NULL DEFAULT '[]'",
+      );
     }
   }
 

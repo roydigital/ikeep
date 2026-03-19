@@ -2,22 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../domain/models/item_location_history.dart';
 import '../providers/history_providers.dart';
+import '../providers/household_providers.dart';
 import '../theme/app_colors.dart';
 
 class ItemActivityTimeline extends ConsumerWidget {
   const ItemActivityTimeline({
     super.key,
     required this.itemUuid,
+    this.showUserAttribution = false,
     this.title = 'Activity Timeline',
   });
 
   final String itemUuid;
+  final bool showUserAttribution;
   final String title;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final historyAsync = ref.watch(itemHistoryProvider(itemUuid));
+    final currentUserId = ref.watch(authStateProvider).valueOrNull?.uid;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
@@ -63,8 +68,10 @@ class ItemActivityTimeline extends ConsumerWidget {
                     _TimelineTile(
                       isLast: i == sorted.length - 1,
                       title: sorted[i].resolvedActionDescription,
-                      subtitle:
-                          '${sorted[i].movedByName ?? sorted[i].userEmail ?? 'Someone'} • ${DateFormat('dd MMM yyyy, h:mm a').format(sorted[i].movedAt)}',
+                      subtitle: _buildSubtitle(
+                        sorted[i],
+                        currentUserId: currentUserId,
+                      ),
                     ),
                 ],
               );
@@ -83,6 +90,26 @@ class ItemActivityTimeline extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  String _buildSubtitle(
+    ItemLocationHistory history, {
+    required String? currentUserId,
+  }) {
+    final formattedDate = DateFormat(
+      'dd MMM yyyy, h:mm a',
+    ).format(history.movedAt);
+
+    if (!showUserAttribution) {
+      return formattedDate;
+    }
+
+    final actorName =
+        history.userId != null && history.userId == currentUserId
+            ? 'You'
+            : history.userName ?? history.userEmail ?? 'Unknown';
+
+    return '$actorName • $formattedDate';
   }
 }
 

@@ -3,7 +3,7 @@ class DbConstants {
   DbConstants._();
 
   static const String dbName = 'ikeep.db';
-  static const int dbVersion = 8;
+  static const int dbVersion = 9;
 
   // households
   static const String tableHouseholds = 'households';
@@ -41,6 +41,7 @@ class DbConstants {
       'is_available_for_lending'; // 0 or 1
   static const String colItemVisibility = 'visibility'; // private|household
   static const String colItemHouseholdId = 'household_id';
+  static const String colItemSharedWithMemberUuids = 'shared_with_member_uuids';
 
   // ── locations ────────────────────────────────────────────────────────────────
   static const String tableLocations = 'locations';

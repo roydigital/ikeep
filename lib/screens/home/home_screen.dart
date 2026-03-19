@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,14 +8,15 @@ import '../../providers/item_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
+import '../../widgets/adaptive_image.dart';
+import '../../widgets/app_nav_bar.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     final user = ref.watch(authStateProvider).valueOrNull;
 
     return Scaffold(
@@ -26,7 +25,6 @@ class HomeScreen extends ConsumerWidget {
         children: [
           Positioned.fill(
             child: _MainContent(
-              bottomInset: bottomInset,
               profilePhotoUrl: user?.photoURL,
             ),
           ),
@@ -36,7 +34,7 @@ class HomeScreen extends ConsumerWidget {
             right: 0,
             child: _BottomNav(bottomInset: bottomInset),
           ),
-          _Fab(bottomInset: bottomInset),
+          const _Fab(),
         ],
       ),
     );
@@ -47,11 +45,9 @@ class HomeScreen extends ConsumerWidget {
 
 class _MainContent extends ConsumerWidget {
   const _MainContent({
-    required this.bottomInset,
     required this.profilePhotoUrl,
   });
 
-  final double bottomInset;
   final String? profilePhotoUrl;
 
   @override
@@ -90,7 +86,9 @@ class _MainContent extends ConsumerWidget {
         ),
         const Spacer(),
         _buildRecentlySaved(context, itemsAsync, isDark),
-        SizedBox(height: bottomInset + 72),
+        SizedBox(
+          height: AppNavBar.contentBottomSpacing(context, includeFab: true),
+        ),
       ],
     );
   }
@@ -396,8 +394,6 @@ class _MainContent extends ConsumerWidget {
 class _HouseholdCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -557,13 +553,14 @@ class _LentPulseSection extends ConsumerWidget {
                             ),
                             clipBehavior: Clip.antiAlias,
                             child: item.imagePaths.isNotEmpty
-                                ? Image.file(
-                                    File(item.imagePaths.first),
+                                ? AdaptiveImage(
+                                    path: item.imagePaths.first,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(
-                                        Icons.image_outlined,
-                                        color: AppColors.primary,
-                                        size: 18),
+                                    errorBuilder: (_) => const Icon(
+                                      Icons.image_outlined,
+                                      color: AppColors.primary,
+                                      size: 18,
+                                    ),
                                   )
                                 : const Icon(Icons.image_outlined,
                                     color: AppColors.primary, size: 18),
@@ -656,11 +653,11 @@ class _ItemCard extends StatelessWidget {
           children: [
             Expanded(
               child: item.imagePaths.isNotEmpty
-                  ? Image.file(
-                      File(item.imagePaths.first),
+                  ? AdaptiveImage(
+                      path: item.imagePaths.first,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const _Placeholder(),
+                      errorBuilder: (_) => const _Placeholder(),
                     )
                   : const _Placeholder(),
             ),
@@ -862,10 +859,10 @@ class _ForgottenItemCard extends StatelessWidget {
             SizedBox(
               width: 124,
               child: item.imagePaths.isNotEmpty
-                  ? Image.file(
-                      File(item.imagePaths.first),
+                  ? AdaptiveImage(
+                      path: item.imagePaths.first,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const _Placeholder(),
+                      errorBuilder: (_) => const _Placeholder(),
                     )
                   : const _Placeholder(),
             ),
@@ -929,15 +926,12 @@ class _ForgottenItemCard extends StatelessWidget {
 // ── Floating action button ─────────────────────────────────────────────────────
 
 class _Fab extends StatelessWidget {
-  const _Fab({required this.bottomInset});
-
-  final double bottomInset;
+  const _Fab();
 
   @override
   Widget build(BuildContext context) {
-    final fabBottom = bottomInset + 58.0 - 14.0;
     return Positioned(
-      bottom: fabBottom,
+      bottom: AppNavBar.fabBottom(context),
       left: 0,
       right: 0,
       child: Center(

@@ -17,14 +17,12 @@ class _HouseholdSettingsScreenState
     extends ConsumerState<HouseholdSettingsScreen> {
   final TextEditingController _householdNameController =
       TextEditingController();
-  final TextEditingController _memberUserIdController = TextEditingController();
   final TextEditingController _memberNameController = TextEditingController();
   final TextEditingController _memberEmailController = TextEditingController();
 
   @override
   void dispose() {
     _householdNameController.dispose();
-    _memberUserIdController.dispose();
     _memberNameController.dispose();
     _memberEmailController.dispose();
     super.dispose();
@@ -94,11 +92,11 @@ class _HouseholdSettingsScreenState
                       borderColor: border,
                       textPrimary: textPrimary,
                       textSecondary: textSecondary,
-                      userIdController: _memberUserIdController,
                       nameController: _memberNameController,
                       emailController: _memberEmailController,
-                      isLoading: actionState.isLoading,
+                      isSubmitting: actionState.isLoading,
                       onAdd: _addMember,
+                      onReset: _resetMemberLookupForm,
                     ),
                     const SizedBox(height: 18),
                     _MembersCard(
@@ -160,20 +158,23 @@ class _HouseholdSettingsScreenState
   }
 
   Future<void> _addMember() async {
-    final userId = _memberUserIdController.text.trim();
-    if (userId.isEmpty) {
-      _showSnackBar('Enter the family member user id.');
+    final lookupState = ref.read(householdMemberLookupProvider);
+    final userId = lookupState.foundUserId;
+    if (userId == null || userId.isEmpty) {
+      _showSnackBar('Search for a valid Ikeep account first.');
+      return;
+    }
+
+    final assignedDisplayName = _memberNameController.text.trim();
+    if (assignedDisplayName.isEmpty) {
+      _showSnackBar('Enter a relationship or display name.');
       return;
     }
 
     final error = await ref.read(householdNotifierProvider.notifier).addMember(
           userId: userId,
-          name: _memberNameController.text.trim().isEmpty
-              ? null
-              : _memberNameController.text.trim(),
-          email: _memberEmailController.text.trim().isEmpty
-              ? null
-              : _memberEmailController.text.trim(),
+          name: assignedDisplayName,
+          email: lookupState.foundUser?.email ?? lookupState.searchedEmail,
         );
     if (!mounted) return;
 
@@ -182,10 +183,16 @@ class _HouseholdSettingsScreenState
       return;
     }
 
-    _memberUserIdController.clear();
-    _memberNameController.clear();
-    _memberEmailController.clear();
+    _resetMemberLookupForm(clearEmail: true);
     _showSnackBar('Member added to household.');
+  }
+
+  void _resetMemberLookupForm({bool clearEmail = false}) {
+    ref.read(householdMemberLookupProvider.notifier).resetForm();
+    _memberNameController.clear();
+    if (clearEmail) {
+      _memberEmailController.clear();
+    }
   }
 
   void _showSnackBar(String message) {
@@ -410,31 +417,38 @@ class _HouseholdSummaryCard extends StatelessWidget {
   }
 }
 
-class _AddMemberCard extends StatelessWidget {
+class _AddMemberCard extends ConsumerWidget {
   const _AddMemberCard({
     required this.cardColor,
     required this.borderColor,
     required this.textPrimary,
     required this.textSecondary,
-    required this.userIdController,
     required this.nameController,
     required this.emailController,
-    required this.isLoading,
+    required this.isSubmitting,
     required this.onAdd,
+    required this.onReset,
   });
 
   final Color cardColor;
   final Color borderColor;
   final Color textPrimary;
   final Color textSecondary;
-  final TextEditingController userIdController;
   final TextEditingController nameController;
   final TextEditingController emailController;
-  final bool isLoading;
+  final bool isSubmitting;
   final Future<void> Function() onAdd;
+  final VoidCallback onReset;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lookupState = ref.watch(householdMemberLookupProvider);
+    final lookupController = ref.read(householdMemberLookupProvider.notifier);
+    final hasFoundUser = lookupState.hasFoundUser;
+    final hasError =
+        lookupState.errorMessage != null && lookupState.errorMessage!.isNotEmpty;
+    final canSearch = !lookupState.isLoading && !hasFoundUser && !isSubmitting;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -455,47 +469,177 @@ class _AddMemberCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Invite flow is mocked for now. Add a known user id directly.',
+            'Search for an existing Ikeep account by email, then assign how they should appear inside your household.',
             style: TextStyle(color: textSecondary),
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: userIdController,
-            decoration: const InputDecoration(
-              labelText: 'User ID',
-              hintText: 'firebase-user-uid',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Display name',
-              hintText: 'Optional',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
             controller: emailController,
+            readOnly: hasFoundUser,
+            enabled: !isSubmitting,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Email',
-              hintText: 'Optional',
+            textInputAction:
+                hasFoundUser ? TextInputAction.next : TextInputAction.search,
+            onChanged: (_) {
+              if (lookupState.searchedEmail.isNotEmpty) {
+                nameController.clear();
+                lookupController.resetForm();
+              }
+            },
+            onSubmitted: (_) {
+              if (canSearch && emailController.text.trim().isNotEmpty) {
+                lookupController.searchUser(emailController.text);
+              }
+            },
+            decoration: InputDecoration(
+              labelText: 'Email address',
+              hintText: 'family@example.com',
+              suffixIcon: hasFoundUser
+                  ? const Icon(Icons.verified_rounded, color: AppColors.success)
+                  : null,
             ),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: isLoading ? null : onAdd,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                minimumSize: const Size.fromHeight(52),
+          if (lookupState.isLoading)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: null,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                icon: const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                label: const Text('Verifying user...'),
               ),
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text('Add To Household'),
+            )
+          else if (!hasFoundUser)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed:
+                    canSearch ? () => lookupController.searchUser(emailController.text) : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                icon: const Icon(Icons.search_rounded),
+                label: const Text('Search User'),
+              ),
+            ),
+          if (hasError) ...[
+            const SizedBox(height: 12),
+            _LookupMessage(
+              icon: Icons.error_outline_rounded,
+              message: lookupState.errorMessage!,
+              color: AppColors.error,
+              textPrimary: textPrimary,
+            ),
+          ],
+          if (hasFoundUser) ...[
+            const SizedBox(height: 12),
+            _LookupMessage(
+              icon: Icons.check_circle_rounded,
+              message: lookupState.foundUser?.displayName?.trim().isNotEmpty == true
+                  ? 'User found: ${lookupState.foundUser!.displayName}'
+                  : 'User found!',
+              color: AppColors.success,
+              textPrimary: textPrimary,
+              trailing: TextButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () {
+                        onReset();
+                        emailController.clear();
+                      },
+                child: const Text('Search another'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameController,
+              enabled: !isSubmitting,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                if (!isSubmitting && nameController.text.trim().isNotEmpty) {
+                  onAdd();
+                }
+              },
+              decoration: const InputDecoration(
+                labelText: 'Display name',
+                hintText: 'Mom, Dad, Sister',
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isSubmitting ? null : onAdd,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                icon: isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.person_add_alt_1_rounded),
+                label: const Text('Add To Household'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LookupMessage extends StatelessWidget {
+  const _LookupMessage({
+    required this.icon,
+    required this.message,
+    required this.color,
+    required this.textPrimary,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String message;
+  final Color color;
+  final Color textPrimary;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.20)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
+          if (trailing != null) trailing!,
         ],
       ),
     );

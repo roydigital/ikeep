@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import '../data/database/item_dao.dart';
 import '../data/database/location_dao.dart';
 import '../domain/models/item.dart';
+import '../domain/models/item_visibility.dart';
 import '../domain/models/location_model.dart';
 import '../domain/models/sync_status.dart';
+import 'firebase_image_upload_service.dart';
 import 'sync_service.dart';
 
 class FirebaseSyncService implements SyncService {
@@ -15,15 +17,18 @@ class FirebaseSyncService implements SyncService {
     required FirebaseFirestore firestore,
     required ItemDao itemDao,
     required LocationDao locationDao,
+    required FirebaseImageUploadService imageUploadService,
   })  : _auth = auth,
         _firestore = firestore,
         _itemDao = itemDao,
-        _locationDao = locationDao;
+        _locationDao = locationDao,
+        _imageUploadService = imageUploadService;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final ItemDao _itemDao;
   final LocationDao _locationDao;
+  final FirebaseImageUploadService _imageUploadService;
 
   DateTime? _lastSyncedAt;
 
@@ -56,9 +61,15 @@ class FirebaseSyncService implements SyncService {
 
     try {
       final now = FieldValue.serverTimestamp();
+      final uploadedImageUrls = await _imageUploadService.uploadItemImages(
+        userId: user.uid,
+        itemUuid: item.uuid,
+        imagePaths: item.imagePaths,
+      );
+
       await _ensureUserDocument(user);
       await _itemsRef.doc(item.uuid).set({
-        ...item.toJson(),
+        ...item.copyWith(imagePaths: uploadedImageUrls).toJson(),
         'userId': user.uid,
         'updatedAt': _toIsoString(item.updatedAt ?? DateTime.now()),
         'createdAt': _toIsoString(item.savedAt),
@@ -102,6 +113,10 @@ class FirebaseSyncService implements SyncService {
     }
 
     try {
+      await _imageUploadService.deleteItemImages(
+        userId: _user!.uid,
+        itemUuid: uuid,
+      );
       await _itemsRef.doc(uuid).delete();
       _lastSyncedAt = DateTime.now();
       return SyncResult.success();
@@ -269,6 +284,11 @@ class FirebaseSyncService implements SyncService {
       expectedReturnDate: _parseDateTime(data['expectedReturnDate']),
       lentReminderAfterDays: data['lentReminderAfterDays'] as int?,
       isAvailableForLending: data['isAvailableForLending'] as bool? ?? false,
+      visibility: ItemVisibility.fromString(data['visibility'] as String?),
+      householdId: data['householdId'] as String?,
+      sharedWithMemberUuids: List<String>.from(
+        (data['sharedWithMemberUuids'] as List?) ?? const [],
+      ),
     );
   }
 
