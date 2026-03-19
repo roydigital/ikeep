@@ -10,6 +10,7 @@ class AppRoutes {
   static const String itemDetail = '/item/:uuid';
   static const String rooms = '/rooms';
   static const String settings = '/settings';
+  static const String manageFamily = '/settings/manage-family';
   static const String search = '/search';
 
   /// Constructs the [itemDetail] path with the given [uuid].

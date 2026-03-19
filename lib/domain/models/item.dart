@@ -25,6 +25,7 @@ class Item {
     this.lentReminderAfterDays,
     this.isAvailableForLending = false,
     this.visibility = ItemVisibility.private_,
+    this.householdId,
     // Denormalized for display — populated by joins
     this.locationName,
     this.locationFullPath,
@@ -51,6 +52,7 @@ class Item {
   final int? lentReminderAfterDays;
   final bool isAvailableForLending;
   final ItemVisibility visibility;
+  final String? householdId;
 
   /// Social sharing is currently disabled in the app.
   bool get isShared => false;
@@ -84,6 +86,7 @@ class Item {
     int? lentReminderAfterDays,
     bool? isAvailableForLending,
     ItemVisibility? visibility,
+    String? householdId,
     String? locationName,
     String? locationFullPath,
     bool clearLocationUuid = false,
@@ -122,6 +125,7 @@ class Item {
       isAvailableForLending:
           isAvailableForLending ?? this.isAvailableForLending,
       visibility: visibility ?? this.visibility,
+      householdId: householdId ?? this.householdId,
       locationName: locationName ?? this.locationName,
       locationFullPath: locationFullPath ?? this.locationFullPath,
     );
@@ -151,6 +155,7 @@ class Item {
       'lent_reminder_after_days': lentReminderAfterDays,
       'is_available_for_lending': isAvailableForLending ? 1 : 0,
       'visibility': visibility.value,
+      'household_id': householdId,
     };
   }
 
@@ -195,6 +200,8 @@ class Item {
           (map['is_available_for_lending'] as int? ?? 0) == 1,
       visibility:
           ItemVisibility.fromString(map['visibility'] as String?),
+      householdId:
+          map['household_id'] as String? ?? map['householdId'] as String?,
       // Joined fields from queries
       locationName: map['location_name'] as String?,
       locationFullPath: map['location_full_path'] as String?,
@@ -223,7 +230,47 @@ class Item {
       'lentReminderAfterDays': lentReminderAfterDays,
       'isAvailableForLending': isAvailableForLending,
       'visibility': visibility.value,
+      'householdId': householdId,
     };
+  }
+
+  factory Item.fromJson(Map<String, dynamic> json) {
+    return Item(
+      uuid: json['uuid'] as String,
+      name: json['name'] as String,
+      locationUuid: json['locationUuid'] as String?,
+      imagePaths: List<String>.from(
+        json['imagePaths'] as List<dynamic>? ?? const <dynamic>[],
+      ),
+      tags: List<String>.from(
+        json['tags'] as List<dynamic>? ?? const <dynamic>[],
+      ),
+      savedAt: DateTime.parse(json['savedAt'] as String),
+      updatedAt: _dateTimeFromJson(json['updatedAt']),
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      expiryDate: _dateTimeFromJson(json['expiryDate']),
+      isArchived: json['isArchived'] as bool? ?? false,
+      notes: json['notes'] as String?,
+      cloudId: json['cloudId'] as String?,
+      lastSyncedAt: _dateTimeFromJson(json['lastSyncedAt']),
+      isLent: json['isLent'] as bool? ?? false,
+      lentTo: json['lentTo'] as String?,
+      lentOn: _dateTimeFromJson(json['lentOn']),
+      expectedReturnDate: _dateTimeFromJson(json['expectedReturnDate']),
+      lentReminderAfterDays: json['lentReminderAfterDays'] as int?,
+      isAvailableForLending: json['isAvailableForLending'] as bool? ?? false,
+      visibility: ItemVisibility.fromString(json['visibility'] as String?),
+      householdId: json['householdId'] as String?,
+    );
+  }
+
+  static DateTime? _dateTimeFromJson(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    return null;
   }
 
   @override

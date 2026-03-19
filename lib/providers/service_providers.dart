@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 import 'database_provider.dart';
 import '../services/firebase_sync_service.dart';
 import '../services/household_cloud_service.dart';
+import '../services/household_sync_service.dart';
 import '../services/image_service.dart';
 import '../services/location_service.dart';
 import '../services/ml_label_service.dart';
@@ -46,6 +48,23 @@ final householdCloudServiceProvider = Provider<HouseholdCloudService>(
     auth: ref.watch(firebaseAuthProvider),
     firestore: ref.watch(firebaseFirestoreProvider),
   ),
+);
+
+final householdSyncServiceProvider = Provider<HouseholdSyncService>(
+  (ref) {
+    final service = HouseholdSyncService(
+      auth: ref.watch(firebaseAuthProvider),
+      firestore: ref.watch(firebaseFirestoreProvider),
+      itemDao: ref.watch(itemDaoProvider),
+      historyDao: ref.watch(historyDaoProvider),
+      pendingSyncDao: ref.watch(pendingSyncDaoProvider),
+      householdCloudService: ref.watch(householdCloudServiceProvider),
+    );
+    ref.onDispose(() {
+      unawaited(service.dispose());
+    });
+    return service;
+  },
 );
 
 final notificationServiceProvider = Provider<NotificationService>(

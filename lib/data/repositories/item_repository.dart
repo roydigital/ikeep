@@ -1,8 +1,8 @@
 import '../../core/errors/failure.dart';
 import '../../domain/models/item.dart';
 
-/// Abstract contract for item persistence. Concrete impl coordinates local DB,
-/// sync, notification scheduling, and history recording.
+/// Abstract contract for item persistence. Concrete impl coordinates SQLite as
+/// the source of truth, optional household cloud mirroring, and history writes.
 abstract class ItemRepository {
   /// Saves a brand new item. Also records the initial location in history.
   Future<Failure?> saveItem(
@@ -30,6 +30,8 @@ abstract class ItemRepository {
   Future<List<Item>> getAllItems();
 
   Future<List<Item>> getItemsByLocation(String locationUuid);
+
+  Future<List<Item>> getSharedItems({String? householdId});
 
   Future<List<Item>> searchItems(String query);
 

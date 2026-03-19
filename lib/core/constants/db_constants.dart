@@ -3,7 +3,16 @@ class DbConstants {
   DbConstants._();
 
   static const String dbName = 'ikeep.db';
-  static const int dbVersion = 7;
+  static const int dbVersion = 8;
+
+  // households
+  static const String tableHouseholds = 'households';
+  static const String colHouseholdId = 'household_id';
+  static const String colHouseholdOwnerId = 'owner_id';
+  static const String colHouseholdName = 'name';
+  static const String colHouseholdMemberIds = 'member_ids';
+  static const String colHouseholdCreatedAt = 'created_at';
+  static const String colHouseholdUpdatedAt = 'updated_at';
 
   // ── items ────────────────────────────────────────────────────────────────────
   static const String tableItems = 'items';
@@ -30,7 +39,8 @@ class DbConstants {
   static const String colItemLentReminderAfterDays = 'lent_reminder_after_days';
   static const String colItemIsAvailableForLending =
       'is_available_for_lending'; // 0 or 1
-  static const String colItemVisibility = 'visibility'; // private|household|nearby
+  static const String colItemVisibility = 'visibility'; // private|household
+  static const String colItemHouseholdId = 'household_id';
 
   // ── locations ────────────────────────────────────────────────────────────────
   static const String tableLocations = 'locations';
@@ -54,6 +64,9 @@ class DbConstants {
   static const String colHistNote = 'note';
   static const String colHistMovedByMemberUuid = 'moved_by_member_uuid';
   static const String colHistMovedByName = 'moved_by_name';
+  static const String colHistHouseholdId = 'household_id';
+  static const String colHistUserEmail = 'user_email';
+  static const String colHistActionDescription = 'action_description';
 
   // ── household_members ───────────────────────────────────────────────────────
   static const String tableHouseholdMembers = 'household_members';
@@ -62,6 +75,9 @@ class DbConstants {
   static const String colMemberName = 'name';
   static const String colMemberInvitedAt = 'invited_at'; // Unix ms
   static const String colMemberIsOwner = 'is_owner'; // 0 or 1
+  static const String colMemberEmail = 'email';
+  static const String colMemberHouseholdUuid = 'household_uuid';
+  static const String colMemberJoinedAt = 'joined_at'; // Unix ms
 
   // ── borrow_requests ─────────────────────────────────────────────────────────
   static const String tableBorrowRequests = 'borrow_requests';

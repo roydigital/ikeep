@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../domain/models/household.dart';
 import '../domain/models/household_member.dart';
 import '../domain/models/item.dart';
+import '../domain/models/item_location_history.dart';
 import '../domain/models/shared_item.dart';
 
 /// Manages all Firestore operations for household sharing:
@@ -24,9 +26,124 @@ class HouseholdCloudService {
   static const _membersSubcol = 'members';
   static const _invitesCol = 'household_invites';
   static const _sharedItemsSubcol = 'shared_items';
+  static const _historySubcol = 'history';
   static const _borrowRequestsSubcol = 'borrow_requests';
 
   User? get currentUser => _auth.currentUser;
+
+  Future<Household> createHousehold({required String name}) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('Please sign in to create a household');
+    }
+
+    final householdRef = _firestore.collection(_householdsCol).doc();
+    final now = FieldValue.serverTimestamp();
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw StateError('Household name is required');
+    }
+
+    final existingHouseholdId = await getUserHouseholdId();
+    if (existingHouseholdId != null && existingHouseholdId.isNotEmpty) {
+      await _firestore.collection(_householdsCol).doc(existingHouseholdId).set({
+        'name': normalizedName,
+        'updatedAt': now,
+      }, SetOptions(merge: true));
+
+      final existing = await fetchHousehold(existingHouseholdId);
+      if (existing != null) {
+        return existing.copyWith(name: normalizedName);
+      }
+    }
+
+    await householdRef.set({
+      'householdId': householdRef.id,
+      'ownerId': user.uid,
+      'ownerUid': user.uid,
+      'ownerEmail': user.email,
+      'name': normalizedName,
+      'members': <String>[user.uid],
+      'createdAt': now,
+      'updatedAt': now,
+    });
+
+    await _firestore.collection(_usersCol).doc(user.uid).set({
+      'uid': user.uid,
+      'email': user.email,
+      'displayName': _displayName(user),
+      'householdId': householdRef.id,
+      'isOwner': true,
+      'updatedAt': now,
+    }, SetOptions(merge: true));
+
+    await _upsertMember(
+      householdId: householdRef.id,
+      uid: user.uid,
+      email: user.email,
+      name: _displayName(user),
+      isOwner: true,
+    );
+
+    return Household(
+      householdId: householdRef.id,
+      ownerId: user.uid,
+      name: normalizedName,
+      memberIds: [user.uid],
+    );
+  }
+
+  Future<Household?> fetchHousehold(String householdId) async {
+    final snapshot =
+        await _firestore.collection(_householdsCol).doc(householdId).get();
+    if (!snapshot.exists) return null;
+
+    final data = snapshot.data()!;
+    return Household(
+      householdId: snapshot.id,
+      ownerId: data['ownerId'] as String? ?? data['ownerUid'] as String? ?? '',
+      name: data['name'] as String? ?? 'Household',
+      memberIds: List<String>.from(data['members'] as List? ?? const []),
+      createdAt: _timestampToDateTime(data['createdAt']),
+      updatedAt: _timestampToDateTime(data['updatedAt']),
+    );
+  }
+
+  Future<void> addMemberByUserId({
+    required String householdId,
+    required String userId,
+    String? email,
+    String? name,
+  }) async {
+    final memberName = (name?.trim().isNotEmpty ?? false)
+        ? name!.trim()
+        : (email?.trim().isNotEmpty ?? false)
+            ? email!.trim()
+            : 'Member';
+
+    await _upsertMember(
+      householdId: householdId,
+      uid: userId,
+      email: email,
+      name: memberName,
+      isOwner: false,
+    );
+
+    await _firestore.collection(_householdsCol).doc(householdId).set({
+      'householdId': householdId,
+      'members': FieldValue.arrayUnion([userId]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _firestore.collection(_usersCol).doc(userId).set({
+      'uid': userId,
+      'email': email?.trim().toLowerCase(),
+      'displayName': memberName,
+      'householdId': householdId,
+      'isOwner': false,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
 
   // ── Household management ────────────────────────────────────────────────
 
@@ -61,9 +178,12 @@ class HouseholdCloudService {
       final householdRef = _firestore.collection(_householdsCol).doc();
       final now = FieldValue.serverTimestamp();
       await householdRef.set({
+        'householdId': householdRef.id,
+        'ownerId': user.uid,
         'ownerUid': user.uid,
         'ownerEmail': user.email,
         'name': '${_displayName(user)}\'s household',
+        'members': <String>[user.uid],
         'createdAt': now,
         'updatedAt': now,
       });
@@ -200,6 +320,9 @@ class HouseholdCloudService {
             : ((d['email'] as String?) ?? 'Member'),
         invitedAt: invitedAt,
         isOwner: (d['isOwner'] as bool?) ?? false,
+        email: d['email'] as String?,
+        householdId: householdId,
+        joinedAt: joinedAt is Timestamp ? joinedAt.toDate() : null,
       );
     }).toList();
   }
@@ -221,17 +344,23 @@ class HouseholdCloudService {
         .collection(_sharedItemsSubcol)
         .doc(item.uuid)
         .set({
+      ...item.toJson(),
       'ownerUid': user.uid,
       'ownerName': _displayName(user),
+      'householdId': householdId,
+      'visibility': item.visibility.value,
       'name': item.name,
+      'locationUuid': item.locationUuid,
       'locationName': item.locationName ?? item.locationFullPath ?? '',
       'tags': item.tags,
       'isLent': item.isLent,
       'lentToName': item.lentTo,
       'lentToUid': null,
+      'savedAt': item.savedAt.toIso8601String(),
       'expectedReturnDate': item.expectedReturnDate != null
           ? Timestamp.fromDate(item.expectedReturnDate!)
           : null,
+      'createdAt': item.savedAt.toIso8601String(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -262,6 +391,61 @@ class HouseholdCloudService {
         .get();
 
     return snapshot.docs.map((doc) => SharedItem.fromFirestore(doc)).toList();
+  }
+
+  Future<void> syncItemHistory({
+    required String householdId,
+    required ItemLocationHistory history,
+  }) async {
+    await _firestore
+        .collection(_householdsCol)
+        .doc(householdId)
+        .collection(_sharedItemsSubcol)
+        .doc(history.itemUuid)
+        .collection(_historySubcol)
+        .doc(history.uuid)
+        .set({
+      'historyId': history.historyId,
+      'itemId': history.itemId,
+      'userId': history.userId,
+      'userName': history.userName,
+      'userEmail': history.userEmail,
+      'locationUuid': history.locationUuid,
+      'locationName': history.locationName,
+      'timestamp': Timestamp.fromDate(history.timestamp),
+      'actionDescription': history.resolvedActionDescription,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<List<ItemLocationHistory>> fetchItemHistory({
+    required String householdId,
+    required String itemUuid,
+  }) async {
+    final snapshot = await _firestore
+        .collection(_householdsCol)
+        .doc(householdId)
+        .collection(_sharedItemsSubcol)
+        .doc(itemUuid)
+        .collection(_historySubcol)
+        .orderBy('timestamp')
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return ItemLocationHistory(
+        uuid: doc.id,
+        itemUuid: data['itemId'] as String? ?? itemUuid,
+        locationUuid: data['locationUuid'] as String?,
+        locationName: data['locationName'] as String? ?? 'Unknown',
+        movedAt: _timestampToDateTime(data['timestamp']) ?? DateTime.now(),
+        movedByMemberUuid: data['userId'] as String?,
+        movedByName: data['userName'] as String?,
+        userEmail: data['userEmail'] as String?,
+        householdId: householdId,
+        actionDescription: data['actionDescription'] as String?,
+      );
+    }).toList();
   }
 
   /// Fetches shared items from OTHER members only (excludes current user's).
@@ -620,5 +804,11 @@ class HouseholdCloudService {
     final email = user.email?.trim();
     if (email != null && email.isNotEmpty) return email.split('@').first;
     return 'You';
+  }
+
+  DateTime? _timestampToDateTime(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
   }
 }

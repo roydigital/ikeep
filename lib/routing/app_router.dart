@@ -7,6 +7,7 @@ import '../screens/onboarding/onboarding_screen.dart';
 import '../screens/rooms/rooms_screen.dart';
 import '../screens/save/save_screen.dart';
 import '../screens/search/search_screen.dart';
+import '../screens/settings/household_settings_screen.dart';
 import '../screens/settings/settings_screen.dart';
 import '../providers/settings_provider.dart';
 import 'app_routes.dart';
@@ -58,6 +59,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.settings,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.manageFamily,
+        builder: (context, state) => const HouseholdSettingsScreen(),
       ),
       GoRoute(
         path: AppRoutes.search,

@@ -18,6 +18,7 @@ final itemRepositoryProvider = Provider<ItemRepository>(
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
     historyDao: ref.watch(historyDaoProvider),
+    householdCloudService: ref.watch(householdCloudServiceProvider),
   ),
 );
 
@@ -30,6 +31,7 @@ final locationRepositoryProvider = Provider<LocationRepository>(
 final historyRepositoryProvider = Provider<HistoryRepository>(
   (ref) => HistoryRepositoryImpl(
     historyDao: ref.watch(historyDaoProvider),
+    householdCloudService: ref.watch(householdCloudServiceProvider),
   ),
 );
 
@@ -43,6 +45,7 @@ final borrowRequestRepositoryProvider = Provider<BorrowRequestRepository>(
 
 final householdRepositoryProvider = Provider<HouseholdRepository>(
   (ref) => HouseholdRepositoryImpl(
+    householdDao: ref.watch(householdDaoProvider),
     memberDao: ref.watch(householdMemberDaoProvider),
     cloudService: ref.watch(householdCloudServiceProvider),
   ),

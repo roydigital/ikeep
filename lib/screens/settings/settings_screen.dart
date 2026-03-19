@@ -444,6 +444,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         _SectionLabel('SUPPORT'),
                         const SizedBox(height: 14),
                         _SupportCard(
+                          onManageFamily: () =>
+                              context.push(AppRoutes.manageFamily),
                           onHelp: () => _showInfo('Help Center coming soon'),
                           onContact: () =>
                               _showInfo('Contact: support@ikeep.app'),
@@ -1156,11 +1158,13 @@ class _DataBackupCard extends StatelessWidget {
 
 class _SupportCard extends StatelessWidget {
   const _SupportCard({
+    required this.onManageFamily,
     required this.onHelp,
     required this.onContact,
     required this.onTerms,
   });
 
+  final VoidCallback onManageFamily;
   final VoidCallback onHelp;
   final VoidCallback onContact;
   final VoidCallback onTerms;
@@ -1175,6 +1179,13 @@ class _SupportCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          _ActionRow(
+            icon: Icons.groups_rounded,
+            title: 'Manage Family',
+            trailing: Icons.chevron_right,
+            onTap: onManageFamily,
+          ),
+          Divider(height: 1, color: _kBorder),
           _ActionRow(
             icon: Icons.help_outline,
             title: 'Help Center',

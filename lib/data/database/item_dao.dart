@@ -82,6 +82,33 @@ class ItemDao {
     return rows.map(Item.fromMap).toList();
   }
 
+  Future<List<Item>> getSharedItems({String? householdId}) async {
+    final db = await _db;
+    final whereClause = householdId == null || householdId.isEmpty
+        ? '''
+      WHERE i.${DbConstants.colItemIsArchived} = 0
+        AND i.${DbConstants.colItemVisibility} = 'household'
+    '''
+        : '''
+      WHERE i.${DbConstants.colItemIsArchived} = 0
+        AND i.${DbConstants.colItemVisibility} = 'household'
+        AND i.${DbConstants.colItemHouseholdId} = ?
+    ''';
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
+      FROM ${DbConstants.tableItems} i
+      LEFT JOIN ${DbConstants.tableLocations} l
+        ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
+      $whereClause
+      ORDER BY COALESCE(i.${DbConstants.colItemUpdatedAt}, i.${DbConstants.colItemSavedAt}) DESC
+    ''',
+      householdId == null || householdId.isEmpty ? null : [householdId],
+    );
+    return rows.map(Item.fromMap).toList();
+  }
+
   Future<List<Item>> getItemsByLocation(String locationUuid) async {
     final db = await _db;
     final rows = await db.rawQuery('''

@@ -53,6 +53,7 @@ class HouseholdMemberDao {
         DbConstants.colMemberName: 'You',
         DbConstants.colMemberInvitedAt: DateTime.now().millisecondsSinceEpoch,
         DbConstants.colMemberIsOwner: 1,
+        DbConstants.colMemberJoinedAt: DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );

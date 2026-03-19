@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/item.dart';
+import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
@@ -551,8 +552,7 @@ class _LentPulseSection extends ConsumerWidget {
                             width: 36,
                             height: 36,
                             decoration: BoxDecoration(
-                              color:
-                                  AppColors.primary.withValues(alpha: 0.15),
+                              color: AppColors.primary.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             clipBehavior: Clip.antiAlias,
@@ -1073,4 +1073,3 @@ class _NavItem extends StatelessWidget {
     );
   }
 }
-

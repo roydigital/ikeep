@@ -17,6 +17,8 @@ import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../../widgets/item_activity_timeline.dart';
+import '../../widgets/item_visibility_toggle.dart';
 
 class ItemDetailScreen extends ConsumerStatefulWidget {
   const ItemDetailScreen({super.key, required this.uuid});
@@ -108,8 +110,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                   borderRadius: BorderRadius.circular(20),
                                   child: AspectRatio(
                                     aspectRatio: 1,
-                                    child: _img(
-                                        selected!, BoxFit.cover, isDark),
+                                    child:
+                                        _img(selected!, BoxFit.cover, isDark),
                                   ),
                                 ),
                               ),
@@ -173,6 +175,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                               textPrimary,
                             ),
 
+                            const SizedBox(height: 18),
+                            ItemVisibilityToggle(item: item),
+
                             if (item.tags.isNotEmpty) ...[
                               const SizedBox(height: 18),
                               Wrap(
@@ -185,16 +190,14 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                           decoration: BoxDecoration(
                                             color: isDark
                                                 ? AppColors.surfaceVariantDark
-                                                : AppColors
-                                                    .surfaceVariantLight,
+                                                : AppColors.surfaceVariantLight,
                                             borderRadius:
                                                 BorderRadius.circular(999),
                                           ),
                                           child: Text('#$t',
                                               style: const TextStyle(
                                                   color: AppColors.primary,
-                                                  fontWeight:
-                                                      FontWeight.w600)),
+                                                  fontWeight: FontWeight.w600)),
                                         ))
                                     .toList(),
                               ),
@@ -202,13 +205,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
                             const SizedBox(height: 24),
                             historyAsync.when(
-                              data: (h) => _meta(
-                                  context,
-                                  isDark,
-                                  item.savedAt,
-                                  h.isEmpty
-                                      ? item.updatedAt
-                                      : h.first.movedAt),
+                              data: (h) => _meta(context, isDark, item.savedAt,
+                                  h.isEmpty ? item.updatedAt : h.first.movedAt),
                               loading: () => _meta(context, isDark,
                                   item.savedAt, item.updatedAt),
                               error: (_, __) => _meta(context, isDark,
@@ -243,54 +241,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                             const SizedBox(height: 44),
 
                             // ── History ───────────────────────────────
-                            Text('Location History',
-                                style: TextStyle(
-                                    color: textPrimary,
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 20),
-                            historyAsync.when(
-                              loading: () => const Center(
-                                  child: CircularProgressIndicator(
-                                      color: AppColors.primary)),
-                              error: (_, __) => Text(
-                                  'Could not load history',
-                                  style: TextStyle(
-                                      color: isDark
-                                          ? AppColors.textSecondaryDark
-                                          : AppColors
-                                              .textSecondaryLight)),
-                              data: (h) {
-                                if (h.isEmpty) {
-                                  return Text(
-                                      'No movement history yet.',
-                                      style: TextStyle(
-                                          color: isDark
-                                              ? AppColors.textSecondaryDark
-                                              : AppColors
-                                                  .textSecondaryLight));
-                                }
-                                return Column(
-                                  children:
-                                      List.generate(h.length, (i) {
-                                    final e = h[i];
-                                    final first = i == 0;
-                                    final actor =
-                                        (e.movedByName?.trim().isNotEmpty ??
-                                                false)
-                                            ? e.movedByName!
-                                            : 'You';
-                                    return _HistoryRow(
-                                      title: e.locationName,
-                                      subtitle: first
-                                          ? '$actor moved it ${_ago(e.movedAt)}'
-                                          : '$actor \u2022 ${DateFormat('MMMM dd, yyyy').format(e.movedAt)}',
-                                      first: first,
-                                      tail: i != h.length - 1,
-                                    );
-                                  }),
-                                );
-                              },
+                            ItemActivityTimeline(
+                              itemUuid: item.uuid,
+                              title: 'Location History',
                             ),
                           ]),
                     ),
@@ -393,8 +346,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
               icon: const Icon(Icons.outbox, size: 18),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
-                side: BorderSide(
-                    color: AppColors.primary.withValues(alpha: 0.5)),
+                side:
+                    BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -418,8 +371,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -428,7 +380,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           top: false,
           child: Padding(
             padding: EdgeInsets.fromLTRB(
-              20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 18),
+                20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 18),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -479,11 +431,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                   onPressed: () async {
                     final picked = await showDatePicker(
                       context: ctx,
-                      initialDate: DateTime.now().add(
-                          const Duration(days: 7)),
+                      initialDate: DateTime.now().add(const Duration(days: 7)),
                       firstDate: DateTime.now(),
-                      lastDate: DateTime.now()
-                          .add(const Duration(days: 365)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
                     if (picked != null) {
                       setSheet(() => expectedReturn = picked);
@@ -525,7 +475,6 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
 
     final lentTo = lentToController.text.trim();
-    lentToController.dispose();
     if (confirmed != true || lentTo.isEmpty) return;
 
     final updated = item.copyWith(
@@ -591,7 +540,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       clearExpectedReturnDate: true,
       clearLentReminderAfterDays: true,
     );
-    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -685,8 +635,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => StatefulBuilder(
@@ -726,26 +675,22 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: locations.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 8),
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
                         final l = locations[i];
                         final active = l.uuid == selected;
                         return InkWell(
-                          onTap: () =>
-                              setInner(() => selected = l.uuid),
+                          onTap: () => setInner(() => selected = l.uuid),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
                               color: active
-                                  ? AppColors.primary
-                                      .withValues(alpha: 0.2)
+                                  ? AppColors.primary.withValues(alpha: 0.2)
                                   : (isDark
                                       ? AppColors.surfaceVariantDark
                                       : AppColors.surfaceVariantLight),
-                              borderRadius:
-                                  BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(14),
                               border: Border.all(
                                   color: active
                                       ? AppColors.primary
@@ -756,31 +701,22 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                   color: active
                                       ? AppColors.primary
                                       : (isDark
-                                          ? AppColors
-                                              .textSecondaryDark
-                                          : AppColors
-                                              .textSecondaryLight)),
+                                          ? AppColors.textSecondaryDark
+                                          : AppColors.textSecondaryLight)),
                               const SizedBox(width: 10),
                               Expanded(
                                   child: Text(
-                                      (l.fullPath
-                                                  ?.trim()
-                                                  .isNotEmpty ??
-                                              false)
+                                      (l.fullPath?.trim().isNotEmpty ?? false)
                                           ? l.fullPath!
                                           : l.name,
                                       maxLines: 1,
-                                      overflow:
-                                          TextOverflow.ellipsis,
+                                      overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                           color: isDark
-                                              ? AppColors
-                                                  .textPrimaryDark
-                                              : AppColors
-                                                  .textPrimaryLight))),
+                                              ? AppColors.textPrimaryDark
+                                              : AppColors.textPrimaryLight))),
                               if (active)
-                                const Icon(
-                                    Icons.check_circle,
+                                const Icon(Icons.check_circle,
                                     color: AppColors.primary),
                             ]),
                           ),
@@ -799,11 +735,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                           : AppColors.textPrimaryLight,
                     ),
                     decoration: InputDecoration(
-                      prefixIcon: const Icon(
-                          Icons.add_location_alt,
+                      prefixIcon: const Icon(Icons.add_location_alt,
                           color: AppColors.primary),
-                      hintText:
-                          'Add new location (e.g. Kitchen Drawer)',
+                      hintText: 'Add new location (e.g. Kitchen Drawer)',
                       hintStyle: TextStyle(
                         color: isDark
                             ? AppColors.textSecondaryDark
@@ -816,22 +750,18 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                         borderSide: BorderSide(
-                          color: AppColors.primary
-                              .withValues(alpha: 0.35),
+                          color: AppColors.primary.withValues(alpha: 0.35),
                         ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                         borderSide: BorderSide(
-                          color: AppColors.primary
-                              .withValues(alpha: 0.25),
+                          color: AppColors.primary.withValues(alpha: 0.25),
                         ),
                       ),
                       focusedBorder: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(
-                            Radius.circular(14)),
-                        borderSide: BorderSide(
-                            color: AppColors.primary),
+                        borderRadius: BorderRadius.all(Radius.circular(14)),
+                        borderSide: BorderSide(color: AppColors.primary),
                       ),
                     ),
                   ),
@@ -841,12 +771,10 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                     child: FilledButton(
                       onPressed: selected == null
                           ? null
-                          : () =>
-                              Navigator.of(ctx).pop(selected),
+                          : () => Navigator.of(ctx).pop(selected),
                       style: FilledButton.styleFrom(
                           backgroundColor: AppColors.primary,
-                          minimumSize:
-                              const Size.fromHeight(50)),
+                          minimumSize: const Size.fromHeight(50)),
                       child: const Text('Save Location'),
                     ),
                   ),
@@ -857,8 +785,6 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         ),
       ),
     );
-
-    newLocationController.dispose();
 
     if (result == null || result == item.locationUuid) return;
     final error = await ref
@@ -900,8 +826,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
     return showModalBottomSheet<ImageSourceOption>(
       context: context,
-      backgroundColor:
-          isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1013,8 +938,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         child: Stack(children: [
           InteractiveViewer(
               child: AspectRatio(
-                  aspectRatio: 1,
-                  child: _img(path, BoxFit.contain, isDark))),
+                  aspectRatio: 1, child: _img(path, BoxFit.contain, isDark))),
           Positioned(
               top: 8,
               right: 8,
@@ -1071,11 +995,10 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
           color: AppColors.primary.withValues(alpha: 0.12),
-          border: Border.all(
-              color: AppColors.primary.withValues(alpha: 0.3)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
         ),
-        child: const Icon(Icons.add_a_photo,
-            color: AppColors.primary, size: 24),
+        child:
+            const Icon(Icons.add_a_photo, color: AppColors.primary, size: 24),
       ),
     );
   }
@@ -1098,15 +1021,12 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(
-              color: AppColors.primary.withValues(alpha: 0.15)),
-          bottom: BorderSide(
-              color: AppColors.primary.withValues(alpha: 0.15)),
+          top: BorderSide(color: AppColors.primary.withValues(alpha: 0.15)),
+          bottom: BorderSide(color: AppColors.primary.withValues(alpha: 0.15)),
         ),
       ),
       child: Row(children: [
-        Expanded(
-            child: _metaCell(isDark, 'SAVED', _ago(savedAt), textPrimary)),
+        Expanded(child: _metaCell(isDark, 'SAVED', _ago(savedAt), textPrimary)),
         Container(
             width: 1,
             height: 52,
@@ -1120,8 +1040,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  Widget _metaCell(
-      bool isDark, String title, String value, Color textPrimary) {
+  Widget _metaCell(bool isDark, String title, String value, Color textPrimary) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(title,
           style: TextStyle(
@@ -1133,9 +1052,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       const SizedBox(height: 4),
       Text(value,
           style: TextStyle(
-              color: textPrimary,
-              fontSize: 19.5,
-              fontWeight: FontWeight.w600)),
+              color: textPrimary, fontSize: 19.5, fontWeight: FontWeight.w600)),
     ]);
   }
 
@@ -1187,8 +1104,7 @@ class _BorrowRequestTile extends StatelessWidget {
         children: [
           Text(
             request.requesterName,
-            style:
-                TextStyle(color: textPrimary, fontWeight: FontWeight.w700),
+            style: TextStyle(color: textPrimary, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(returnText,
@@ -1197,8 +1113,8 @@ class _BorrowRequestTile extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               '"${request.note!.trim()}"',
-              style: TextStyle(
-                  color: textSecondary, fontSize: 12, height: 1.35),
+              style:
+                  TextStyle(color: textSecondary, fontSize: 12, height: 1.35),
             ),
           ],
           const SizedBox(height: 10),
@@ -1256,16 +1172,12 @@ class _Action extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: filled
               ? null
-              : Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3)),
+              : Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
         ),
         child: Column(
           children: [
             Icon(icon,
-                color: filled
-                    ? Colors.white
-                    : AppColors.primary,
-                size: 26),
+                color: filled ? Colors.white : AppColors.primary, size: 26),
             const SizedBox(height: 8),
             Text(
               label,
@@ -1409,4 +1321,3 @@ class _DetailFab extends StatelessWidget {
     );
   }
 }
-

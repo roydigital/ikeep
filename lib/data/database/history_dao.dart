@@ -21,6 +21,15 @@ class HistoryDao {
     );
   }
 
+  Future<void> upsertHistory(ItemLocationHistory entry) async {
+    final db = await _db;
+    await db.insert(
+      DbConstants.tableHistory,
+      entry.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
   Future<List<ItemLocationHistory>> getHistoryForItem(String itemUuid) async {
     final db = await _db;
     final rows = await db.query(

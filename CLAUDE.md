@@ -71,6 +71,7 @@ lib/
 │       ├── location_model.dart   # LocationModel (hierarchical)
 │       ├── item_location_history.dart # History entry (with member attribution)
 │       ├── item_visibility.dart  # ItemVisibility enum: private_, household, nearby
+│       ├── household.dart        # Household (local SQLite model — id, ownerId, name, memberIds)
 │       ├── household_member.dart # HouseholdMember (local SQLite model)
 │       ├── borrow_request.dart   # BorrowRequest (local SQLite model)
 │       ├── shared_item.dart      # SharedItem (Firestore model — household catalog)
@@ -81,12 +82,14 @@ lib/
 │
 ├── data/
 │   ├── database/
-│   │   ├── database_helper.dart  # SQLite singleton (v7), creates all 6 tables
+│   │   ├── database_helper.dart  # SQLite singleton (v8), creates all 7 tables
 │   │   ├── item_dao.dart         # CRUD for items table
 │   │   ├── location_dao.dart     # CRUD for locations table
 │   │   ├── history_dao.dart      # CRUD for item_location_history (with member attribution)
 │   │   ├── borrow_request_dao.dart   # CRUD for borrow_requests table
-│   │   └── household_member_dao.dart # CRUD for household_members table
+│   │   ├── household_member_dao.dart # CRUD for household_members table
+│   │   ├── household_dao.dart    # CRUD for households table (upsert, getById, getLatest, delete)
+│   │   └── pending_sync_dao.dart # Queue for offline-first cloud sync (enqueue, getAll, deleteById)
 │   └── repositories/
 │       ├── item_repository.dart / item_repository_impl.dart
 │       ├── location_repository.dart / location_repository_impl.dart
@@ -114,6 +117,7 @@ lib/
 │   ├── sync_service.dart         # Cloud sync orchestration (interface)
 │   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations
 │   ├── household_cloud_service.dart # Firestore ops for household sharing & borrow requests
+│   ├── household_sync_service.dart  # Real-time Firestore listener sync for household items + history; uses PendingSyncDao for offline queue
 │   ├── nearby_cloud_service.dart # Firestore ops for geo-based nearby lending
 │   ├── location_service.dart     # GPS → locality string (cached 24h)
 │   ├── appwrite_sync_service.dart# Appwrite cloud sync (stub)
@@ -125,7 +129,7 @@ lib/
 │   └── app_theme.dart            # AppTheme.lightTheme / AppTheme.darkTheme
 │
 ├── routing/
-│   ├── app_routes.dart           # AppRoutes class with static path constants (incl. /network)
+│   ├── app_routes.dart           # AppRoutes class with static path constants (incl. /settings/manage-family)
 │   └── app_router.dart           # routerProvider (GoRouter) with onboarding redirect logic
 │
 ├── screens/
@@ -137,10 +141,13 @@ lib/
 │   ├── rooms/add_new_room_screen.dart
 │   ├── onboarding/onboarding_screen.dart
 │   ├── settings/settings_screen.dart
+│   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members (route: /settings/manage-family)
 │   └── network/network_screen.dart  # Network tab: Catalog, Activity, My Lends
 │
 └── widgets/
-    └── app_nav_bar.dart          # 5 tabs: Items, Locations, Search, Network, Settings
+    ├── app_nav_bar.dart              # 5 tabs: Items, Locations, Search, Network, Settings
+    ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
+    └── item_visibility_toggle.dart   # Toggle widget for private/household visibility (requires active household)
 ```
 
 ---
@@ -160,17 +167,18 @@ Screens / Widgets
 - **Domain models** (`domain/models/`) are plain Dart classes with `toMap()` / `fromMap()` for SQLite. Firestore models (`SharedItem`, `NearbyItem`, `FirestoreBorrowRequest`) use `fromFirestore()` / `fromMap()` factories for Firestore documents.
 - **DAOs** (`data/database/`) handle raw SQL; all receive `DatabaseHelper`.
 - **Repositories** (`data/repositories/`) implement abstract interfaces; injected via Riverpod providers in `repository_providers.dart`. Some repositories (e.g., `HouseholdRepositoryImpl`) combine local SQLite + Firestore cloud services.
-- **Cloud services** (`services/`) handle Firestore reads/writes directly. `HouseholdCloudService` and `NearbyCloudService` are not wrapped by DAOs — they talk to Firestore, not SQLite.
+- **Cloud services** (`services/`) handle Firestore reads/writes directly. `HouseholdCloudService` and `NearbyCloudService` are not wrapped by DAOs — they talk to Firestore, not SQLite. `HouseholdSyncService` bridges both layers: it listens to Firestore real-time snapshots and writes changes into local SQLite via DAOs; failed writes are queued in `pending_sync_operations` and replayed on reconnect.
 - **Providers** expose `FutureProvider`, `StateNotifierProvider`, etc. Mutations go through `*Notifier` classes which call `ref.invalidate(...)` to refresh derived providers.
-- **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths).
+- **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths). Current named routes: `/`, `/onboarding`, `/home`, `/save`, `/item/:uuid`, `/rooms`, `/settings`, `/settings/manage-family`, `/search`.
 
-### SQLite Schema (6 tables, v7)
+### SQLite Schema (7 tables, v8)
 - `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`) and `visibility` (private/household/nearby)
 - `locations` — hierarchical (self-referencing `parent_uuid`), tree via `full_path`
 - `item_location_history` — log of location changes per item; includes `moved_by_member_uuid` and `moved_by_name` for household attribution
-- `pending_sync_operations` — queue for offline-first cloud sync
+- `pending_sync_operations` — offline-first cloud sync queue; managed by `PendingSyncDao` (enqueue, getAll, deleteById); `HouseholdSyncService` flushes on reconnect
 - `borrow_requests` — local borrow request queue (status: pending/approved/denied/cancelled); FK to items
 - `household_members` — local cache of household members synced from Firestore
+- `households` — local cache of household doc (id, ownerId, name, memberIds as JSON); managed by `HouseholdDao`
 
 ### Firestore Collections (Cloud)
 - `users/{uid}` — User profile with `householdId`, `isOwner`
@@ -193,6 +201,9 @@ Screens / Widgets
 | `itemSearchQueryProvider` | `StateProvider<String>` | Current search query |
 | `itemsNotifierProvider` | `StateNotifierProvider<ItemsNotifier, bool>` | save / update / archive / delete mutations |
 | `routerProvider` | `Provider<GoRouter>` | App router; watches `settingsProvider` for redirect |
+| `householdDaoProvider` | `Provider<HouseholdDao>` | DAO for local `households` SQLite table |
+| `pendingSyncDaoProvider` | `Provider<PendingSyncDao>` | DAO for local `pending_sync_operations` SQLite queue |
+| `householdSyncServiceProvider` | `Provider<HouseholdSyncService>` | Real-time Firestore sync; call `startSync(householdId)` to activate |
 | `authStateProvider` | `StreamProvider<User?>` | Firebase Auth state stream |
 | `isSignedInProvider` | `Provider<bool>` | Whether user is authenticated |
 | `currentHouseholdIdProvider` | `FutureProvider<String?>` | Current user's household ID |
@@ -245,6 +256,7 @@ Never hardcode colors — use `app_colors.dart` constants, then reference via `A
 | Item Detail | Built |
 | Rooms / Add Room | Built |
 | Settings | Built |
+| Household Settings | Built (`/settings/manage-family`) — create household, add members, view members list |
 | Network | Future aspect only for now; detailed notes retained below for later implementation |
 | Login / Auth | Built (currently used for account/backup flows; previous Network-related notes remain below for future reference) |
 | History Timeline | **Not built** |

@@ -51,6 +51,17 @@ class DatabaseHelper {
   Future<void> _onCreate(Database db, int version) async {
     final batch = db.batch();
 
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableHouseholds} (
+        ${DbConstants.colHouseholdId} TEXT PRIMARY KEY,
+        ${DbConstants.colHouseholdOwnerId} TEXT NOT NULL,
+        ${DbConstants.colHouseholdName} TEXT NOT NULL,
+        ${DbConstants.colHouseholdMemberIds} TEXT NOT NULL DEFAULT '[]',
+        ${DbConstants.colHouseholdCreatedAt} INTEGER,
+        ${DbConstants.colHouseholdUpdatedAt} INTEGER
+      )
+    ''');
+
     // ── items ──────────────────────────────────────────────────────────────
     batch.execute('''
       CREATE TABLE ${DbConstants.tableItems} (
@@ -75,7 +86,8 @@ class DatabaseHelper {
         ${DbConstants.colItemExpectedReturnDate} INTEGER,
         ${DbConstants.colItemLentReminderAfterDays} INTEGER,
         ${DbConstants.colItemIsAvailableForLending} INTEGER NOT NULL DEFAULT 0,
-        ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private'
+        ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private',
+        ${DbConstants.colItemHouseholdId} TEXT
       )
     ''');
 
@@ -108,6 +120,9 @@ class DatabaseHelper {
         ${DbConstants.colHistMovedByMemberUuid} TEXT,
         ${DbConstants.colHistMovedByName} TEXT,
         ${DbConstants.colHistNote} TEXT,
+        ${DbConstants.colHistHouseholdId} TEXT,
+        ${DbConstants.colHistUserEmail} TEXT,
+        ${DbConstants.colHistActionDescription} TEXT NOT NULL,
         FOREIGN KEY (${DbConstants.colHistItemUuid})
           REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
           ON DELETE CASCADE
@@ -157,9 +172,13 @@ class DatabaseHelper {
     batch.execute(
         'CREATE INDEX idx_items_archived ON ${DbConstants.tableItems}(${DbConstants.colItemIsArchived})');
     batch.execute(
+        'CREATE INDEX idx_items_visibility_household ON ${DbConstants.tableItems}(${DbConstants.colItemVisibility}, ${DbConstants.colItemHouseholdId})');
+    batch.execute(
         'CREATE INDEX idx_items_saved_at ON ${DbConstants.tableItems}(${DbConstants.colItemSavedAt} DESC)');
     batch.execute(
         'CREATE INDEX idx_history_item ON ${DbConstants.tableHistory}(${DbConstants.colHistItemUuid})');
+    batch.execute(
+        'CREATE INDEX idx_history_household_item ON ${DbConstants.tableHistory}(${DbConstants.colHistHouseholdId}, ${DbConstants.colHistItemUuid})');
     batch.execute(
         'CREATE INDEX idx_borrow_item ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowItemUuid})');
     batch.execute(
@@ -330,16 +349,96 @@ class DatabaseHelper {
         WHERE ${DbConstants.colItemIsAvailableForLending} = 1
       ''');
     }
+
+    if (oldVersion < 8) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholds} (
+          ${DbConstants.colHouseholdId} TEXT PRIMARY KEY,
+          ${DbConstants.colHouseholdOwnerId} TEXT NOT NULL,
+          ${DbConstants.colHouseholdName} TEXT NOT NULL,
+          ${DbConstants.colHouseholdMemberIds} TEXT NOT NULL DEFAULT '[]',
+          ${DbConstants.colHouseholdCreatedAt} INTEGER,
+          ${DbConstants.colHouseholdUpdatedAt} INTEGER
+        )
+      ''');
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemHouseholdId,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHistory,
+        DbConstants.colHistHouseholdId,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHistory,
+        DbConstants.colHistUserEmail,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHistory,
+        DbConstants.colHistActionDescription,
+        "TEXT NOT NULL DEFAULT ''",
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHouseholdMembers,
+        DbConstants.colMemberEmail,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHouseholdMembers,
+        DbConstants.colMemberHouseholdUuid,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableHouseholdMembers,
+        DbConstants.colMemberJoinedAt,
+        'INTEGER',
+      );
+      await db.execute('''
+        UPDATE ${DbConstants.tableHistory}
+        SET ${DbConstants.colHistActionDescription} = COALESCE(
+          NULLIF(${DbConstants.colHistNote}, ''),
+          'Moved to ' || ${DbConstants.colHistLocationName}
+        )
+        WHERE ${DbConstants.colHistActionDescription} = ''
+      ''');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_items_visibility_household ON ${DbConstants.tableItems}(${DbConstants.colItemVisibility}, ${DbConstants.colItemHouseholdId})');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_history_household_item ON ${DbConstants.tableHistory}(${DbConstants.colHistHouseholdId}, ${DbConstants.colHistItemUuid})');
+    }
   }
 
   Future<void> _onOpen(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholds} (
+        ${DbConstants.colHouseholdId} TEXT PRIMARY KEY,
+        ${DbConstants.colHouseholdOwnerId} TEXT NOT NULL,
+        ${DbConstants.colHouseholdName} TEXT NOT NULL,
+        ${DbConstants.colHouseholdMemberIds} TEXT NOT NULL DEFAULT '[]',
+        ${DbConstants.colHouseholdCreatedAt} INTEGER,
+        ${DbConstants.colHouseholdUpdatedAt} INTEGER
+      )
+    ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${DbConstants.tableHouseholdMembers} (
         ${DbConstants.colMemberId} INTEGER PRIMARY KEY AUTOINCREMENT,
         ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
         ${DbConstants.colMemberName} TEXT NOT NULL,
         ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
-        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colMemberEmail} TEXT,
+        ${DbConstants.colMemberHouseholdUuid} TEXT,
+        ${DbConstants.colMemberJoinedAt} INTEGER
       )
     ''');
     await db.insert(
@@ -349,6 +448,7 @@ class DatabaseHelper {
         DbConstants.colMemberName: 'You',
         DbConstants.colMemberInvitedAt: _nowMs,
         DbConstants.colMemberIsOwner: 1,
+        DbConstants.colMemberJoinedAt: _nowMs,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
@@ -411,7 +511,10 @@ class DatabaseHelper {
         ${DbConstants.colMemberUuid} TEXT NOT NULL UNIQUE,
         ${DbConstants.colMemberName} TEXT NOT NULL,
         ${DbConstants.colMemberInvitedAt} INTEGER NOT NULL,
-        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0
+        ${DbConstants.colMemberIsOwner} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colMemberEmail} TEXT,
+        ${DbConstants.colMemberHouseholdUuid} TEXT,
+        ${DbConstants.colMemberJoinedAt} INTEGER
       )
     ''');
   }
@@ -422,8 +525,9 @@ class DatabaseHelper {
         ${DbConstants.colMemberUuid},
         ${DbConstants.colMemberName},
         ${DbConstants.colMemberInvitedAt},
-        ${DbConstants.colMemberIsOwner}
-      ) VALUES ('owner-local', 'You', $_nowMs, 1)
+        ${DbConstants.colMemberIsOwner},
+        ${DbConstants.colMemberJoinedAt}
+      ) VALUES ('owner-local', 'You', $_nowMs, 1, $_nowMs)
     ''');
   }
 
