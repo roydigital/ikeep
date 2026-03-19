@@ -428,24 +428,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               setState(() => _lentReminders = v),
                         ),
                         const SizedBox(height: 36),
-                        _SectionLabel('DATA & BACKUP'),
+                        _SectionLabel('PREMIUM FEATURES'),
                         const SizedBox(height: 14),
-                        _DataBackupCard(
-                          isPremium: _backupEnabled,
+                        _PremiumFeaturesCard(
                           statusText: statusText,
                           statusColor: statusColor,
                           isSyncing: syncStatus.isSyncing,
                           progress: _backupEnabled ? 0.85 : 0.25,
                           lastSyncedText: _formatLastSynced(lastSynced),
                           onSyncTap: _runSync,
-                          onExportTap: _exportData,
+                          onManageFamily: () =>
+                              context.push(AppRoutes.manageFamily),
                         ),
                         const SizedBox(height: 36),
                         _SectionLabel('SUPPORT'),
                         const SizedBox(height: 14),
                         _SupportCard(
-                          onManageFamily: () =>
-                              context.push(AppRoutes.manageFamily),
                           onHelp: () => _showInfo('Help Center coming soon'),
                           onContact: () =>
                               _showInfo('Contact: support@ikeep.app'),
@@ -1049,26 +1047,24 @@ class _NearbyLendingCard extends ConsumerWidget {
   }
 }
 
-class _DataBackupCard extends StatelessWidget {
-  const _DataBackupCard({
-    required this.isPremium,
+class _PremiumFeaturesCard extends StatelessWidget {
+  const _PremiumFeaturesCard({
     required this.statusText,
     required this.statusColor,
     required this.isSyncing,
     required this.progress,
     required this.lastSyncedText,
     required this.onSyncTap,
-    required this.onExportTap,
+    required this.onManageFamily,
   });
 
-  final bool isPremium;
   final String statusText;
   final Color statusColor;
   final bool isSyncing;
   final double progress;
   final String lastSyncedText;
   final VoidCallback onSyncTap;
-  final VoidCallback onExportTap;
+  final VoidCallback onManageFamily;
 
   @override
   Widget build(BuildContext context) {
@@ -1093,7 +1089,7 @@ class _DataBackupCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Backup Sync Status',
+                          'Online Backup',
                           style: TextStyle(
                             color: _kTextPrimary,
                             fontWeight: FontWeight.w700,
@@ -1136,19 +1132,10 @@ class _DataBackupCard extends StatelessWidget {
           ),
           Divider(height: 1, color: _kBorder),
           _ActionRow(
-            icon: isPremium ? Icons.download : Icons.workspace_premium,
-            title: isPremium ? 'Export Data' : 'Buy Data & Backup',
+            icon: Icons.groups_rounded,
+            title: 'Manage Family',
             trailing: Icons.chevron_right,
-            onTap: isPremium
-                ? onExportTap
-                : () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            'Upgrade required to use Data & Backup features'),
-                      ),
-                    );
-                  },
+            onTap: onManageFamily,
           ),
         ],
       ),
@@ -1158,13 +1145,11 @@ class _DataBackupCard extends StatelessWidget {
 
 class _SupportCard extends StatelessWidget {
   const _SupportCard({
-    required this.onManageFamily,
     required this.onHelp,
     required this.onContact,
     required this.onTerms,
   });
 
-  final VoidCallback onManageFamily;
   final VoidCallback onHelp;
   final VoidCallback onContact;
   final VoidCallback onTerms;
@@ -1179,13 +1164,6 @@ class _SupportCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _ActionRow(
-            icon: Icons.groups_rounded,
-            title: 'Manage Family',
-            trailing: Icons.chevron_right,
-            onTap: onManageFamily,
-          ),
-          Divider(height: 1, color: _kBorder),
           _ActionRow(
             icon: Icons.help_outline,
             title: 'Help Center',

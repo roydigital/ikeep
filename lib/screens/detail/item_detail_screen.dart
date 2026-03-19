@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/item.dart';
+import '../../domain/models/item_location_history.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/household_providers.dart';
@@ -155,12 +156,33 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                   color: AppColors.primary, size: 18),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  _location(item),
-                                  style: const TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 17),
+                                child: historyAsync.when(
+                                  data: (history) => Text(
+                                    _location(
+                                      item,
+                                      latestHistory: history.isEmpty
+                                          ? null
+                                          : history.last,
+                                    ),
+                                    style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 17),
+                                  ),
+                                  loading: () => Text(
+                                    _location(item),
+                                    style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 17),
+                                  ),
+                                  error: (_, __) => Text(
+                                    _location(item),
+                                    style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 17),
+                                  ),
                                 ),
                               ),
                             ]),
@@ -206,7 +228,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                             const SizedBox(height: 24),
                             historyAsync.when(
                               data: (h) => _meta(context, isDark, item.savedAt,
-                                  h.isEmpty ? item.updatedAt : h.first.movedAt),
+                                  h.isEmpty ? item.updatedAt : h.last.movedAt),
                               loading: () => _meta(context, isDark,
                                   item.savedAt, item.updatedAt),
                               error: (_, __) => _meta(context, isDark,
@@ -1003,12 +1025,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  String _location(Item item) {
+  String _location(Item item, {ItemLocationHistory? latestHistory}) {
     if (item.locationFullPath?.trim().isNotEmpty ?? false) {
       return item.locationFullPath!;
     }
     if (item.locationName?.trim().isNotEmpty ?? false) {
       return item.locationName!;
+    }
+    if (latestHistory?.locationName.trim().isNotEmpty ?? false) {
+      return latestHistory!.locationName;
     }
     return 'No location set';
   }
