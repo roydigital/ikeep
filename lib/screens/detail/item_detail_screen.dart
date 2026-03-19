@@ -498,7 +498,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   Future<void> _lendItem(Item item) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final lentToController = TextEditingController();
-    DateTime? expectedReturn;
+    DateTime expectedReturn = DateTime.now().add(const Duration(days: 7));
 
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
@@ -573,9 +573,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                   },
                   icon: const Icon(Icons.event_available, size: 18),
                   label: Text(
-                    expectedReturn == null
-                        ? 'Expected return date (optional)'
-                        : 'Return by ${DateFormat('dd MMM yyyy').format(expectedReturn!)}',
+                    'Return by ${DateFormat('dd MMM yyyy').format(expectedReturn)}',
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -614,7 +612,6 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       lentTo: lentTo,
       lentOn: DateTime.now(),
       expectedReturnDate: expectedReturn,
-      lentReminderAfterDays: 7,
     );
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updated);

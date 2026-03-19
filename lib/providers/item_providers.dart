@@ -119,52 +119,29 @@ class ItemsNotifier extends StateNotifier<bool> {
   final Ref _ref;
 
   Future<String?> saveItem(Item item) async {
-    final failure = await _ref.read(itemRepositoryProvider).saveItem(item);
+    final preparedItem = await _prepareItem(item);
+    final failure =
+        await _ref.read(itemRepositoryProvider).saveItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(item);
+    await _syncItemToCloud(preparedItem);
+    await _syncNotificationsForItem(preparedItem);
 
-    if (_ref.read(settingsProvider).expiryRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleExpiryReminder(item);
-    }
-    if (_ref.read(settingsProvider).lentRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleLentReminder(item);
-    }
-
-    _ref.invalidate(allItemsProvider);
-    _ref.invalidate(lentItemsProvider);
-    _ref.invalidate(lendableItemsProvider);
-    _ref.invalidate(forgottenItemsProvider);
+    _invalidateItemLists();
     return null;
   }
 
   Future<String?> updateItem(Item item) async {
-    final failure = await _ref.read(itemRepositoryProvider).updateItem(item);
+    final preparedItem = await _prepareItem(item);
+    final failure =
+        await _ref.read(itemRepositoryProvider).updateItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(item.copyWith(updatedAt: DateTime.now()));
+    await _syncItemToCloud(preparedItem.copyWith(updatedAt: DateTime.now()));
+    await _syncNotificationsForItem(preparedItem);
 
-    if (_ref.read(settingsProvider).expiryRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleExpiryReminder(item);
-    } else {
-      await _ref
-          .read(notificationServiceProvider)
-          .cancelExpiryReminder(item.uuid);
-    }
-
-    if (_ref.read(settingsProvider).lentRemindersEnabled && item.isLent) {
-      await _ref.read(notificationServiceProvider).scheduleLentReminder(item);
-    } else {
-      await _ref
-          .read(notificationServiceProvider)
-          .cancelLentReminder(item.uuid);
-    }
-
-    _ref.invalidate(allItemsProvider);
-    _ref.invalidate(lentItemsProvider);
-    _ref.invalidate(lendableItemsProvider);
-    _ref.invalidate(forgottenItemsProvider);
-    _ref.invalidate(singleItemProvider(item.uuid));
+    _invalidateItemLists();
+    _ref.invalidate(singleItemProvider(preparedItem.uuid));
     return null;
   }
 
@@ -173,26 +150,18 @@ class ItemsNotifier extends StateNotifier<bool> {
     String? movedByMemberUuid,
     String? movedByName,
   }) async {
+    final preparedItem = await _prepareItem(item);
     final failure = await _ref.read(itemRepositoryProvider).saveItem(
-          item,
+          preparedItem,
           movedByMemberUuid: movedByMemberUuid,
           movedByName: movedByName,
         );
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(item);
+    await _syncItemToCloud(preparedItem);
+    await _syncNotificationsForItem(preparedItem);
 
-    if (_ref.read(settingsProvider).expiryRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleExpiryReminder(item);
-    }
-    if (_ref.read(settingsProvider).lentRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleLentReminder(item);
-    }
-
-    _ref.invalidate(allItemsProvider);
-    _ref.invalidate(lentItemsProvider);
-    _ref.invalidate(lendableItemsProvider);
-    _ref.invalidate(forgottenItemsProvider);
+    _invalidateItemLists();
     return null;
   }
 
@@ -201,36 +170,19 @@ class ItemsNotifier extends StateNotifier<bool> {
     String? movedByMemberUuid,
     String? movedByName,
   }) async {
+    final preparedItem = await _prepareItem(item);
     final failure = await _ref.read(itemRepositoryProvider).updateItem(
-          item,
+          preparedItem,
           movedByMemberUuid: movedByMemberUuid,
           movedByName: movedByName,
         );
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(item.copyWith(updatedAt: DateTime.now()));
+    await _syncItemToCloud(preparedItem.copyWith(updatedAt: DateTime.now()));
+    await _syncNotificationsForItem(preparedItem);
 
-    if (_ref.read(settingsProvider).expiryRemindersEnabled) {
-      await _ref.read(notificationServiceProvider).scheduleExpiryReminder(item);
-    } else {
-      await _ref
-          .read(notificationServiceProvider)
-          .cancelExpiryReminder(item.uuid);
-    }
-
-    if (_ref.read(settingsProvider).lentRemindersEnabled && item.isLent) {
-      await _ref.read(notificationServiceProvider).scheduleLentReminder(item);
-    } else {
-      await _ref
-          .read(notificationServiceProvider)
-          .cancelLentReminder(item.uuid);
-    }
-
-    _ref.invalidate(allItemsProvider);
-    _ref.invalidate(lentItemsProvider);
-    _ref.invalidate(lendableItemsProvider);
-    _ref.invalidate(forgottenItemsProvider);
-    _ref.invalidate(singleItemProvider(item.uuid));
+    _invalidateItemLists();
+    _ref.invalidate(singleItemProvider(preparedItem.uuid));
     return null;
   }
 
@@ -282,6 +234,47 @@ class ItemsNotifier extends StateNotifier<bool> {
       _ref.read(syncStatusProvider.notifier).state = result;
       _ref.invalidate(lastSyncedAtProvider);
     }
+  }
+
+  Future<void> _syncNotificationsForItem(Item item) async {
+    final notificationService = _ref.read(notificationServiceProvider);
+    final settings = _ref.read(settingsProvider);
+    final shouldScheduleNotifications =
+        settings.expiryRemindersEnabled ||
+        (settings.lentRemindersEnabled && item.isLent);
+
+    if (shouldScheduleNotifications) {
+      await notificationService.requestPermissionsIfNeeded();
+    }
+
+    if (settings.expiryRemindersEnabled) {
+      await notificationService.scheduleExpiryReminder(item);
+    } else {
+      await notificationService.cancelExpiryReminder(item.uuid);
+    }
+
+    if (settings.lentRemindersEnabled && item.isLent) {
+      await notificationService.scheduleLentReminder(item);
+    } else {
+      await notificationService.cancelLentReminder(item.uuid);
+    }
+  }
+
+  Future<Item> _prepareItem(Item item) async {
+    final seasonCategory =
+        await _ref.read(mlLabelServiceProvider).classifySeasonCategory(
+              itemName: item.name,
+              tags: item.tags,
+              imagePaths: item.imagePaths,
+            );
+    return item.copyWith(seasonCategory: seasonCategory);
+  }
+
+  void _invalidateItemLists() {
+    _ref.invalidate(allItemsProvider);
+    _ref.invalidate(lentItemsProvider);
+    _ref.invalidate(lendableItemsProvider);
+    _ref.invalidate(forgottenItemsProvider);
   }
 }
 

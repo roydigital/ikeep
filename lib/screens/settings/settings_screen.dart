@@ -76,6 +76,7 @@ const _lightColors = _SettingsColors(
 
 late _SettingsColors _activeColors;
 
+Color get _kBg => _activeColors.bg;
 Color get _kCard => _activeColors.card;
 Color get _kCardSoft => _activeColors.cardSoft;
 Color get _kBorder => _activeColors.border;
@@ -163,7 +164,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (_initialized) return;
     _darkMode = settings.themeMode == ThemeMode.dark;
     _stillThere = settings.stillThereRemindersEnabled;
-    _seasonal = settings.expiryRemindersEnabled;
+    _seasonal = settings.seasonalRemindersEnabled;
     _lentReminders = settings.lentRemindersEnabled;
     _backupEnabled = settings.isBackupEnabled;
     _initialized = true;
@@ -172,7 +173,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _hasChanges(AppSettings settings) {
     return _darkMode != (settings.themeMode == ThemeMode.dark) ||
         _stillThere != settings.stillThereRemindersEnabled ||
-        _seasonal != settings.expiryRemindersEnabled ||
+        _seasonal != settings.seasonalRemindersEnabled ||
         _lentReminders != settings.lentRemindersEnabled ||
         _backupEnabled != settings.isBackupEnabled;
   }
@@ -183,26 +184,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final notifier = ref.read(settingsProvider.notifier);
       final notificationService = ref.read(notificationServiceProvider);
+      final backgroundScheduler = ref.read(backgroundSchedulerServiceProvider);
+      final wantsNotificationFeatures =
+          settings.expiryRemindersEnabled ||
+          _stillThere ||
+          _seasonal ||
+          _lentReminders;
+
+      if (wantsNotificationFeatures) {
+        final permissionGranted =
+            await notificationService.requestPermissionsIfNeeded();
+        if (!permissionGranted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Notifications are off. Reminders can be saved, but alerts may not appear until permission is allowed.',
+              ),
+            ),
+          );
+        }
+      }
+
       await notifier.setThemeMode(_darkMode ? ThemeMode.dark : ThemeMode.light);
       await notifier.setStillThereReminders(_stillThere);
-      await notifier.setExpiryReminders(_seasonal);
+      await notifier.setSeasonalReminders(_seasonal);
       await notifier.setLentReminders(_lentReminders);
       await notifier.setBackupEnabled(_backupEnabled);
 
       final items = await ref.read(allItemsProvider.future);
-      if (_stillThere) {
-        await notificationService.scheduleStillThereDailyReminder();
-      } else {
-        await notificationService.cancelStillThereDailyReminder();
-      }
+      final updatedSettings = settings.copyWith(
+        themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
+        stillThereRemindersEnabled: _stillThere,
+        seasonalRemindersEnabled: _seasonal,
+        lentRemindersEnabled: _lentReminders,
+        isBackupEnabled: _backupEnabled,
+      );
+      await backgroundScheduler.syncNotificationTasks(updatedSettings);
 
-      if (_seasonal) {
-        await notificationService.rescheduleExpiryReminders(
-          items.where((item) => !item.isArchived),
-        );
-      } else {
-        await notificationService.cancelExpiryReminders(items);
-      }
+      await notificationService.rescheduleExpiryReminders(
+        items.where((item) => !item.isArchived),
+      );
 
       if (_lentReminders) {
         await notificationService.rescheduleLentReminders(
@@ -373,7 +394,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ? 'Error'
                 : 'Connected';
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: _kBg,
       body: Stack(
         children: [
           SafeArea(
@@ -831,21 +852,21 @@ class _PreferencesCard extends StatelessWidget {
             const SizedBox(height: 14),
             _NotificationRow(
               title: '"Still there?" Reminders',
-              subtitle: 'Periodic checks for inactive items',
+              subtitle: 'Weekly stale-item spot checks',
               value: stillThere,
               onChanged: onStillThereChanged,
             ),
             const SizedBox(height: 16),
             _NotificationRow(
               title: 'Seasonal Reminders',
-              subtitle: 'Suggestions based on the time of year',
+              subtitle: 'Background monthly seasonal prompts',
               value: seasonal,
               onChanged: onSeasonalChanged,
             ),
             const SizedBox(height: 16),
             _NotificationRow(
               title: '"I Lent It" Reminders',
-              subtitle: 'Nudge me for items I gave to someone',
+              subtitle: 'Due-date morning alerts plus one 48h follow-up',
               value: lentReminders,
               onChanged: onLentRemindersChanged,
             ),

@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/item.dart';
+import '../../domain/models/location_model.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
+import '../../providers/location_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
@@ -54,49 +56,52 @@ class _MainContent extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final itemsAsync = ref.watch(allItemsProvider);
     final forgottenItemsAsync = ref.watch(forgottenItemsProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SafeArea(
-          bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(context, isDark),
-              const SizedBox(height: AppDimensions.spacingMd),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppDimensions.spacingMd,
-                ),
-                child: _buildSearchBar(context, isDark),
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(
+        bottom: AppNavBar.contentBottomSpacing(context, includeFab: true),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(context),
+            const SizedBox(height: AppDimensions.spacingMd),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppDimensions.spacingMd,
               ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppDimensions.spacingMd,
-                ),
-                child: _LentPulseSection(),
+              child: _buildSearchBar(context),
+            ),
+            const SizedBox(height: 14),
+            const Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: AppDimensions.spacingMd,
               ),
-              const SizedBox(height: 14),
-              _buildForgottenCarousel(context, forgottenItemsAsync, isDark),
-            ],
-          ),
+              child: _ActionNeededCard(),
+            ),
+            const SizedBox(height: 18),
+            _buildRecentlySaved(context, itemsAsync),
+            const SizedBox(height: AppDimensions.spacingLg),
+            const Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: AppDimensions.spacingMd,
+              ),
+              child: _TopLocationsGrid(),
+            ),
+            const SizedBox(height: AppDimensions.spacingLg),
+            _buildForgottenCarousel(context, forgottenItemsAsync),
+            const SizedBox(height: AppDimensions.spacingLg),
+          ],
         ),
-        const Spacer(),
-        _buildRecentlySaved(context, itemsAsync, isDark),
-        SizedBox(
-          height: AppNavBar.contentBottomSpacing(context, includeFab: true),
-        ),
-      ],
+      ),
     );
   }
 
   Widget _buildForgottenCarousel(
     BuildContext context,
     AsyncValue<List<Item>> forgottenItemsAsync,
-    bool isDark,
   ) {
     final now = DateTime.now();
     if (now.weekday != DateTime.sunday) {
@@ -108,6 +113,7 @@ class _MainContent extends ConsumerWidget {
       error: (_, __) => const SizedBox.shrink(),
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
+        final isDark = Theme.of(context).brightness == Brightness.dark;
 
         return Padding(
           padding:
@@ -144,7 +150,8 @@ class _MainContent extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDark) {
+  Widget _buildHeader(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final avatarBorderColor = isDark
         ? AppColors.primary.withValues(alpha: 0.55)
         : AppColors.borderLight;
@@ -217,7 +224,8 @@ class _MainContent extends ConsumerWidget {
     );
   }
 
-  Widget _buildSearchBar(BuildContext context, bool isDark) {
+  Widget _buildSearchBar(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: () => context.push(AppRoutes.search),
       child: Container(
@@ -261,8 +269,8 @@ class _MainContent extends ConsumerWidget {
   Widget _buildRecentlySaved(
     BuildContext context,
     AsyncValue<List<Item>> itemsAsync,
-    bool isDark,
   ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -280,7 +288,7 @@ class _MainContent extends ConsumerWidget {
                   color: isDark
                       ? AppColors.textPrimaryDark
                       : AppColors.textPrimaryLight,
-                  fontSize: 26,
+                  fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -481,6 +489,340 @@ class _HouseholdCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ActionNeededCard extends ConsumerWidget {
+  const _ActionNeededCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lentAsync = ref.watch(lentItemsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return lentAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (items) {
+        final now = DateTime.now();
+        final overdueItems = items
+            .where(
+              (item) =>
+                  item.isLent &&
+                  item.expectedReturnDate != null &&
+                  item.expectedReturnDate!.isBefore(now),
+            )
+            .toList();
+
+        if (overdueItems.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final backgroundColor = isDark
+            ? AppColors.error.withValues(alpha: 0.18)
+            : AppColors.warning.withValues(alpha: 0.14);
+        final borderColor = isDark
+            ? AppColors.error.withValues(alpha: 0.42)
+            : AppColors.warning.withValues(alpha: 0.42);
+        final iconColor = isDark ? AppColors.error : AppColors.warning;
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppDimensions.spacingMd),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                ),
+                child: Icon(
+                  Icons.warning_amber_rounded,
+                  color: iconColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Action Needed',
+                      style: TextStyle(
+                        color: isDark
+                            ? AppColors.textPrimaryDark
+                            : AppColors.textPrimaryLight,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      overdueItems.length == 1
+                          ? 'You have items overdue for return.'
+                          : 'You have ${overdueItems.length} items overdue for return.',
+                      style: TextStyle(
+                        color: isDark
+                            ? AppColors.textSecondaryDark
+                            : AppColors.textSecondaryLight,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TopLocationsGrid extends ConsumerWidget {
+  const _TopLocationsGrid();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locationsAsync = ref.watch(allLocationsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Top Locations',
+          style: TextStyle(
+            color: isDark
+                ? AppColors.textPrimaryDark
+                : AppColors.textPrimaryLight,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Jump back into the places you use most.',
+          style: TextStyle(
+            color: isDark
+                ? AppColors.textSecondaryDark
+                : AppColors.textSecondaryLight,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 12),
+        locationsAsync.when(
+          loading: () => _TopLocationsGridSkeleton(isDark: isDark),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (locations) {
+            final ranked = [...locations]
+              ..sort((a, b) => b.usageCount.compareTo(a.usageCount));
+            final display = ranked
+                .where((location) => location.usageCount > 0)
+                .take(6)
+                .toList();
+
+            if (display.isEmpty) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppDimensions.spacingMd),
+                decoration: BoxDecoration(
+                  color:
+                      isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+                  border: Border.all(
+                    color: isDark
+                        ? AppColors.borderDark
+                        : AppColors.borderLight,
+                  ),
+                ),
+                child: Text(
+                  'Save a few items with locations to unlock quick access here.',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textSecondaryDark
+                        : AppColors.textSecondaryLight,
+                    fontSize: 13,
+                  ),
+                ),
+              );
+            }
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth > 520 ? 3 : 2;
+                final spacing = AppDimensions.spacingSm;
+                final itemWidth =
+                    (constraints.maxWidth - ((columns - 1) * spacing)) /
+                        columns;
+
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    for (final location in display)
+                      SizedBox(
+                        width: itemWidth,
+                        child: _TopLocationTile(location: location),
+                      ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _TopLocationTile extends StatelessWidget {
+  const _TopLocationTile({required this.location});
+
+  final LocationModel location;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final icon = _iconForLocation(location.iconName);
+
+    return InkWell(
+      onTap: () => context.push(
+        AppRoutes.search,
+        extra: {'initialQuery': location.fullPath ?? location.name},
+      ),
+      borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+      child: Ink(
+        padding: const EdgeInsets.all(AppDimensions.spacingMd),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+          border: Border.all(
+            color: isDark ? AppColors.borderDark : AppColors.borderLight,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+              ),
+              child: Icon(icon, color: AppColors.primary),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              location.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textPrimaryDark
+                    : AppColors.textPrimaryLight,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              location.fullPath ?? 'Quick access location',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              location.usageCount == 1
+                  ? '1 item'
+                  : '${location.usageCount} items',
+              style: const TextStyle(
+                color: AppColors.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopLocationsGridSkeleton extends StatelessWidget {
+  const _TopLocationsGridSkeleton({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth > 520 ? 3 : 2;
+        final spacing = AppDimensions.spacingSm;
+        final itemWidth =
+            (constraints.maxWidth - ((columns - 1) * spacing)) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: List.generate(
+            columns * 2,
+            (_) => Container(
+              width: itemWidth,
+              height: 132,
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+                border: Border.all(
+                  color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+IconData _iconForLocation(String iconName) {
+  switch (iconName) {
+    case 'bed':
+      return Icons.bed_rounded;
+    case 'living':
+      return Icons.chair_rounded;
+    case 'kitchen':
+      return Icons.kitchen_rounded;
+    case 'garage':
+      return Icons.garage_rounded;
+    case 'bath':
+      return Icons.bathtub_outlined;
+    case 'office':
+      return Icons.work_outline_rounded;
+    case 'dining':
+      return Icons.restaurant_rounded;
+    case 'door':
+      return Icons.door_sliding_outlined;
+    case 'shelves':
+      return Icons.table_rows_rounded;
+    default:
+      return Icons.inventory_2_outlined;
   }
 }
 

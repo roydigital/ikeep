@@ -110,7 +110,6 @@ class BorrowRequestRepositoryImpl implements BorrowRequestRepository {
           lentTo: request.requesterMemberName,
           lentOn: now,
           expectedReturnDate: request.requestedReturnDate,
-          lentReminderAfterDays: item.lentReminderAfterDays ?? 7,
           updatedAt: now,
         ),
       );

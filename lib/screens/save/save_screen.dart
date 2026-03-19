@@ -39,7 +39,6 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   final _lentToController = TextEditingController();
   DateTime _lentOnDate = DateTime.now();
   DateTime? _expectedReturnDate;
-  int _lentReminderAfterDays = 7;
 
   @override
   void initState() {
@@ -119,6 +118,15 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       );
       return;
     }
+    if (_isLentFlow && _expectedReturnDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add an expected return date for lent items'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
 
     final item = Item(
@@ -132,7 +140,6 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       lentTo: _isLentFlow ? _lentToController.text.trim() : null,
       lentOn: _isLentFlow ? _lentOnDate : null,
       expectedReturnDate: _isLentFlow ? _expectedReturnDate : null,
-      lentReminderAfterDays: _isLentFlow ? _lentReminderAfterDays : null,
       visibility: ItemVisibility.private_,
     );
 
@@ -975,31 +982,6 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [3, 7, 14, 30].map((days) {
-              final active = _lentReminderAfterDays == days;
-              return ChoiceChip(
-                selected: active,
-                label: Text('Remind in $days d'),
-                onSelected: (_) =>
-                    setState(() => _lentReminderAfterDays = days),
-                selectedColor: AppColors.primary.withValues(alpha: 0.2),
-                labelStyle: TextStyle(
-                  color: active ? AppColors.primary : textColor,
-                  fontWeight: FontWeight.w600,
-                ),
-                side: BorderSide(
-                  color: active ? AppColors.primary : borderColor,
-                ),
-                backgroundColor: isDark
-                    ? AppColors.surfaceVariantDark
-                    : AppColors.surfaceVariantLight,
-              );
-            }).toList(),
           ),
         ],
       ],

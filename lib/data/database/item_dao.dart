@@ -159,21 +159,45 @@ class ItemDao {
     return rows.map(Item.fromMap).toList();
   }
 
-  /// Returns items saved more than [thresholdMs] milliseconds ago
-  /// for "still there?" reminders.
-  Future<List<Item>> getOldItems(int thresholdMs) async {
+  Future<Item?> getRandomStaleItem({
+    required DateTime cutoff,
+  }) async {
     final db = await _db;
-    final cutoff = DateTime.now()
-        .subtract(Duration(milliseconds: thresholdMs))
-        .millisecondsSinceEpoch;
     final rows = await db.rawQuery('''
       SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
       FROM ${DbConstants.tableItems} i
       LEFT JOIN ${DbConstants.tableLocations} l
         ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
-      WHERE i.${DbConstants.colItemSavedAt} < ?
+      WHERE COALESCE(
+        i.${DbConstants.colItemUpdatedAt},
+        i.${DbConstants.colItemSavedAt}
+      ) < ?
         AND i.${DbConstants.colItemIsArchived} = 0
-    ''', [cutoff]);
-    return rows.map(Item.fromMap).toList();
+      ORDER BY RANDOM()
+      LIMIT 1
+    ''', [cutoff.millisecondsSinceEpoch]);
+    if (rows.isEmpty) return null;
+    return Item.fromMap(rows.first);
+  }
+
+  Future<Item?> getRandomItemBySeasonCategories(
+    List<String> seasonCategories,
+  ) async {
+    if (seasonCategories.isEmpty) return null;
+
+    final db = await _db;
+    final placeholders = List.filled(seasonCategories.length, '?').join(', ');
+    final rows = await db.rawQuery('''
+      SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
+      FROM ${DbConstants.tableItems} i
+      LEFT JOIN ${DbConstants.tableLocations} l
+        ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
+      WHERE i.${DbConstants.colItemSeasonCategory} IN ($placeholders)
+        AND i.${DbConstants.colItemIsArchived} = 0
+      ORDER BY RANDOM()
+      LIMIT 1
+    ''', seasonCategories);
+    if (rows.isEmpty) return null;
+    return Item.fromMap(rows.first);
   }
 }

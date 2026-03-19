@@ -84,6 +84,7 @@ class DatabaseHelper {
         ${DbConstants.colItemLentTo} TEXT,
         ${DbConstants.colItemLentOn} INTEGER,
         ${DbConstants.colItemExpectedReturnDate} INTEGER,
+        ${DbConstants.colItemSeasonCategory} TEXT NOT NULL DEFAULT 'all_year',
         ${DbConstants.colItemLentReminderAfterDays} INTEGER,
         ${DbConstants.colItemIsAvailableForLending} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private',
@@ -172,6 +173,8 @@ class DatabaseHelper {
         'CREATE INDEX idx_items_location ON ${DbConstants.tableItems}(${DbConstants.colItemLocationUuid})');
     batch.execute(
         'CREATE INDEX idx_items_archived ON ${DbConstants.tableItems}(${DbConstants.colItemIsArchived})');
+    batch.execute(
+        'CREATE INDEX idx_items_season_category ON ${DbConstants.tableItems}(${DbConstants.colItemSeasonCategory})');
     batch.execute(
         'CREATE INDEX idx_items_visibility_household ON ${DbConstants.tableItems}(${DbConstants.colItemVisibility}, ${DbConstants.colItemHouseholdId})');
     batch.execute(
@@ -425,6 +428,17 @@ class DatabaseHelper {
         DbConstants.colItemSharedWithMemberUuids,
         "TEXT NOT NULL DEFAULT '[]'",
       );
+    }
+
+    if (oldVersion < 10) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemSeasonCategory,
+        "TEXT NOT NULL DEFAULT 'all_year'",
+      );
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_items_season_category ON ${DbConstants.tableItems}(${DbConstants.colItemSeasonCategory})');
     }
   }
 

@@ -8,8 +8,6 @@ import 'package:timezone/timezone.dart' as tz;
 import '../core/constants/notification_constants.dart';
 import '../domain/models/item.dart';
 
-/// Wraps [FlutterLocalNotificationsPlugin].
-/// Call [initialize] once at app startup before any other method.
 class NotificationService {
   factory NotificationService() => _instance;
 
@@ -24,23 +22,17 @@ class NotificationService {
     if (_initialized) return;
     tz.initializeTimeZones();
 
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
     const settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
     );
 
     await _plugin.initialize(settings);
-    await _requestPermissions();
 
-    // Create Android notification channels
     if (!kIsWeb && Platform.isAndroid) {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
@@ -73,13 +65,35 @@ class NotificationService {
     _initialized = true;
   }
 
-  Future<void> _requestPermissions() async {
-    if (kIsWeb) return;
+  static List<String> seasonCategoriesForMonth(int month) {
+    switch (month) {
+      case DateTime.december:
+        return const ['winter', 'holiday'];
+      case DateTime.january:
+      case DateTime.february:
+        return const ['winter'];
+      case DateTime.june:
+      case DateTime.july:
+      case DateTime.august:
+        return const ['summer'];
+      default:
+        return const [];
+    }
+  }
+
+  Future<bool> requestPermissionsIfNeeded() async {
+    await initialize();
+    if (kIsWeb) return true;
 
     if (Platform.isIOS || Platform.isMacOS) {
       final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
           IOSFlutterLocalNotificationsPlugin>();
-      await iosPlugin?.requestPermissions(
+      final iosPermissions = await iosPlugin?.checkPermissions();
+      if (iosPermissions?.isEnabled == true) {
+        return true;
+      }
+
+      final iosGranted = await iosPlugin?.requestPermissions(
         alert: true,
         badge: true,
         sound: true,
@@ -87,148 +101,160 @@ class NotificationService {
 
       final macPlugin = _plugin.resolvePlatformSpecificImplementation<
           MacOSFlutterLocalNotificationsPlugin>();
-      await macPlugin?.requestPermissions(
+      final macPermissions = await macPlugin?.checkPermissions();
+      if (macPermissions?.isEnabled == true) {
+        return true;
+      }
+
+      final macGranted = await macPlugin?.requestPermissions(
         alert: true,
         badge: true,
         sound: true,
       );
+      return iosGranted ?? macGranted ?? false;
     }
 
     if (Platform.isAndroid) {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-      await androidPlugin?.requestNotificationsPermission();
+      final alreadyEnabled =
+          await androidPlugin?.areNotificationsEnabled() ?? true;
+      if (alreadyEnabled) {
+        return true;
+      }
+
+      return await androidPlugin?.requestNotificationsPermission() ?? false;
     }
+
+    return true;
   }
 
-  /// Schedules an expiry reminder for [item] 3 days before its expiry date.
-  /// Silently skips if expiry date is null or already in the past.
+  Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
+    if (kIsWeb || !Platform.isAndroid) {
+      return AndroidScheduleMode.exactAllowWhileIdle;
+    }
+
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    final canScheduleExact =
+        await androidPlugin?.canScheduleExactNotifications() ?? false;
+    if (canScheduleExact) {
+      return AndroidScheduleMode.exactAllowWhileIdle;
+    }
+
+    // Exact alarms are restricted on newer Android versions. Fall back to an
+    // inexact schedule instead of forcing the app into a fragile settings flow.
+    return AndroidScheduleMode.inexactAllowWhileIdle;
+  }
+
   Future<void> scheduleExpiryReminder(Item item) async {
     await initialize();
-    if (item.expiryDate == null) return;
-    final reminderDate = item.expiryDate!.subtract(const Duration(days: 3));
-    if (reminderDate.isBefore(DateTime.now())) return;
+    await cancelExpiryReminder(item.uuid);
 
-    final id = _notificationIdForItem(item.uuid);
+    if (item.expiryDate == null || item.isArchived) return;
+
+    final reminderDate = _morningOf(item.expiryDate!);
+    if (reminderDate.isBefore(DateTime.now())) return;
+    final scheduleMode = await _resolveAndroidScheduleMode();
+
     await _plugin.zonedSchedule(
-      id,
+      _expiryNotificationIdForItem(item.uuid),
       'Expiry Reminder',
-      '${item.name} expires on ${item.expiryDate!.day}/${item.expiryDate!.month}/${item.expiryDate!.year}',
+      '${item.name} expires today.',
       tz.TZDateTime.from(reminderDate, tz.local),
-      NotificationDetails(
-        android: const AndroidNotificationDetails(
-          NotificationConstants.expiryChannelId,
-          NotificationConstants.expiryChannelName,
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-        iOS: const DarwinNotificationDetails(),
-      ),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      _expiryNotificationDetails(),
+      androidScheduleMode: scheduleMode,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
 
-  /// Cancels a scheduled expiry reminder for [itemUuid].
   Future<void> cancelExpiryReminder(String itemUuid) async {
     await initialize();
-    await _plugin.cancel(_notificationIdForItem(itemUuid));
+    await _plugin.cancel(_expiryNotificationIdForItem(itemUuid));
   }
 
-  /// Schedules "I Lent It" reminder after [item.lentReminderAfterDays].
   Future<void> scheduleLentReminder(Item item) async {
     await initialize();
+    await cancelLentReminder(item.uuid);
+
     if (!item.isLent ||
-        item.lentOn == null ||
-        item.lentReminderAfterDays == null) {
+        item.isArchived ||
+        item.expectedReturnDate == null ||
+        item.lentTo?.trim().isEmpty != false) {
       return;
     }
 
-    final reminderDate = item.lentOn!.add(
-      Duration(days: item.lentReminderAfterDays!),
-    );
+    final primaryAt = _morningOf(item.expectedReturnDate!);
+    final scheduleMode = await _resolveAndroidScheduleMode();
+    if (primaryAt.isAfter(DateTime.now())) {
+      await _plugin.zonedSchedule(
+        _lentNotificationIdForItem(item.uuid),
+        'I Lent It Reminder',
+        'Your ${item.name} is due back from ${item.lentTo!.trim()} today.',
+        tz.TZDateTime.from(primaryAt, tz.local),
+        _lentNotificationDetails(),
+        androidScheduleMode: scheduleMode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
 
-    if (reminderDate.isBefore(DateTime.now())) return;
-
-    final id = _lentNotificationIdForItem(item.uuid);
-    final who = (item.lentTo?.trim().isNotEmpty ?? false)
-        ? item.lentTo!.trim()
-        : 'them';
-
-    await _plugin.zonedSchedule(
-      id,
-      'I Lent It Reminder',
-      'Have you got your ${item.name} back from $who?',
-      tz.TZDateTime.from(reminderDate, tz.local),
-      NotificationDetails(
-        android: const AndroidNotificationDetails(
-          NotificationConstants.lentChannelId,
-          NotificationConstants.lentChannelName,
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-        iOS: const DarwinNotificationDetails(),
-      ),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-    );
+    final followUpAt = primaryAt.add(const Duration(hours: 48));
+    if (followUpAt.isAfter(DateTime.now())) {
+      await _plugin.zonedSchedule(
+        _lentFollowUpNotificationIdForItem(item.uuid),
+        'Still waiting on a return?',
+        '${item.name} was due back from ${item.lentTo!.trim()} two days ago.',
+        tz.TZDateTime.from(followUpAt, tz.local),
+        _lentNotificationDetails(),
+        androidScheduleMode: scheduleMode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
   }
 
   Future<void> cancelLentReminder(String itemUuid) async {
     await initialize();
     await _plugin.cancel(_lentNotificationIdForItem(itemUuid));
+    await _plugin.cancel(_lentFollowUpNotificationIdForItem(itemUuid));
   }
 
-  /// Shows a one-time "still there?" reminder notification.
   Future<void> showStillThereReminder(Item item) async {
     await initialize();
     await _plugin.show(
-      _notificationIdForItem(item.uuid) +
-          NotificationConstants.reminderNotificationIdBase,
+      NotificationConstants.stillThereBackgroundNotificationId,
       'Still there?',
-      'Is your ${item.name} still in ${item.locationName ?? 'the same place'}?',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          NotificationConstants.reminderChannelId,
-          NotificationConstants.reminderChannelName,
-        ),
-        iOS: DarwinNotificationDetails(),
-      ),
+      'You saved ${item.name} 6 months ago. Is it still in the ${item.locationName ?? 'same place'}?',
+      _reminderNotificationDetails(),
     );
   }
 
-  Future<void> scheduleStillThereDailyReminder() async {
+  Future<void> showSeasonalReminder(
+    Item item, {
+    required int month,
+  }) async {
     await initialize();
-    await _plugin.periodicallyShow(
-      NotificationConstants.stillThereDailyNotificationId,
-      'Still there?',
-      'Quick check: are your saved items still in their places?',
-      RepeatInterval.daily,
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          NotificationConstants.reminderChannelId,
-          NotificationConstants.reminderChannelName,
-        ),
-        iOS: DarwinNotificationDetails(),
-      ),
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-    );
-  }
+    final intro = switch (month) {
+      DateTime.december => 'Winter is here!',
+      DateTime.january || DateTime.february => 'Cold weather reminder!',
+      DateTime.june || DateTime.july || DateTime.august =>
+        'Summer is here!',
+      _ => 'Seasonal reminder!',
+    };
 
-  Future<void> cancelStillThereDailyReminder() async {
-    await initialize();
-    await _plugin.cancel(NotificationConstants.stillThereDailyNotificationId);
+    await _plugin.show(
+      NotificationConstants.seasonalBackgroundNotificationId,
+      intro,
+      'Time to dig out your ${item.name}.',
+      _reminderNotificationDetails(),
+    );
   }
 
   Future<void> rescheduleExpiryReminders(Iterable<Item> items) async {
     await initialize();
     for (final item in items) {
-      if (item.expiryDate == null) {
-        await cancelExpiryReminder(item.uuid);
-        continue;
-      }
       await scheduleExpiryReminder(item);
     }
   }
@@ -243,17 +269,61 @@ class NotificationService {
   Future<void> rescheduleLentReminders(Iterable<Item> items) async {
     await initialize();
     for (final item in items) {
-      if (!item.isLent) {
-        await cancelLentReminder(item.uuid);
-        continue;
-      }
       await scheduleLentReminder(item);
     }
   }
 
   Future<void> cancelAll() => _plugin.cancelAll();
 
-  int _notificationIdForItem(String uuid) {
+  DateTime _morningOf(DateTime date) {
+    final target = DateTime(date.year, date.month, date.day, 9);
+    if (!target.isBefore(DateTime.now())) return target;
+
+    final today = DateTime.now();
+    final sameDay = today.year == date.year &&
+        today.month == date.month &&
+        today.day == date.day;
+    if (sameDay) {
+      return today.add(const Duration(minutes: 1));
+    }
+    return target;
+  }
+
+  NotificationDetails _expiryNotificationDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        NotificationConstants.expiryChannelId,
+        NotificationConstants.expiryChannelName,
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+  }
+
+  NotificationDetails _lentNotificationDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        NotificationConstants.lentChannelId,
+        NotificationConstants.lentChannelName,
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+  }
+
+  NotificationDetails _reminderNotificationDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        NotificationConstants.reminderChannelId,
+        NotificationConstants.reminderChannelName,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+  }
+
+  int _expiryNotificationIdForItem(String uuid) {
     return (uuid.hashCode.abs() % 90000) +
         NotificationConstants.expiryNotificationIdBase;
   }
@@ -261,5 +331,10 @@ class NotificationService {
   int _lentNotificationIdForItem(String uuid) {
     return (uuid.hashCode.abs() % 90000) +
         NotificationConstants.lentNotificationIdBase;
+  }
+
+  int _lentFollowUpNotificationIdForItem(String uuid) {
+    return (uuid.hashCode.abs() % 90000) +
+        NotificationConstants.lentFollowUpNotificationIdBase;
   }
 }

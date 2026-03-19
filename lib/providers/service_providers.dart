@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:async';
 
 import 'database_provider.dart';
+import '../services/background_scheduler_service.dart';
 import '../services/firebase_image_upload_service.dart';
 import '../services/firebase_sync_service.dart';
 import '../services/household_cloud_service.dart';
@@ -89,6 +90,10 @@ final householdSyncServiceProvider = Provider<HouseholdSyncService>(
 
 final notificationServiceProvider = Provider<NotificationService>(
   (ref) => NotificationService(),
+);
+
+final backgroundSchedulerServiceProvider = Provider<BackgroundSchedulerService>(
+  (ref) => BackgroundSchedulerService.instance,
 );
 
 final locationServiceProvider = Provider<LocationService>(

@@ -319,6 +319,7 @@ class HouseholdSyncService {
       lentTo: data['lentTo'] as String? ?? data['lentToName'] as String?,
       lentOn: _parseDateTime(data['lentOn']),
       expectedReturnDate: _parseDateTime(data['expectedReturnDate']),
+      seasonCategory: (data['seasonCategory'] as String?) ?? 'all_year',
       lentReminderAfterDays: data['lentReminderAfterDays'] as int?,
       isAvailableForLending:
           (data['isAvailableForLending'] as bool?) ?? true,

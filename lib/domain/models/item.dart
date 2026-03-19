@@ -22,6 +22,7 @@ class Item {
     this.lentTo,
     this.lentOn,
     this.expectedReturnDate,
+    this.seasonCategory = 'all_year',
     this.lentReminderAfterDays,
     this.isAvailableForLending = false,
     this.visibility = ItemVisibility.private_,
@@ -50,6 +51,7 @@ class Item {
   final String? lentTo;
   final DateTime? lentOn;
   final DateTime? expectedReturnDate;
+  final String seasonCategory;
   final int? lentReminderAfterDays;
   final bool isAvailableForLending;
   final ItemVisibility visibility;
@@ -85,6 +87,7 @@ class Item {
     String? lentTo,
     DateTime? lentOn,
     DateTime? expectedReturnDate,
+    String? seasonCategory,
     int? lentReminderAfterDays,
     bool? isAvailableForLending,
     ItemVisibility? visibility,
@@ -123,6 +126,7 @@ class Item {
       expectedReturnDate: clearExpectedReturnDate
           ? null
           : (expectedReturnDate ?? this.expectedReturnDate),
+      seasonCategory: seasonCategory ?? this.seasonCategory,
       lentReminderAfterDays: clearLentReminderAfterDays
           ? null
           : (lentReminderAfterDays ?? this.lentReminderAfterDays),
@@ -158,6 +162,7 @@ class Item {
       'lent_to': lentTo,
       'lent_on': lentOn?.millisecondsSinceEpoch,
       'expected_return_date': expectedReturnDate?.millisecondsSinceEpoch,
+      'season_category': seasonCategory,
       'lent_reminder_after_days': lentReminderAfterDays,
       'is_available_for_lending': isAvailableForLending ? 1 : 0,
       'visibility': visibility.value,
@@ -202,6 +207,7 @@ class Item {
               map['expected_return_date'] as int,
             )
           : null,
+      seasonCategory: (map['season_category'] as String?) ?? 'all_year',
       lentReminderAfterDays: map['lent_reminder_after_days'] as int?,
       isAvailableForLending:
           (map['is_available_for_lending'] as int? ?? 0) == 1,
@@ -241,6 +247,7 @@ class Item {
       'lentTo': lentTo,
       'lentOn': lentOn?.toIso8601String(),
       'expectedReturnDate': expectedReturnDate?.toIso8601String(),
+      'seasonCategory': seasonCategory,
       'lentReminderAfterDays': lentReminderAfterDays,
       'isAvailableForLending': isAvailableForLending,
       'visibility': visibility.value,
@@ -273,6 +280,7 @@ class Item {
       lentTo: json['lentTo'] as String?,
       lentOn: _dateTimeFromJson(json['lentOn']),
       expectedReturnDate: _dateTimeFromJson(json['expectedReturnDate']),
+      seasonCategory: (json['seasonCategory'] as String?) ?? 'all_year',
       lentReminderAfterDays: json['lentReminderAfterDays'] as int?,
       isAvailableForLending: json['isAvailableForLending'] as bool? ?? false,
       visibility: ItemVisibility.fromString(json['visibility'] as String?),

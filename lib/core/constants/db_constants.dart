@@ -3,7 +3,7 @@ class DbConstants {
   DbConstants._();
 
   static const String dbName = 'ikeep.db';
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
 
   // households
   static const String tableHouseholds = 'households';
@@ -36,6 +36,7 @@ class DbConstants {
   static const String colItemLentOn = 'lent_on'; // Unix ms
   static const String colItemExpectedReturnDate =
       'expected_return_date'; // Unix ms
+  static const String colItemSeasonCategory = 'season_category';
   static const String colItemLentReminderAfterDays = 'lent_reminder_after_days';
   static const String colItemIsAvailableForLending =
       'is_available_for_lending'; // 0 or 1

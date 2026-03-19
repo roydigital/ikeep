@@ -26,8 +26,10 @@ class NotificationConstants {
   // Expiry notifications use hash of itemUuid truncated to int range.
   // Reminder notifications use a fixed ID offset + index.
   static const int syncErrorNotificationId = 1;
-  static const int stillThereDailyNotificationId = 2;
+  static const int stillThereBackgroundNotificationId = 2;
+  static const int seasonalBackgroundNotificationId = 3;
   static const int expiryNotificationIdBase = 10000;
   static const int reminderNotificationIdBase = 20000;
   static const int lentNotificationIdBase = 30000;
+  static const int lentFollowUpNotificationIdBase = 40000;
 }

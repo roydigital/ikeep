@@ -32,6 +32,85 @@ class MlLabelService {
     }
   }
 
+  Future<String> classifySeasonCategory({
+    required String itemName,
+    List<String> tags = const [],
+    List<String> imagePaths = const [],
+  }) async {
+    final tokens = <String>[
+      itemName.toLowerCase(),
+      ...tags.map((tag) => tag.toLowerCase()),
+    ];
+
+    if (imagePaths.isNotEmpty) {
+      final labels = await getLabelsForImage(imagePaths.first);
+      tokens.addAll(labels.take(5).map((label) => label.label.toLowerCase()));
+    }
+
+    final haystack = tokens.join(' ');
+    final scores = <String, int>{
+      'winter': _scoreForKeywords(haystack, _winterKeywords),
+      'summer': _scoreForKeywords(haystack, _summerKeywords),
+      'holiday': _scoreForKeywords(haystack, _holidayKeywords),
+    };
+
+    final ranked = scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    if (ranked.isEmpty || ranked.first.value == 0) {
+      return 'all_year';
+    }
+
+    return ranked.first.key;
+  }
+
+  int _scoreForKeywords(String haystack, List<String> keywords) {
+    return keywords.where(haystack.contains).length;
+  }
+
+  static const List<String> _winterKeywords = [
+    'coat',
+    'jacket',
+    'sweater',
+    'hoodie',
+    'blanket',
+    'heater',
+    'boots',
+    'gloves',
+    'thermal',
+    'ski',
+    'snow',
+    'winter',
+  ];
+
+  static const List<String> _summerKeywords = [
+    'summer',
+    'beach',
+    'swim',
+    'swimsuit',
+    'sunscreen',
+    'fan',
+    'shorts',
+    'sandals',
+    'sunglasses',
+    'cooler',
+    'vacation',
+  ];
+
+  static const List<String> _holidayKeywords = [
+    'holiday',
+    'christmas',
+    'xmas',
+    'ornament',
+    'tree',
+    'lights',
+    'wreath',
+    'stocking',
+    'gift',
+    'festive',
+    'decoration',
+  ];
+
   Future<void> dispose() async {
     await _labeler?.close();
     _labeler = null;

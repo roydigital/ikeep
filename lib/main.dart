@@ -3,15 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'app.dart';
-import 'services/notification_service.dart';
+import 'services/background_scheduler_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp();
 
-  // Initialize notifications
-  await NotificationService().initialize();
+  await BackgroundSchedulerService.instance.initialize();
+  await BackgroundSchedulerService.instance.syncFromStoredSettings();
 
   runApp(
     const ProviderScope(
