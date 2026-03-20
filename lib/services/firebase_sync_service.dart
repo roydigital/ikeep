@@ -156,6 +156,7 @@ class FirebaseSyncService implements SyncService {
 
     try {
       await _ensureUserDocument(user);
+      await _locationDao.recalculateUsageCounts();
 
       final localLocations = await _locationDao.getAllLocations();
       final localItems = await _itemDao.getAllItems();
@@ -220,6 +221,8 @@ class FirebaseSyncService implements SyncService {
           await _itemDao.insertItem(_itemFromFirestore(remoteEntry.value));
         }
       }
+
+      await _locationDao.recalculateUsageCounts();
 
       _lastSyncedAt = DateTime.now();
       await _userDoc.set({

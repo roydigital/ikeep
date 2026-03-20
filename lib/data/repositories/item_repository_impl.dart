@@ -44,9 +44,9 @@ class ItemRepositoryImpl implements ItemRepository {
         );
         await historyDao.insertHistory(history);
         await _syncHistoryIfShared(history);
-        await locationDao.incrementUsageCount(normalized.locationUuid!);
       }
 
+      await locationDao.recalculateUsageCounts();
       await _syncItemVisibility(item: normalized);
       return null;
     } on DatabaseException catch (e) {
@@ -85,9 +85,9 @@ class ItemRepositoryImpl implements ItemRepository {
         );
         await historyDao.insertHistory(history);
         await _syncHistoryIfShared(history);
-        await locationDao.incrementUsageCount(normalized.locationUuid!);
       }
 
+      await locationDao.recalculateUsageCounts();
       await _syncItemVisibility(
         item: normalized,
         removeRemote:
@@ -115,6 +115,7 @@ class ItemRepositoryImpl implements ItemRepository {
       final archived =
           item.copyWith(isArchived: true, updatedAt: DateTime.now());
       await itemDao.updateItem(archived);
+      await locationDao.recalculateUsageCounts();
       await _syncItemVisibility(
           item: archived, removeRemote: archived.visibility.isHousehold);
       return null;
@@ -129,6 +130,7 @@ class ItemRepositoryImpl implements ItemRepository {
       final existing = await itemDao.getItemByUuid(uuid);
       await historyDao.deleteHistoryForItem(uuid);
       await itemDao.deleteItem(uuid);
+      await locationDao.recalculateUsageCounts();
 
       if (existing != null && existing.visibility.isHousehold) {
         final householdId = await _resolveHouseholdId(existing);

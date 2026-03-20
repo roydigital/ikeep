@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -12,13 +13,25 @@ import '../screens/settings/settings_screen.dart';
 import '../providers/settings_provider.dart';
 import 'app_routes.dart';
 
+class _RouterRefreshNotifier extends ChangeNotifier {
+  void refresh() => notifyListeners();
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
-  final settings = ref.watch(settingsProvider);
+  final refreshNotifier = _RouterRefreshNotifier();
+  ref.onDispose(refreshNotifier.dispose);
+  ref.listen<AppSettings>(settingsProvider, (previous, next) {
+    if (previous?.isOnboardingComplete != next.isOnboardingComplete) {
+      refreshNotifier.refresh();
+    }
+  });
 
   return GoRouter(
     initialLocation: AppRoutes.splash,
     debugLogDiagnostics: false,
+    refreshListenable: refreshNotifier,
     redirect: (context, state) {
+      final settings = ref.read(settingsProvider);
       final onboardingDone = settings.isOnboardingComplete;
       final isOnboarding = state.uri.path == AppRoutes.onboarding;
 

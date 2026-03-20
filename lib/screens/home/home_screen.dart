@@ -1,45 +1,88 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../../domain/models/item.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/auth_providers.dart';
-import '../../providers/household_providers.dart';
+import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
-import '../../providers/location_providers.dart';
+import '../../providers/location_usage_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/adaptive_image.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../../widgets/app_showcase.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final GlobalKey _fabShowcaseKey = GlobalKey();
+  final GlobalKey _searchShowcaseKey = GlobalKey();
+  final GlobalKey _dashboardShowcaseKey = GlobalKey();
+  bool _tourQueued = false;
+
+  void _startHomeTour(BuildContext context) {
+    if (_tourQueued) return;
+    _tourQueued = true;
+
+    ShowCaseWidget.of(context).startShowCase([
+      _fabShowcaseKey,
+      _searchShowcaseKey,
+      _dashboardShowcaseKey,
+    ]);
+
+    ref.read(homeTourControllerProvider.notifier).markSeen();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final user = ref.watch(authStateProvider).valueOrNull;
+    final hasSeenHomeTour = ref.watch(homeTourControllerProvider);
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: _MainContent(
-              profilePhotoUrl: user?.photoURL,
-            ),
+    return ShowCaseWidget(
+      blurValue: 1.5,
+      enableAutoScroll: true,
+      globalTooltipActionConfig: appShowcaseTooltipActionConfig,
+      globalTooltipActions: appShowcaseTooltipActions(),
+      builder: (tourContext) {
+        if (hasSeenHomeTour.valueOrNull == false && !_tourQueued) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _tourQueued) return;
+            _startHomeTour(tourContext);
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: _MainContent(
+                  profilePhotoUrl: user?.photoURL,
+                  searchShowcaseKey: _searchShowcaseKey,
+                  dashboardShowcaseKey: _dashboardShowcaseKey,
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _BottomNav(bottomInset: bottomInset),
+              ),
+              _Fab(showcaseKey: _fabShowcaseKey),
+            ],
           ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _BottomNav(bottomInset: bottomInset),
-          ),
-          const _Fab(),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -49,9 +92,13 @@ class HomeScreen extends ConsumerWidget {
 class _MainContent extends ConsumerWidget {
   const _MainContent({
     required this.profilePhotoUrl,
+    required this.searchShowcaseKey,
+    required this.dashboardShowcaseKey,
   });
 
   final String? profilePhotoUrl;
+  final GlobalKey searchShowcaseKey;
+  final GlobalKey dashboardShowcaseKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -73,14 +120,26 @@ class _MainContent extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(
                 horizontal: AppDimensions.spacingMd,
               ),
-              child: _buildSearchBar(context),
+              child: _buildTourStep(
+                showcaseKey: searchShowcaseKey,
+                title: 'Search Fast',
+                description:
+                    'Find anything instantly. Search by name, tags, or location.',
+                child: _buildSearchBar(context),
+              ),
             ),
             const SizedBox(height: 14),
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: AppDimensions.spacingMd,
               ),
-              child: _ActionNeededCard(),
+              child: _buildTourStep(
+                showcaseKey: dashboardShowcaseKey,
+                title: 'Your Dashboard',
+                description:
+                    'Keep track of items you\'ve lent out or things expiring soon right here.',
+                child: const _ActionNeededCard(),
+              ),
             ),
             const SizedBox(height: 18),
             _buildRecentlySaved(context, itemsAsync),
@@ -128,7 +187,7 @@ class _MainContent extends ConsumerWidget {
                   color: isDark
                       ? AppColors.textPrimaryDark
                       : AppColors.textPrimaryLight,
-                  fontSize: 22,
+                  fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -267,6 +326,37 @@ class _MainContent extends ConsumerWidget {
     );
   }
 
+  Widget _buildTourStep({
+    required GlobalKey showcaseKey,
+    required String title,
+    required String description,
+    required Widget child,
+  }) {
+    return Showcase(
+      key: showcaseKey,
+      title: title,
+      description: description,
+      tooltipBackgroundColor: AppColors.surfaceDark,
+      textColor: AppColors.textPrimaryDark,
+      titleTextStyle: const TextStyle(
+        color: AppColors.textPrimaryDark,
+        fontSize: 18,
+        fontWeight: FontWeight.w800,
+      ),
+      descTextStyle: const TextStyle(
+        color: AppColors.textSecondaryDark,
+        fontSize: 14,
+        height: 1.45,
+      ),
+      tooltipBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+      targetBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+      targetPadding: const EdgeInsets.all(6),
+      overlayOpacity: 0.78,
+      disableDefaultTargetGestures: true,
+      child: child,
+    );
+  }
+
   Widget _buildRecentlySaved(
     BuildContext context,
     AsyncValue<List<Item>> itemsAsync,
@@ -289,7 +379,7 @@ class _MainContent extends ConsumerWidget {
                   color: isDark
                       ? AppColors.textPrimaryDark
                       : AppColors.textPrimaryLight,
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -305,7 +395,7 @@ class _MainContent extends ConsumerWidget {
                   'View All',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 18,
+                    fontSize: 15,
                     color: AppColors.primary,
                   ),
                 ),
@@ -498,56 +588,134 @@ class _ActionNeededCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lentAsync = ref.watch(lentItemsProvider);
+    final itemsAsync = ref.watch(allItemsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return lentAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+    return itemsAsync.when(
+      loading: () => _buildCard(
+        isDark: isDark,
+        icon: Icons.space_dashboard_rounded,
+        title: 'Your Dashboard',
+        headline: 'Preparing your lending and expiry overview...',
+        supportingText:
+            'Returns, due dates, and expiring items will show up here.',
+        lentOutCount: 0,
+        expiringSoonCount: 0,
+        isUrgent: false,
+      ),
+      error: (_, __) => _buildCard(
+        isDark: isDark,
+        icon: Icons.space_dashboard_rounded,
+        title: 'Your Dashboard',
+        headline: 'Keep an eye on what needs attention.',
+        supportingText:
+            'This area surfaces items you lent out and things expiring soon.',
+        lentOutCount: 0,
+        expiringSoonCount: 0,
+        isUrgent: false,
+      ),
       data: (items) {
         final now = DateTime.now();
-        final overdueItems = items
+        final today = DateTime(now.year, now.month, now.day);
+        final activeItems = items.where((item) => !item.isArchived).toList();
+        final lentOutCount = activeItems.where((item) => item.isLent).length;
+        final overdueReturnCount = activeItems
             .where(
               (item) =>
                   item.isLent &&
                   item.expectedReturnDate != null &&
                   item.expectedReturnDate!.isBefore(now),
             )
-            .toList();
+            .length;
+        final expiringSoonCount = activeItems.where((item) {
+          final expiryDate = item.expiryDate;
+          if (expiryDate == null) return false;
+          final expiryDay = DateTime(
+            expiryDate.year,
+            expiryDate.month,
+            expiryDate.day,
+          );
+          final daysUntilExpiry = expiryDay.difference(today).inDays;
+          return daysUntilExpiry >= 0 && daysUntilExpiry <= 14;
+        }).length;
 
-        if (overdueItems.isEmpty) {
-          return const SizedBox.shrink();
-        }
+        final hasUrgentItems =
+            overdueReturnCount > 0 || expiringSoonCount > 0;
+        final headline = switch ((overdueReturnCount, expiringSoonCount)) {
+          (final overdue, final expiring)
+              when overdue > 0 && expiring > 0 =>
+            '$overdue ${_pluralize(overdue, "return")} overdue and '
+                '$expiring ${_pluralize(expiring, "item")} expiring soon.',
+          (final overdue, _) when overdue > 0 =>
+            '$overdue ${_pluralize(overdue, "return")} overdue for check-in.',
+          (_, final expiring) when expiring > 0 =>
+            '$expiring ${_pluralize(expiring, "item")} expiring within 14 days.',
+          _ when lentOutCount > 0 =>
+            'Nothing urgent right now. $lentOutCount ${_pluralize(lentOutCount, "item")} currently out on loan.',
+          _ => 'Nothing urgent right now.',
+        };
+        final supportingText = hasUrgentItems
+            ? 'Keep borrowing deadlines and expiry reminders visible at a glance.'
+            : 'As you save, lend, and annotate items, this dashboard will surface what needs attention.';
 
-        final backgroundColor = isDark
-            ? AppColors.error.withValues(alpha: 0.18)
-            : AppColors.warning.withValues(alpha: 0.14);
-        final borderColor = isDark
-            ? AppColors.error.withValues(alpha: 0.42)
-            : AppColors.warning.withValues(alpha: 0.42);
-        final iconColor = isDark ? AppColors.error : AppColors.warning;
+        return _buildCard(
+          isDark: isDark,
+          icon: hasUrgentItems
+              ? Icons.warning_amber_rounded
+              : Icons.space_dashboard_rounded,
+          title: 'Your Dashboard',
+          headline: headline,
+          supportingText: supportingText,
+          lentOutCount: lentOutCount,
+          expiringSoonCount: expiringSoonCount,
+          isUrgent: hasUrgentItems,
+        );
+      },
+    );
+  }
 
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppDimensions.spacingMd),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-            border: Border.all(color: borderColor),
-          ),
-          child: Row(
+  Widget _buildCard({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    required String headline,
+    required String supportingText,
+    required int lentOutCount,
+    required int expiringSoonCount,
+    required bool isUrgent,
+  }) {
+    final backgroundColor = isUrgent
+        ? (isDark
+            ? AppColors.warning.withValues(alpha: 0.16)
+            : AppColors.warning.withValues(alpha: 0.12))
+        : (isDark ? AppColors.surfaceDark : AppColors.surfaceLight);
+    final borderColor = isUrgent
+        ? AppColors.warning.withValues(alpha: isDark ? 0.4 : 0.28)
+        : (isDark ? AppColors.borderDark : AppColors.borderLight);
+    final iconColor =
+        isUrgent ? AppColors.warning : AppColors.primary.withValues(alpha: 0.9);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppDimensions.spacingMd),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: iconColor.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
                 ),
-                child: Icon(
-                  Icons.warning_amber_rounded,
-                  color: iconColor,
-                ),
+                child: Icon(icon, color: iconColor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -555,7 +723,7 @@ class _ActionNeededCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Action Needed',
+                      title,
                       style: TextStyle(
                         color: isDark
                             ? AppColors.textPrimaryDark
@@ -566,15 +734,14 @@ class _ActionNeededCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      overdueItems.length == 1
-                          ? 'You have items overdue for return.'
-                          : 'You have ${overdueItems.length} items overdue for return.',
+                      headline,
                       style: TextStyle(
                         color: isDark
-                            ? AppColors.textSecondaryDark
-                            : AppColors.textSecondaryLight,
-                        fontSize: 13,
-                        height: 1.3,
+                            ? AppColors.textPrimaryDark
+                            : AppColors.textPrimaryLight,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
                       ),
                     ),
                   ],
@@ -582,8 +749,94 @@ class _ActionNeededCard extends ConsumerWidget {
               ),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _DashboardMetric(
+                  label: 'Lent Out',
+                  value: '$lentOutCount',
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _DashboardMetric(
+                  label: 'Expiring Soon',
+                  value: '$expiringSoonCount',
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            supportingText,
+            style: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+              fontSize: 12.5,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _pluralize(int count, String singular) {
+    return count == 1 ? singular : '${singular}s';
+  }
+}
+
+class _DashboardMetric extends StatelessWidget {
+  const _DashboardMetric({
+    required this.label,
+    required this.value,
+    required this.isDark,
+  });
+
+  final String label;
+  final String value;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppDimensions.spacingMd,
+        vertical: AppDimensions.spacingSm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: isDark ? 0.16 : 0.08),
+        borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color:
+                  isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -593,7 +846,7 @@ class _TopLocationsGrid extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final locationsAsync = ref.watch(allLocationsProvider);
+    final locationsAsync = ref.watch(locationsWithDerivedUsageProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
@@ -605,7 +858,7 @@ class _TopLocationsGrid extends ConsumerWidget {
             color: isDark
                 ? AppColors.textPrimaryDark
                 : AppColors.textPrimaryLight,
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -1269,7 +1522,9 @@ class _ForgottenItemCard extends StatelessWidget {
 // ── Floating action button ─────────────────────────────────────────────────────
 
 class _Fab extends StatelessWidget {
-  const _Fab();
+  const _Fab({required this.showcaseKey});
+
+  final GlobalKey showcaseKey;
 
   @override
   Widget build(BuildContext context) {
@@ -1278,30 +1533,53 @@ class _Fab extends StatelessWidget {
       left: 0,
       right: 0,
       child: Center(
-        child: GestureDetector(
-          onTap: () => context.push(AppRoutes.save),
-          child: Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.primary,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.12),
-                width: 4,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.5),
-                  blurRadius: 28,
-                  spreadRadius: 6,
+        child: Showcase(
+          key: showcaseKey,
+          title: 'Start Here!',
+          description:
+              'Tap to save your first item, document, or memory.',
+          tooltipBackgroundColor: AppColors.surfaceDark,
+          textColor: AppColors.textPrimaryDark,
+          titleTextStyle: const TextStyle(
+            color: AppColors.textPrimaryDark,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+          descTextStyle: const TextStyle(
+            color: AppColors.textSecondaryDark,
+            fontSize: 14,
+            height: 1.45,
+          ),
+          tooltipBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+          targetShapeBorder: const CircleBorder(),
+          targetPadding: const EdgeInsets.all(8),
+          overlayOpacity: 0.78,
+          disableDefaultTargetGestures: true,
+          child: GestureDetector(
+            onTap: () => context.push(AppRoutes.save),
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.primary,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  width: 4,
                 ),
-              ],
-            ),
-            child: const Icon(
-              Icons.photo_camera,
-              color: Colors.white,
-              size: 30,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.5),
+                    blurRadius: 28,
+                    spreadRadius: 6,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.photo_camera,
+                color: Colors.white,
+                size: 30,
+              ),
             ),
           ),
         ),

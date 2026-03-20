@@ -1,15 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../../domain/models/sync_status.dart';
 import '../../providers/auth_providers.dart';
+import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
@@ -18,6 +19,7 @@ import '../../providers/sync_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../../widgets/app_showcase.dart';
 
 const _kAccent = AppColors.primary;
 
@@ -86,6 +88,37 @@ Color get _kIcon => _activeColors.icon;
 Color get _kSwitchOffTrack => _activeColors.switchOffTrack;
 Color get _kSwitchOffThumb => _activeColors.switchOffThumb;
 
+Widget _buildSettingsTourStep({
+  required GlobalKey showcaseKey,
+  required String title,
+  required String description,
+  required Widget child,
+}) {
+  return Showcase(
+    key: showcaseKey,
+    title: title,
+    description: description,
+    tooltipBackgroundColor: AppColors.surfaceDark,
+    textColor: AppColors.textPrimaryDark,
+    titleTextStyle: const TextStyle(
+      color: AppColors.textPrimaryDark,
+      fontSize: 18,
+      fontWeight: FontWeight.w800,
+    ),
+    descTextStyle: const TextStyle(
+      color: AppColors.textSecondaryDark,
+      fontSize: 14,
+      height: 1.45,
+    ),
+    tooltipBorderRadius: BorderRadius.circular(16),
+    targetBorderRadius: BorderRadius.circular(28),
+    targetPadding: const EdgeInsets.all(6),
+    overlayOpacity: 0.78,
+    disableDefaultTargetGestures: true,
+    child: child,
+  );
+}
+
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -101,6 +134,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _lentReminders = true;
   bool _backupEnabled = false;
   bool _isSaving = false;
+  final GlobalKey _accountShowcaseKey = GlobalKey();
+  final GlobalKey _preferencesShowcaseKey = GlobalKey();
+  final GlobalKey _premiumShowcaseKey = GlobalKey();
+  bool _settingsTourQueued = false;
 
   Future<void> _handleGoogleSignIn() async {
     final googleSignIn = ref.read(googleSignInProvider);
@@ -154,6 +191,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _seasonal != settings.seasonalRemindersEnabled ||
         _lentReminders != settings.lentRemindersEnabled ||
         _backupEnabled != settings.isBackupEnabled;
+  }
+
+  Future<void> _toggleDarkMode(bool enabled) async {
+    setState(() => _darkMode = enabled);
+    await ref
+        .read(settingsProvider.notifier)
+        .setThemeMode(enabled ? ThemeMode.dark : ThemeMode.light);
   }
 
   Future<void> _save(AppSettings settings) async {
@@ -354,6 +398,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final authUser = ref.watch(authStateProvider).valueOrNull;
+    final hasSeenSettingsTour = ref.watch(settingsTourControllerProvider);
     final syncStatus = ref.watch(syncStatusProvider);
     final lastSynced = ref.watch(lastSyncedAtProvider).valueOrNull;
     _initFromSettings(settings);
@@ -372,126 +417,164 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             : syncStatus.hasError
                 ? 'Error'
                 : 'Connected';
-    return Scaffold(
-      backgroundColor: _kBg,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _Header(
-                    canSave: canSave,
-                    isSaving: _isSaving,
-                    onBack: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go(AppRoutes.home);
-                      }
-                    },
-                    onSave: () => _save(settings),
-                  ),
-                ),
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    24,
-                    20,
-                    AppNavBar.contentBottomSpacing(context),
-                  ),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate(
-                      [
-                        _SectionLabel('ACCOUNT'),
-                        const SizedBox(height: 14),
-                        _AccountCard(
-                          backupEnabled: _backupEnabled,
-                          displayName: authUser?.displayName,
-                          photoUrl: authUser?.photoURL,
-                          isGoogleSignedIn: authUser != null,
-                          onGoogleSignInTap:
-                              authUser == null ? _handleGoogleSignIn : null,
-                        ),
-                        const SizedBox(height: 36),
-                        _SectionLabel('PREFERENCES'),
-                        const SizedBox(height: 14),
-                        _PreferencesCard(
-                          darkMode: _darkMode,
-                          stillThere: _stillThere,
-                          seasonal: _seasonal,
-                          lentReminders: _lentReminders,
-                          onDarkModeChanged: (v) =>
-                              setState(() => _darkMode = v),
-                          onStillThereChanged: (v) =>
-                              setState(() => _stillThere = v),
-                          onSeasonalChanged: (v) =>
-                              setState(() => _seasonal = v),
-                          onLentRemindersChanged: (v) =>
-                              setState(() => _lentReminders = v),
-                        ),
-                        const SizedBox(height: 36),
-                        _SectionLabel('PREMIUM FEATURES'),
-                        const SizedBox(height: 14),
-                        _PremiumFeaturesCard(
-                          statusText: statusText,
-                          statusColor: statusColor,
-                          isSyncing: syncStatus.isSyncing,
-                          progress: _backupEnabled ? 0.85 : 0.25,
-                          lastSyncedText: _formatLastSynced(lastSynced),
-                          onSyncTap: _runSync,
-                          onManageFamily: () =>
-                              context.push(AppRoutes.manageFamily),
-                        ),
-                        const SizedBox(height: 36),
-                        _SectionLabel('SUPPORT'),
-                        const SizedBox(height: 14),
-                        _SupportCard(
-                          onHelp: () => _showInfo('Help Center coming soon'),
-                          onContact: () =>
-                              _showInfo('Contact: support@ikeep.app'),
-                          onTerms: () =>
-                              _showInfo('Terms & Privacy coming soon'),
-                        ),
-                        const SizedBox(height: 52),
-                        Center(
-                          child: Text(
-                            'Ikeep Version 2.4.0 (b892)',
-                            style: TextStyle(
-                              color: _kTextMuted,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Center(
-                          child: TextButton(
-                            onPressed: _handleLogout,
-                            child: const Text(
-                              'Log Out',
-                              style: TextStyle(
-                                color: AppColors.error,
-                                fontSize: 33 / 2,
-                                fontWeight: FontWeight.w500,
+    return ShowCaseWidget(
+      blurValue: 1.5,
+      enableAutoScroll: true,
+      globalTooltipActionConfig: appShowcaseTooltipActionConfig,
+      globalTooltipActions: appShowcaseTooltipActions(),
+      builder: (tourContext) {
+        if (hasSeenSettingsTour.valueOrNull == false && !_settingsTourQueued) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _settingsTourQueued) return;
+            _settingsTourQueued = true;
+            ShowCaseWidget.of(tourContext).startShowCase([
+              _accountShowcaseKey,
+              _preferencesShowcaseKey,
+              _premiumShowcaseKey,
+            ]);
+            ref.read(settingsTourControllerProvider.notifier).markSeen();
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: _kBg,
+          body: Stack(
+            children: [
+              SafeArea(
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: _Header(
+                        canSave: canSave,
+                        isSaving: _isSaving,
+                        onBack: () {
+                          if (context.canPop()) {
+                            context.pop();
+                          } else {
+                            context.go(AppRoutes.home);
+                          }
+                        },
+                        onSave: () => _save(settings),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        24,
+                        20,
+                        AppNavBar.contentBottomSpacing(context),
+                      ),
+                      sliver: SliverList(
+                        delegate: SliverChildListDelegate(
+                          [
+                            _SectionLabel('ACCOUNT'),
+                            const SizedBox(height: 14),
+                            _buildSettingsTourStep(
+                              showcaseKey: _accountShowcaseKey,
+                              title: 'Your Account',
+                              description:
+                                  'Connect your account, confirm your membership status, and see whether backup is active.',
+                              child: _AccountCard(
+                                backupEnabled: _backupEnabled,
+                                displayName: authUser?.displayName,
+                                photoUrl: authUser?.photoURL,
+                                isGoogleSignedIn: authUser != null,
+                                onGoogleSignInTap:
+                                    authUser == null ? _handleGoogleSignIn : null,
                               ),
                             ),
-                          ),
+                            const SizedBox(height: 36),
+                            _SectionLabel('PREFERENCES'),
+                            const SizedBox(height: 14),
+                            _buildSettingsTourStep(
+                              showcaseKey: _preferencesShowcaseKey,
+                              title: 'Tune Your Preferences',
+                              description:
+                                  'Adjust theme and reminder behavior here so Ikeep matches how you actually use it.',
+                              child: _PreferencesCard(
+                                darkMode: _darkMode,
+                                stillThere: _stillThere,
+                                seasonal: _seasonal,
+                                lentReminders: _lentReminders,
+                                onDarkModeChanged: _toggleDarkMode,
+                                onStillThereChanged: (v) =>
+                                    setState(() => _stillThere = v),
+                                onSeasonalChanged: (v) =>
+                                    setState(() => _seasonal = v),
+                                onLentRemindersChanged: (v) =>
+                                    setState(() => _lentReminders = v),
+                              ),
+                            ),
+                            const SizedBox(height: 36),
+                            _SectionLabel('PREMIUM FEATURES'),
+                            const SizedBox(height: 14),
+                            _buildSettingsTourStep(
+                              showcaseKey: _premiumShowcaseKey,
+                              title: 'Backup And Family Features',
+                              description:
+                                  'Monitor sync status, trigger a backup, and manage family-sharing features from this card.',
+                              child: _PremiumFeaturesCard(
+                                statusText: statusText,
+                                statusColor: statusColor,
+                                isSyncing: syncStatus.isSyncing,
+                                progress: _backupEnabled ? 0.85 : 0.25,
+                                lastSyncedText: _formatLastSynced(lastSynced),
+                                onSyncTap: _runSync,
+                                onManageFamily: () =>
+                                    context.push(AppRoutes.manageFamily),
+                              ),
+                            ),
+                            const SizedBox(height: 36),
+                            _SectionLabel('SUPPORT'),
+                            const SizedBox(height: 14),
+                            _SupportCard(
+                              onHelp: () => _showInfo('Help Center coming soon'),
+                              onContact: () =>
+                                  _showInfo('Contact: support@ikeep.app'),
+                              onTerms: () =>
+                                  _showInfo('Terms & Privacy coming soon'),
+                            ),
+                            const SizedBox(height: 52),
+                            Center(
+                              child: Text(
+                                'Ikeep Version 2.4.0 (b892)',
+                                style: TextStyle(
+                                  color: _kTextMuted,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            Center(
+                              child: TextButton(
+                                onPressed: _handleLogout,
+                                child: const Text(
+                                  'Log Out',
+                                  style: TextStyle(
+                                    color: AppColors.error,
+                                    fontSize: 33 / 2,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: AppNavBar(activeTab: AppNavTab.settings),
+              ),
+            ],
           ),
-          const Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: AppNavBar(activeTab: AppNavTab.settings),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -570,7 +653,7 @@ class _SectionLabel extends StatelessWidget {
         color: _kAccent,
         fontWeight: FontWeight.w800,
         letterSpacing: 1.5,
-        fontSize: 17,
+        fontSize: 13,
       ),
     );
   }

@@ -2,18 +2,77 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../../domain/models/item.dart';
 import '../../domain/models/shared_item.dart';
 import '../../providers/history_providers.dart';
+import '../../providers/home_tour_provider.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/adaptive_image.dart';
+import '../../widgets/app_showcase.dart';
 
 enum _FilterType { all, recent, location, tags }
+
+Color _searchResultLocationColor(bool isDark) {
+  if (isDark) {
+    return Color.lerp(
+      AppColors.primaryLight,
+      AppColors.textPrimaryDark,
+      0.32,
+    )!;
+  }
+  return AppColors.primaryDark;
+}
+
+Color _searchResultLocationBackground(bool isDark) {
+  return isDark
+      ? AppColors.primaryLight.withValues(alpha: 0.12)
+      : AppColors.primary.withValues(alpha: 0.08);
+}
+
+Color _searchResultDetailColor(bool isDark) {
+  return Color.lerp(
+    isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+    isDark ? AppColors.primaryLight : AppColors.primary,
+    isDark ? 0.12 : 0.08,
+  )!;
+}
+
+Widget _buildListingTourStep({
+  required GlobalKey showcaseKey,
+  required String title,
+  required String description,
+  required Widget child,
+}) {
+  return Showcase(
+    key: showcaseKey,
+    title: title,
+    description: description,
+    tooltipBackgroundColor: AppColors.surfaceDark,
+    textColor: AppColors.textPrimaryDark,
+    titleTextStyle: const TextStyle(
+      color: AppColors.textPrimaryDark,
+      fontSize: 18,
+      fontWeight: FontWeight.w800,
+    ),
+    descTextStyle: const TextStyle(
+      color: AppColors.textSecondaryDark,
+      fontSize: 14,
+      height: 1.45,
+    ),
+    tooltipBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+    targetBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+    targetPadding: const EdgeInsets.all(6),
+    overlayOpacity: 0.78,
+    disableDefaultTargetGestures: true,
+    child: child,
+  );
+}
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({
@@ -31,10 +90,14 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   late final TextEditingController _controller;
+  final GlobalKey _searchInputShowcaseKey = GlobalKey();
+  final GlobalKey _filterShowcaseKey = GlobalKey();
+  final GlobalKey _resultsShowcaseKey = GlobalKey();
   _FilterType _activeFilter = _FilterType.all;
   String? _selectedLocation;
   String? _selectedTag;
   late bool _isHouseholdMode;
+  bool _itemListingTourQueued = false;
 
   @override
   void initState() {
@@ -110,6 +173,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
+  void _startItemListingTour(BuildContext context) {
+    if (_itemListingTourQueued) return;
+    _itemListingTourQueued = true;
+
+    ShowCaseWidget.of(context).startShowCase([
+      _searchInputShowcaseKey,
+      _filterShowcaseKey,
+      _resultsShowcaseKey,
+    ]);
+
+    ref.read(itemListingTourControllerProvider.notifier).markSeen();
+  }
+
   List<Item> _applyFilter(List<Item> items) {
     var filtered = [...items];
 
@@ -138,6 +214,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final allItemsAsync = ref.watch(allItemsProvider);
+    final hasSeenItemListingTour = ref.watch(itemListingTourControllerProvider);
     final locationOptions = allItemsAsync.maybeWhen(
       data: _locationOptions,
       orElse: () => const <String>[],
@@ -146,37 +223,63 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       data: _tagOptions,
       orElse: () => const <String>[],
     );
+    final shouldAutofocusSearch = hasSeenItemListingTour.valueOrNull == true;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Column(
-        children: [
-          _SearchHeader(
-            controller: _controller,
-            isDark: isDark,
-            isHouseholdMode: false,
-            isSignedIn: false,
-            activeFilter: _activeFilter,
-            selectedLocation: _selectedLocation,
-            selectedTag: _selectedTag,
-            locationOptions: locationOptions,
-            tagOptions: tagOptions,
-            onQueryChanged: _onQueryChanged,
-            onClear: _clearQuery,
-            onFilterSelected: _onPrimaryFilterSelected,
-            onLocationSelected: _onLocationSelected,
-            onTagSelected: _onTagSelected,
-            onModeChanged: (_) {},
+    return ShowCaseWidget(
+      blurValue: 1.5,
+      enableAutoScroll: true,
+      globalTooltipActionConfig: appShowcaseTooltipActionConfig,
+      globalTooltipActions: appShowcaseTooltipActions(),
+      builder: (tourContext) {
+        if (hasSeenItemListingTour.valueOrNull == false &&
+            !_itemListingTourQueued) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _itemListingTourQueued) return;
+            _startItemListingTour(tourContext);
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Column(
+            children: [
+              _SearchHeader(
+                controller: _controller,
+                isDark: isDark,
+                isHouseholdMode: false,
+                isSignedIn: false,
+                activeFilter: _activeFilter,
+                selectedLocation: _selectedLocation,
+                selectedTag: _selectedTag,
+                locationOptions: locationOptions,
+                tagOptions: tagOptions,
+                searchShowcaseKey: _searchInputShowcaseKey,
+                filterShowcaseKey: _filterShowcaseKey,
+                shouldAutofocusSearch: shouldAutofocusSearch,
+                onQueryChanged: _onQueryChanged,
+                onClear: _clearQuery,
+                onFilterSelected: _onPrimaryFilterSelected,
+                onLocationSelected: _onLocationSelected,
+                onTagSelected: _onTagSelected,
+                onModeChanged: (_) {},
+              ),
+              Expanded(
+                child: _buildListingTourStep(
+                  showcaseKey: _resultsShowcaseKey,
+                  title: 'Browse Everything',
+                  description:
+                      'Your items appear here. Open any card to view details, edit information, or jump back to where it is stored.',
+                  child: _ResultsList(
+                    isDark: isDark,
+                    applyFilter: _applyFilter,
+                    sourceItemsAsync: allItemsAsync,
+                  ),
+                ),
+              ),
+            ],
           ),
-          Expanded(
-            child: _ResultsList(
-              isDark: isDark,
-              applyFilter: _applyFilter,
-              sourceItemsAsync: allItemsAsync,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -194,6 +297,9 @@ class _SearchHeader extends StatelessWidget {
     required this.selectedTag,
     required this.locationOptions,
     required this.tagOptions,
+    required this.searchShowcaseKey,
+    required this.filterShowcaseKey,
+    required this.shouldAutofocusSearch,
     required this.onQueryChanged,
     required this.onClear,
     required this.onFilterSelected,
@@ -211,6 +317,9 @@ class _SearchHeader extends StatelessWidget {
   final String? selectedTag;
   final List<String> locationOptions;
   final List<String> tagOptions;
+  final GlobalKey searchShowcaseKey;
+  final GlobalKey filterShowcaseKey;
+  final bool shouldAutofocusSearch;
   final ValueChanged<String> onQueryChanged;
   final VoidCallback onClear;
   final ValueChanged<_FilterType> onFilterSelected;
@@ -284,58 +393,70 @@ class _SearchHeader extends StatelessWidget {
                 AppDimensions.spacingMd,
                 0,
               ),
-              child: _SearchInput(
-                controller: controller,
-                isDark: isDark,
-                onChanged: onQueryChanged,
-                onClear: onClear,
+              child: _buildListingTourStep(
+                showcaseKey: searchShowcaseKey,
+                title: 'Search Your Items',
+                description:
+                    'Type a name, tag, or location to narrow the list instantly.',
+                child: _SearchInput(
+                  controller: controller,
+                  isDark: isDark,
+                  shouldAutofocus: shouldAutofocusSearch,
+                  onChanged: onQueryChanged,
+                  onClear: onClear,
+                ),
               ),
             ),
             const SizedBox(height: AppDimensions.spacingSm),
-            SizedBox(
-              height: 38,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppDimensions.spacingMd,
+            _buildListingTourStep(
+              showcaseKey: filterShowcaseKey,
+              title: 'Refine the List',
+              description:
+                  'Use these quick filters to jump to recent items or narrow the list by location and tags.',
+              child: SizedBox(
+                height: 38,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppDimensions.spacingMd,
+                  ),
+                  children: _FilterType.values.map((f) {
+                    if (f == _FilterType.location) {
+                      return _DropdownFilterChip(
+                        label: selectedLocation == null
+                            ? 'Location'
+                            : 'Location: $selectedLocation',
+                        isActive: activeFilter == f,
+                        isDark: isDark,
+                        options: locationOptions,
+                        allOptionLabel: 'All locations',
+                        onSelected: onLocationSelected,
+                        onActivated: () =>
+                            onFilterSelected(_FilterType.location),
+                      );
+                    }
+
+                    if (f == _FilterType.tags) {
+                      return _DropdownFilterChip(
+                        label:
+                            selectedTag == null ? 'Tags' : 'Tag: $selectedTag',
+                        isActive: activeFilter == f,
+                        isDark: isDark,
+                        options: tagOptions,
+                        allOptionLabel: 'All tags',
+                        onSelected: onTagSelected,
+                        onActivated: () => onFilterSelected(_FilterType.tags),
+                      );
+                    }
+
+                    return _FilterChip(
+                      label: _filterLabel(f),
+                      isActive: activeFilter == f,
+                      isDark: isDark,
+                      onTap: () => onFilterSelected(f),
+                    );
+                  }).toList(),
                 ),
-                children: _FilterType.values.map((f) {
-                  if (f == _FilterType.location) {
-                    return _DropdownFilterChip(
-                      label: selectedLocation == null
-                          ? 'Location'
-                          : 'Location: $selectedLocation',
-                      isActive: activeFilter == f,
-                      isDark: isDark,
-                      options: locationOptions,
-                      allOptionLabel: 'All locations',
-                      onSelected: onLocationSelected,
-                      onActivated: () =>
-                          onFilterSelected(_FilterType.location),
-                    );
-                  }
-
-                  if (f == _FilterType.tags) {
-                    return _DropdownFilterChip(
-                      label: selectedTag == null
-                          ? 'Tags'
-                          : 'Tag: $selectedTag',
-                      isActive: activeFilter == f,
-                      isDark: isDark,
-                      options: tagOptions,
-                      allOptionLabel: 'All tags',
-                      onSelected: onTagSelected,
-                      onActivated: () => onFilterSelected(_FilterType.tags),
-                    );
-                  }
-
-                  return _FilterChip(
-                    label: _filterLabel(f),
-                    isActive: activeFilter == f,
-                    isDark: isDark,
-                    onTap: () => onFilterSelected(f),
-                  );
-                }).toList(),
               ),
             ),
             const SizedBox(height: AppDimensions.spacingMd),
@@ -365,12 +486,14 @@ class _SearchInput extends StatelessWidget {
   const _SearchInput({
     required this.controller,
     required this.isDark,
+    required this.shouldAutofocus,
     required this.onChanged,
     required this.onClear,
   });
 
   final TextEditingController controller;
   final bool isDark;
+  final bool shouldAutofocus;
   final ValueChanged<String> onChanged;
   final VoidCallback onClear;
 
@@ -397,7 +520,7 @@ class _SearchInput extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: controller,
-              autofocus: true,
+              autofocus: shouldAutofocus,
               onChanged: onChanged,
               style: TextStyle(
                 fontSize: 16,
@@ -1109,7 +1232,7 @@ Future<void> _showBorrowRequestSheet(
                           ? AppColors.textPrimaryDark
                           : AppColors.textPrimaryLight,
                       fontWeight: FontWeight.w700,
-                      fontSize: 20,
+                      fontSize: 18,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1206,6 +1329,8 @@ class _RichResultCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final latestHistoryAsync = ref.watch(itemLatestHistoryProvider(item.uuid));
+    final locationColor = _searchResultLocationColor(isDark);
+    final detailColor = _searchResultDetailColor(isDark);
     return GestureDetector(
       onTap: () => context.push(AppRoutes.itemDetailPath(item.uuid)),
       child: Container(
@@ -1277,7 +1402,7 @@ class _RichResultCard extends ConsumerWidget {
                           vertical: AppDimensions.spacingXs,
                         ),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.10),
+                          color: _searchResultLocationBackground(isDark),
                           borderRadius:
                               BorderRadius.circular(AppDimensions.radiusSm),
                         ),
@@ -1287,7 +1412,7 @@ class _RichResultCard extends ConsumerWidget {
                             Icon(
                               Icons.location_on,
                               size: AppDimensions.iconSm,
-                              color: AppColors.primary,
+                              color: locationColor,
                             ),
                             const SizedBox(width: 4),
                             Flexible(
@@ -1298,8 +1423,7 @@ class _RichResultCard extends ConsumerWidget {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
-                                ),
+                                ).copyWith(color: locationColor),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1320,7 +1444,7 @@ class _RichResultCard extends ConsumerWidget {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
+                            color: detailColor,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -1397,6 +1521,8 @@ class _CompactResultItem extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final latestHistoryAsync = ref.watch(itemLatestHistoryProvider(item.uuid));
+    final locationColor = _searchResultLocationColor(isDark);
+    final detailColor = _searchResultDetailColor(isDark);
     return GestureDetector(
       onTap: () => context.push(AppRoutes.itemDetailPath(item.uuid)),
       child: Container(
@@ -1454,9 +1580,7 @@ class _CompactResultItem extends ConsumerWidget {
                       'Location: ${item.locationName ?? item.locationFullPath}',
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark
-                            ? AppColors.textSecondaryDark
-                            : AppColors.textSecondaryLight,
+                        color: locationColor,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1472,7 +1596,7 @@ class _CompactResultItem extends ConsumerWidget {
                         'Last seen by $who ${_RichResultCard._ago(entry.movedAt)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.primary,
+                          color: detailColor,
                           fontWeight: FontWeight.w600,
                         ),
                         maxLines: 1,

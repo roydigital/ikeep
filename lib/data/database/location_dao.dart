@@ -92,6 +92,63 @@ class LocationDao {
     ''', [uuid]);
   }
 
+  /// Rebuilds location usage counts from all non-archived items.
+  ///
+  /// Counts are rolled up through the full ancestor chain so a room reflects
+  /// items stored directly inside it and inside any of its child zones.
+  Future<void> recalculateUsageCounts() async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.rawUpdate('''
+        UPDATE ${DbConstants.tableLocations}
+        SET ${DbConstants.colLocUsageCount} = 0
+      ''');
+
+      final locationRows = await txn.query(
+        DbConstants.tableLocations,
+        columns: [
+          DbConstants.colLocUuid,
+          DbConstants.colLocParentUuid,
+        ],
+      );
+      final parentByUuid = <String, String?>{
+        for (final row in locationRows)
+          row[DbConstants.colLocUuid] as String:
+              row[DbConstants.colLocParentUuid] as String?,
+      };
+
+      final itemRows = await txn.query(
+        DbConstants.tableItems,
+        columns: [DbConstants.colItemLocationUuid],
+        where:
+            '${DbConstants.colItemIsArchived} = 0 AND ${DbConstants.colItemLocationUuid} IS NOT NULL',
+      );
+
+      final countsByUuid = <String, int>{};
+      for (final row in itemRows) {
+        var currentUuid = row[DbConstants.colItemLocationUuid] as String?;
+        final visited = <String>{};
+
+        while (currentUuid != null && visited.add(currentUuid)) {
+          if (!parentByUuid.containsKey(currentUuid)) break;
+          countsByUuid[currentUuid] = (countsByUuid[currentUuid] ?? 0) + 1;
+          currentUuid = parentByUuid[currentUuid];
+        }
+      }
+
+      final batch = txn.batch();
+      countsByUuid.forEach((uuid, usageCount) {
+        batch.update(
+          DbConstants.tableLocations,
+          {DbConstants.colLocUsageCount: usageCount},
+          where: '${DbConstants.colLocUuid} = ?',
+          whereArgs: [uuid],
+        );
+      });
+      await batch.commit(noResult: true);
+    });
+  }
+
   /// Returns the ordered ancestor chain for a location (from root to parent).
   Future<List<LocationModel>> getAncestors(String uuid) async {
     final ancestors = <LocationModel>[];

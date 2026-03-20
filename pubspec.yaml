@@ -59,6 +59,7 @@ dependencies:
 
   # UI
   flutter_animate: ^4.5.2
+  showcaseview: ^4.0.1
 
 dependency_overrides:
   flutter_web_auth_2: ^4.0.0

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/utils/fuzzy_search.dart';
 import '../domain/models/item.dart';
 import '../domain/models/sync_status.dart';
+import 'location_providers.dart';
 import 'repository_providers.dart';
 import 'service_providers.dart';
 import 'settings_provider.dart';
@@ -275,6 +276,8 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(lentItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
+    _ref.invalidate(allLocationsProvider);
+    _ref.invalidate(rootLocationsProvider);
   }
 }
 

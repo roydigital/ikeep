@@ -244,7 +244,7 @@ class _HeroCard extends StatelessWidget {
             'Household collaboration',
             style: TextStyle(
               color: titleColor,
-              fontSize: 22,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -385,7 +385,7 @@ class _HouseholdSummaryCard extends StatelessWidget {
                   householdName,
                   style: TextStyle(
                     color: textPrimary,
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
                 ),

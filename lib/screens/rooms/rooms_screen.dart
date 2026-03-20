@@ -3,16 +3,51 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/location_model.dart';
+import '../../providers/home_tour_provider.dart';
 import '../../providers/location_providers.dart';
+import '../../providers/location_usage_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../../widgets/app_showcase.dart';
 import 'add_new_room_screen.dart';
+
+Widget _buildRoomsTourStep({
+  required GlobalKey showcaseKey,
+  required String title,
+  required String description,
+  required Widget child,
+}) {
+  return Showcase(
+    key: showcaseKey,
+    title: title,
+    description: description,
+    tooltipBackgroundColor: AppColors.surfaceDark,
+    textColor: AppColors.textPrimaryDark,
+    titleTextStyle: const TextStyle(
+      color: AppColors.textPrimaryDark,
+      fontSize: 18,
+      fontWeight: FontWeight.w800,
+    ),
+    descTextStyle: const TextStyle(
+      color: AppColors.textSecondaryDark,
+      fontSize: 14,
+      height: 1.45,
+    ),
+    tooltipBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+    targetBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+    targetPadding: const EdgeInsets.all(6),
+    overlayOpacity: 0.78,
+    disableDefaultTargetGestures: true,
+    child: child,
+  );
+}
 
 class RoomsScreen extends ConsumerStatefulWidget {
   const RoomsScreen({super.key});
@@ -25,6 +60,10 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
   int _expandedRoom = -1;
   final ScrollController _areasScrollController = ScrollController();
   final Map<String, String> _locationImageByUuid = {};
+  final GlobalKey _roomsSearchShowcaseKey = GlobalKey();
+  final GlobalKey _roomsAddShowcaseKey = GlobalKey();
+  final GlobalKey _roomsListShowcaseKey = GlobalKey();
+  bool _roomsTourQueued = false;
 
   final List<_AreaData> _areaImages = const [
     _AreaData(
@@ -551,12 +590,17 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
       final zoneLocations = List<LocationModel>.from(
         zonesByRoom[room.uuid] ?? const <LocationModel>[],
       )..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final zoneItemTotal = zoneLocations.fold<int>(
+        0,
+        (sum, zone) => sum + zone.usageCount,
+      );
 
       return _RoomData(
         location: room,
         uuid: room.uuid,
         name: room.name,
-        items: room.usageCount,
+        items:
+            room.usageCount >= zoneItemTotal ? room.usageCount : zoneItemTotal,
         icon: _iconForLocation(room.iconName),
         zones: zoneLocations
             .map(
@@ -583,7 +627,8 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final locationsAsync = ref.watch(allLocationsProvider);
+    final locationsAsync = ref.watch(locationsWithDerivedUsageProvider);
+    final hasSeenRoomsTour = ref.watch(roomsTourControllerProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kBg = isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
     final kCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
@@ -592,199 +637,237 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     final kMuted =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    return Scaffold(
-      backgroundColor: kBg,
-      body: Column(
-        children: [
-          _TopHeader(
-            onAddTap: _openAddRoomFlow,
-            onSearchTap: () => context.push(AppRoutes.search),
-          ),
-          Expanded(
-            child: locationsAsync.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: AppColors.primary),
+    return ShowCaseWidget(
+      blurValue: 1.5,
+      enableAutoScroll: true,
+      globalTooltipActionConfig: appShowcaseTooltipActionConfig,
+      globalTooltipActions: appShowcaseTooltipActions(),
+      builder: (tourContext) {
+        if (hasSeenRoomsTour.valueOrNull == false && !_roomsTourQueued) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _roomsTourQueued) return;
+            _roomsTourQueued = true;
+            ShowCaseWidget.of(tourContext).startShowCase([
+              _roomsSearchShowcaseKey,
+              _roomsAddShowcaseKey,
+              _roomsListShowcaseKey,
+            ]);
+            ref.read(roomsTourControllerProvider.notifier).markSeen();
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: kBg,
+          body: Column(
+            children: [
+              _TopHeader(
+                searchShowcaseKey: _roomsSearchShowcaseKey,
+                addShowcaseKey: _roomsAddShowcaseKey,
+                onAddTap: _openAddRoomFlow,
+                onSearchTap: () => context.push(AppRoutes.search),
               ),
-              error: (error, _) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Text(
-                    'Failed to load locations.\n$error',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: kMuted),
+              Expanded(
+                child: _buildRoomsTourStep(
+                  showcaseKey: _roomsListShowcaseKey,
+                  title: 'Manage Rooms',
+                  description:
+                      'Your rooms and zones live here. Expand a room to drill into its zones, rename spaces, or add a new zone.',
+                  child: locationsAsync.when(
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(color: AppColors.primary),
+                    ),
+                    error: (error, _) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          'Failed to load locations.\n$error',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: kMuted),
+                        ),
+                      ),
+                    ),
+                    data: (allLocations) {
+                      final mapped = _mapLocations(allLocations);
+                      final roots = mapped.roots;
+                      final rooms = mapped.rooms;
+
+                      final areaLocations = allLocations.isNotEmpty
+                          ? [
+                              ...roots,
+                              ...allLocations.where((location) => !location.isRoot),
+                            ]
+                          : const <LocationModel>[];
+
+                      final areas = areaLocations.isNotEmpty
+                          ? areaLocations
+                              .asMap()
+                              .entries
+                              .map(
+                                (entry) => _AreaData(
+                                  location: entry.value,
+                                  name: entry.value.name,
+                                  items: entry.value.usageCount,
+                                  imageUrl: _locationImagePath(entry.value.uuid) ??
+                                      _areaImages[entry.key % _areaImages.length]
+                                          .imageUrl,
+                                  isPrimary: entry.key == 0 &&
+                                      entry.value.parentUuid == null,
+                                ),
+                              )
+                              .toList()
+                          : _areaImages;
+
+                      return ListView(
+                        padding: const EdgeInsets.only(
+                          bottom: AppNavBar.contentMargin,
+                        ),
+                        children: [
+                          const SizedBox(height: AppDimensions.spacingMd),
+                          _SectionTitle(
+                            title: 'Houses & Areas',
+                            trailing: TextButton(
+                              onPressed: _handleViewAllAreasTap,
+                              child: const Text(
+                                'View All',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            height: 290,
+                            child: ListView.separated(
+                              controller: _areasScrollController,
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              itemCount: areas.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 16),
+                              itemBuilder: (context, index) {
+                                final area = areas[index];
+                                return _AreaCard(
+                                  data: area,
+                                  onTap: area.location == null
+                                      ? null
+                                      : () => _showLocationActions(
+                                            area.location!,
+                                            label: area.location!.isRoot
+                                                ? 'Area'
+                                                : 'Zone',
+                                            cascadesOnDelete: true,
+                                          ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          _SectionTitle(
+                            title: 'Rooms',
+                            trailing: Padding(
+                              padding: const EdgeInsets.only(right: 16),
+                              child: Text(
+                                '${rooms.length} total rooms',
+                                style: TextStyle(
+                                  color: kMuted,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (rooms.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Container(
+                                padding: const EdgeInsets.all(18),
+                                decoration: BoxDecoration(
+                                  color: kCardSoft,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Text(
+                                  'No rooms added yet. Tap + to create your first room.',
+                                  style: TextStyle(color: kMuted),
+                                ),
+                              ),
+                            )
+                          else
+                            ListView.separated(
+                              itemCount: rooms.length,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 14),
+                              itemBuilder: (context, index) {
+                                final room = rooms[index];
+                                final expanded = _expandedRoom == index;
+                                return _RoomCard(
+                                  room: room,
+                                  expanded: expanded,
+                                  card: kCard,
+                                  cardSoft: kCardSoft,
+                                  muted: kMuted,
+                                  onTap: () {
+                                    setState(() {
+                                      _expandedRoom = expanded ? -1 : index;
+                                    });
+                                  },
+                                  onAddZoneTap: () {
+                                    _addZoneToRoom(room);
+                                  },
+                                  onSwipeEdit: () {
+                                    _editLocationName(room.location, label: 'Room');
+                                  },
+                                  onSwipeDelete: () {
+                                    _deleteLocation(
+                                      room.location,
+                                      label: 'Room',
+                                      cascades: true,
+                                    );
+                                  },
+                                  onZoneTap: (zone) {
+                                    _showLocationActions(zone.location,
+                                        label: 'Zone');
+                                  },
+                                  onZoneSwipeEdit: (zone) {
+                                    _editLocationName(zone.location, label: 'Zone');
+                                  },
+                                  onZoneSwipeDelete: (zone) {
+                                    _deleteLocation(zone.location, label: 'Zone');
+                                  },
+                                  imagePathForUuid: _locationImagePath,
+                                );
+                              },
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
-              data: (allLocations) {
-                final mapped = _mapLocations(allLocations);
-                final roots = mapped.roots;
-                final rooms = mapped.rooms;
-
-                final areaLocations = allLocations.isNotEmpty
-                    ? [
-                        ...roots,
-                        ...allLocations.where((location) => !location.isRoot),
-                      ]
-                    : const <LocationModel>[];
-
-                final areas = areaLocations.isNotEmpty
-                    ? areaLocations
-                        .asMap()
-                        .entries
-                        .map(
-                          (entry) => _AreaData(
-                            location: entry.value,
-                            name: entry.value.name,
-                            items: entry.value.usageCount,
-                            imageUrl: _locationImagePath(entry.value.uuid) ??
-                                _areaImages[entry.key % _areaImages.length]
-                                    .imageUrl,
-                            isPrimary: entry.key == 0 &&
-                                entry.value.parentUuid == null,
-                          ),
-                        )
-                        .toList()
-                    : _areaImages;
-
-                return ListView(
-                  padding: EdgeInsets.only(
-                    bottom: AppNavBar.contentBottomSpacing(context),
-                  ),
-                  children: [
-                    const SizedBox(height: AppDimensions.spacingMd),
-                    _SectionTitle(
-                      title: 'Houses & Areas',
-                      trailing: TextButton(
-                        onPressed: _handleViewAllAreasTap,
-                        child: const Text(
-                          'View All',
-                          style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 18,
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      height: 290,
-                      child: ListView.separated(
-                        controller: _areasScrollController,
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: areas.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 16),
-                        itemBuilder: (context, index) {
-                          final area = areas[index];
-                          return _AreaCard(
-                            data: area,
-                            onTap: area.location == null
-                                ? null
-                                : () => _showLocationActions(
-                                      area.location!,
-                                      label: area.location!.isRoot
-                                          ? 'Area'
-                                          : 'Zone',
-                                      cascadesOnDelete: true,
-                                    ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    _SectionTitle(
-                      title: 'Rooms',
-                      trailing: Padding(
-                        padding: const EdgeInsets.only(right: 16),
-                        child: Text(
-                          '${rooms.length} total rooms',
-                          style: TextStyle(
-                            color: kMuted,
-                            fontSize: 36 / 2,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (rooms.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Container(
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: kCardSoft,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            'No rooms added yet. Tap + to create your first room.',
-                            style: TextStyle(color: kMuted),
-                          ),
-                        ),
-                      )
-                    else
-                      ListView.separated(
-                        itemCount: rooms.length,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        separatorBuilder: (_, __) => const SizedBox(height: 14),
-                        itemBuilder: (context, index) {
-                          final room = rooms[index];
-                          final expanded = _expandedRoom == index;
-                          return _RoomCard(
-                            room: room,
-                            expanded: expanded,
-                            card: kCard,
-                            cardSoft: kCardSoft,
-                            muted: kMuted,
-                            onTap: () {
-                              setState(() {
-                                _expandedRoom = expanded ? -1 : index;
-                              });
-                            },
-                            onAddZoneTap: () {
-                              _addZoneToRoom(room);
-                            },
-                            onSwipeEdit: () {
-                              _editLocationName(room.location, label: 'Room');
-                            },
-                            onSwipeDelete: () {
-                              _deleteLocation(
-                                room.location,
-                                label: 'Room',
-                                cascades: true,
-                              );
-                            },
-                            onZoneTap: (zone) {
-                              _showLocationActions(zone.location,
-                                  label: 'Zone');
-                            },
-                            onZoneSwipeEdit: (zone) {
-                              _editLocationName(zone.location, label: 'Zone');
-                            },
-                            onZoneSwipeDelete: (zone) {
-                              _deleteLocation(zone.location, label: 'Zone');
-                            },
-                            imagePathForUuid: _locationImagePath,
-                          );
-                        },
-                      ),
-                  ],
-                );
-              },
-            ),
+              const AppNavBar(activeTab: AppNavTab.locations),
+            ],
           ),
-          const AppNavBar(activeTab: AppNavTab.locations),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
 class _TopHeader extends StatelessWidget {
-  const _TopHeader({required this.onAddTap, required this.onSearchTap});
+  const _TopHeader({
+    required this.searchShowcaseKey,
+    required this.addShowcaseKey,
+    required this.onAddTap,
+    required this.onSearchTap,
+  });
 
+  final GlobalKey searchShowcaseKey;
+  final GlobalKey addShowcaseKey;
   final VoidCallback onAddTap;
   final VoidCallback onSearchTap;
 
@@ -817,38 +900,50 @@ class _TopHeader extends StatelessWidget {
                     color: isDark
                         ? AppColors.textPrimaryDark
                         : AppColors.textPrimaryLight,
-                    fontSize: 44 / 2,
+                    fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              IconButton(
-                onPressed: onSearchTap,
-                icon: Icon(
-                  Icons.search_rounded,
-                  color: isDark
-                      ? AppColors.textSecondaryDark
-                      : AppColors.textSecondaryLight,
+              _buildRoomsTourStep(
+                showcaseKey: searchShowcaseKey,
+                title: 'Find a Saved Item',
+                description:
+                    'Jump straight into search when you know the item, room, or zone you want to find.',
+                child: IconButton(
+                  onPressed: onSearchTap,
+                  icon: Icon(
+                    Icons.search_rounded,
+                    color: isDark
+                        ? AppColors.textSecondaryDark
+                        : AppColors.textSecondaryLight,
+                  ),
                 ),
               ),
-              InkWell(
-                onTap: onAddTap,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primary,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
-                        blurRadius: 16,
-                        spreadRadius: 2,
-                      ),
-                    ],
+              _buildRoomsTourStep(
+                showcaseKey: addShowcaseKey,
+                title: 'Add a Room',
+                description:
+                    'Create a new room first, then organize it into zones for more precise storage.',
+                child: InkWell(
+                  onTap: onAddTap,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.primary,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.35),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.add, color: Colors.white, size: 30),
                   ),
-                  child: const Icon(Icons.add, color: Colors.white, size: 30),
                 ),
               ),
             ],
@@ -878,7 +973,7 @@ class _SectionTitle extends StatelessWidget {
               color: isDark
                   ? AppColors.textPrimaryDark
                   : AppColors.textPrimaryLight,
-              fontSize: 52 / 2,
+              fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -1000,7 +1095,7 @@ class _AreaCard extends StatelessWidget {
               data.name,
               style: TextStyle(
                 color: textPrimary,
-                fontSize: 22,
+                fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1060,8 +1155,24 @@ class _RoomCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor =
-        AppColors.primary.withValues(alpha: expanded ? 0.55 : 0.20);
+    final borderColor = expanded
+        ? (isDark
+            ? AppColors.primaryLight.withValues(alpha: 0.7)
+            : AppColors.primary.withValues(alpha: 0.55))
+        : (isDark
+            ? AppColors.borderDark
+            : AppColors.primary.withValues(alpha: 0.2));
+    final collapsedIconBg =
+        isDark ? AppColors.accentSurfaceDark : AppColors.surfaceVariantLight;
+    final collapsedIconColor =
+        isDark ? AppColors.primaryLight : AppColors.primary;
+    final addZoneBorder = isDark
+        ? AppColors.primaryLight.withValues(alpha: 0.8)
+        : AppColors.primary.withValues(alpha: 0.5);
+    final addZoneFill =
+        isDark ? AppColors.accentSurfaceDark : Colors.transparent;
+    final addZoneTextColor =
+        isDark ? AppColors.primaryLight : AppColors.primary;
 
     return _SwipeActionCard(
       dismissKey: ValueKey('room-${room.uuid}'),
@@ -1087,16 +1198,12 @@ class _RoomCard extends StatelessWidget {
                       width: 62,
                       height: 62,
                       decoration: BoxDecoration(
-                        color: expanded
-                            ? AppColors.primary
-                            : (isDark
-                                ? AppColors.backgroundDark
-                                : AppColors.surfaceVariantLight),
+                        color: expanded ? AppColors.primary : collapsedIconBg,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Icon(
                         room.icon,
-                        color: expanded ? Colors.white : AppColors.primary,
+                        color: expanded ? Colors.white : collapsedIconColor,
                         size: 30,
                       ),
                     ),
@@ -1189,9 +1296,10 @@ class _RoomCard extends StatelessWidget {
                         width: double.infinity,
                         height: 52,
                         decoration: BoxDecoration(
+                          color: addZoneFill,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
-                            color: AppColors.primary.withValues(alpha: 0.5),
+                            color: addZoneBorder,
                             width: 1.5,
                           ),
                         ),
@@ -1199,7 +1307,7 @@ class _RoomCard extends StatelessWidget {
                           child: Text(
                             '+  Add Zone',
                             style: TextStyle(
-                              color: AppColors.primary,
+                              color: addZoneTextColor,
                               fontSize: 18 / 1.2,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1237,6 +1345,18 @@ class _ZoneRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isNetworkImage = imagePath?.startsWith('http') ?? false;
+    final rowBorderColor = isDark
+        ? AppColors.borderDark
+        : AppColors.primary.withValues(alpha: 0.22);
+    final chipColor = isDark
+        ? AppColors.accentSurfaceDark
+        : AppColors.primary.withValues(alpha: 0.12);
+    final chipIconColor = isDark ? AppColors.primaryLight : AppColors.primary;
+    final countBadgeColor = isDark
+        ? AppColors.accentSurfaceDarkStrong
+        : AppColors.primary.withValues(alpha: 0.22);
+    final countTextColor =
+        isDark ? AppColors.textPrimaryDark : AppColors.primary;
 
     return _SwipeActionCard(
       dismissKey: ValueKey('zone-${zone.uuid}'),
@@ -1251,8 +1371,7 @@ class _ZoneRow extends StatelessWidget {
           decoration: BoxDecoration(
             color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
             borderRadius: BorderRadius.circular(18),
-            border:
-                Border.all(color: AppColors.primary.withValues(alpha: 0.22)),
+            border: Border.all(color: rowBorderColor),
           ),
           child: Row(
             children: [
@@ -1260,19 +1379,19 @@ class _ZoneRow extends StatelessWidget {
                 width: 30,
                 height: 30,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.12),
+                  color: chipColor,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: imagePath == null
-                    ? Icon(zone.icon, color: AppColors.primary, size: 18)
+                    ? Icon(zone.icon, color: chipIconColor, size: 18)
                     : (isNetworkImage
                         ? Image.network(
                             imagePath!,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Icon(
                               zone.icon,
-                              color: AppColors.primary,
+                              color: chipIconColor,
                               size: 18,
                             ),
                           )
@@ -1281,7 +1400,7 @@ class _ZoneRow extends StatelessWidget {
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Icon(
                               zone.icon,
-                              color: AppColors.primary,
+                              color: chipIconColor,
                               size: 18,
                             ),
                           )),
@@ -1303,13 +1422,13 @@ class _ZoneRow extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.22),
+                  color: countBadgeColor,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   '${zone.count}',
-                  style: const TextStyle(
-                    color: AppColors.primary,
+                  style: TextStyle(
+                    color: countTextColor,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                   ),

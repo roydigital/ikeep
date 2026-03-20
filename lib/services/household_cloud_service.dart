@@ -385,16 +385,31 @@ class HouseholdCloudService {
       itemUuid: item.uuid,
       imagePaths: item.imagePaths,
     );
-
-    await _firestore
+    final itemRef = _firestore
         .collection(_householdsCol)
         .doc(householdId)
         .collection(_sharedItemsSubcol)
-        .doc(item.uuid)
-        .set({
+        .doc(item.uuid);
+    final existingSnapshot = await itemRef.get();
+    final existingData = existingSnapshot.data();
+
+    final existingOwnerUid = (existingData?['ownerUid'] as String?)?.trim();
+    final existingOwnerName = (existingData?['ownerName'] as String?)?.trim();
+    final itemOwnerUid = item.cloudId?.trim();
+
+    final ownerUid = existingOwnerUid?.isNotEmpty == true
+        ? existingOwnerUid!
+        : itemOwnerUid?.isNotEmpty == true
+            ? itemOwnerUid!
+            : user.uid;
+    final ownerName = existingOwnerName?.isNotEmpty == true
+        ? existingOwnerName!
+        : _displayName(user);
+
+    await itemRef.set({
       ...item.copyWith(imagePaths: uploadedImageUrls).toJson(),
-      'ownerUid': user.uid,
-      'ownerName': _displayName(user),
+      'ownerUid': ownerUid,
+      'ownerName': ownerName,
       'householdId': householdId,
       'visibility': item.visibility.value,
       'name': item.name,

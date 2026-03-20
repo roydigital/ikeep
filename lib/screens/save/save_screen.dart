@@ -13,6 +13,7 @@ import '../../domain/models/item_visibility.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
+import '../../providers/location_usage_providers.dart';
 import '../../providers/ml_label_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../theme/app_colors.dart';
@@ -508,7 +509,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
         Text(
           'Quick Save',
           style: TextStyle(
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: FontWeight.w700,
             color: textColor,
           ),
@@ -655,7 +656,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   }
 
   Widget _buildLocationChips(bool isDark, Color borderColor, Color textColor) {
-    final locationsAsync = ref.watch(allLocationsProvider);
+    final locationsAsync = ref.watch(locationsWithDerivedUsageProvider);
 
     return locationsAsync.when(
       data: (locations) {

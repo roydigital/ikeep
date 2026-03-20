@@ -1219,6 +1219,46 @@ class _ItemVisibilitySectionState
 
   bool get _isShared => _item.visibility == ItemVisibility.household;
 
+  String? get _currentUserUid {
+    final uid = ref.read(firebaseAuthProvider).currentUser?.uid?.trim();
+    if (uid == null || uid.isEmpty) return null;
+    return uid;
+  }
+
+  String? get _itemOwnerMemberUuid {
+    final ownerMemberUuid = _item.cloudId?.trim();
+    if (ownerMemberUuid != null && ownerMemberUuid.isNotEmpty) {
+      return ownerMemberUuid;
+    }
+    return _currentUserUid;
+  }
+
+  bool get _canChangeShareState {
+    final ownerMemberUuid = _itemOwnerMemberUuid;
+    final currentUserUid = _currentUserUid;
+    if (ownerMemberUuid == null || currentUserUid == null) return true;
+    return ownerMemberUuid == currentUserUid;
+  }
+
+  List<String> _normalizedSelectedMemberUuids([Iterable<String>? memberUuids]) {
+    final ownerMemberUuid = _itemOwnerMemberUuid;
+    final normalized = <String>[];
+    final seen = <String>{};
+
+    for (final memberUuid in memberUuids ?? _item.sharedWithMemberUuids) {
+      final trimmedMemberUuid = memberUuid.trim();
+      if (trimmedMemberUuid.isEmpty) continue;
+      if (ownerMemberUuid != null && trimmedMemberUuid == ownerMemberUuid) {
+        continue;
+      }
+      if (seen.add(trimmedMemberUuid)) {
+        normalized.add(trimmedMemberUuid);
+      }
+    }
+
+    return normalized;
+  }
+
   Future<void> _saveItem(Item updatedItem) async {
     if (_isSaving) return;
 
@@ -1234,6 +1274,10 @@ class _ItemVisibilitySectionState
   }
 
   Future<void> _toggleSharing(bool enabled) async {
+    if (!enabled && !_canChangeShareState) {
+      return;
+    }
+
     if (!enabled) {
       await _saveItem(
         _item.copyWith(
@@ -1275,7 +1319,11 @@ class _ItemVisibilitySectionState
   }
 
   Future<void> _toggleMember(String memberUuid, bool selected) async {
-    final next = {..._item.sharedWithMemberUuids};
+    if (memberUuid == _itemOwnerMemberUuid) {
+      return;
+    }
+
+    final next = {..._normalizedSelectedMemberUuids()};
     if (selected) {
       next.add(memberUuid);
     } else {
@@ -1285,7 +1333,7 @@ class _ItemVisibilitySectionState
     await _saveItem(
       _item.copyWith(
         visibility: ItemVisibility.household,
-        sharedWithMemberUuids: next.toList(),
+        sharedWithMemberUuids: _normalizedSelectedMemberUuids(next),
       ),
     );
   }
@@ -1299,7 +1347,8 @@ class _ItemVisibilitySectionState
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     final membersAsync = ref.watch(householdMembersProvider);
     final hasHousehold = ref.watch(hasHouseholdProvider);
-    final allMembersSelected = _item.sharedWithMemberUuids.isEmpty;
+    final selectedMemberUuids = _normalizedSelectedMemberUuids();
+    final allMembersSelected = selectedMemberUuids.isEmpty;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1344,8 +1393,11 @@ class _ItemVisibilitySectionState
               Switch.adaptive(
                 value: _isShared,
                 activeColor: AppColors.primary,
-                onChanged:
-                    _isSaving || (!hasHousehold && !_isShared) ? null : _toggleSharing,
+                onChanged: _isSaving ||
+                        (!hasHousehold && !_isShared) ||
+                        (_isShared && !_canChangeShareState)
+                    ? null
+                    : _toggleSharing,
               ),
             ],
           ),
@@ -1366,7 +1418,8 @@ class _ItemVisibilitySectionState
               child: membersAsync.when(
                 data: (members) => _VisibilityMembersList(
                   members: members,
-                  selectedMemberUuids: _item.sharedWithMemberUuids,
+                  itemOwnerMemberUuid: _itemOwnerMemberUuid,
+                  selectedMemberUuids: selectedMemberUuids,
                   allMembersSelected: allMembersSelected,
                   isSaving: _isSaving,
                   textPrimary: textPrimary,
@@ -1405,6 +1458,7 @@ class _ItemVisibilitySectionState
 class _VisibilityMembersList extends StatelessWidget {
   const _VisibilityMembersList({
     required this.members,
+    required this.itemOwnerMemberUuid,
     required this.selectedMemberUuids,
     required this.allMembersSelected,
     required this.isSaving,
@@ -1415,6 +1469,7 @@ class _VisibilityMembersList extends StatelessWidget {
   });
 
   final List<HouseholdMember> members;
+  final String? itemOwnerMemberUuid;
   final List<String> selectedMemberUuids;
   final bool allMembersSelected;
   final bool isSaving;
@@ -1426,7 +1481,11 @@ class _VisibilityMembersList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selectableMembers = members
-        .where((member) => member.uuid != HouseholdMember.localOwnerUuid)
+        .where(
+          (member) =>
+              member.uuid != HouseholdMember.localOwnerUuid &&
+              member.uuid != itemOwnerMemberUuid,
+        )
         .toList();
 
     return Column(
@@ -1442,7 +1501,7 @@ class _VisibilityMembersList extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Select specific family members, or keep "All Household Members" enabled. An empty selection list is stored as shared with everyone.',
+          'Select specific family members, or keep "All Household Members" enabled. An empty selection list is stored as shared with everyone. The original item lister is always included.',
           style: TextStyle(
             color: textSecondary,
             fontSize: 12,

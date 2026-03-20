@@ -27,7 +27,7 @@ class AppNavBar extends StatelessWidget {
   static const double _labelFontSize = 10.5;
   static const double _fabSize = 72;
   static const double _fabBottomOffset = 44;
-  static const double _contentBuffer = AppDimensions.spacingLg;
+  static const double contentMargin = 20;
 
   static double navBarHeight(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
@@ -44,14 +44,14 @@ class AppNavBar extends StatelessWidget {
   static double fabClearance(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final fabTop = bottomInset + _fabBottomOffset + _fabSize;
-    return fabTop + _contentBuffer;
+    return fabTop + contentMargin;
   }
 
   static double contentBottomSpacing(
     BuildContext context, {
     bool includeFab = false,
   }) {
-    final navClearance = navBarHeight(context) + _contentBuffer;
+    final navClearance = navBarHeight(context) + contentMargin;
     if (!includeFab) return navClearance;
     final fabClearanceValue = fabClearance(context);
     return fabClearanceValue > navClearance ? fabClearanceValue : navClearance;
