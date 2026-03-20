@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../domain/models/item_location_history.dart';
+import '../providers/auth_providers.dart';
 import '../providers/history_providers.dart';
-import '../providers/household_providers.dart';
 import '../theme/app_colors.dart';
 
 class ItemActivityTimeline extends ConsumerWidget {

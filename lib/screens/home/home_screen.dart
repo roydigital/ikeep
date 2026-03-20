@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../domain/models/item.dart';
 import '../../domain/models/location_model.dart';
+import '../../providers/auth_providers.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'providers/auth_providers.dart';
 import 'providers/settings_provider.dart';
 import 'routing/app_router.dart';
 import 'theme/app_theme.dart';
@@ -10,6 +11,7 @@ class IkeepApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(authSessionBootstrapProvider);
     final router = ref.watch(routerProvider);
     final settings = ref.watch(settingsProvider);
 

@@ -1,16 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/sync_status.dart';
+import '../../providers/auth_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
@@ -102,57 +101,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _lentReminders = true;
   bool _backupEnabled = false;
   bool _isSaving = false;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
-  GoogleSignInAccount? _googleUser;
-  StreamSubscription<GoogleSignInAccount?>? _googleAuthSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _googleAuthSubscription = _googleSignIn.onCurrentUserChanged.listen((user) {
-      if (!mounted) return;
-      setState(() => _googleUser = user);
-    });
-    _googleSignIn.signInSilently().then((user) {
-      if (!mounted) return;
-      setState(() => _googleUser = user ?? _googleSignIn.currentUser);
-    });
-  }
-
-  @override
-  void dispose() {
-    _googleAuthSubscription?.cancel();
-    super.dispose();
-  }
 
   Future<void> _handleGoogleSignIn() async {
+    final googleSignIn = ref.read(googleSignInProvider);
+    final auth = ref.read(firebaseAuthProvider);
+
     try {
-      final account = await _googleSignIn.signIn();
+      final account = await googleSignIn.signIn();
       if (account != null) {
-        final googleAuth = await account.authentication;
-        final credential = GoogleAuthProvider.credential(
-          idToken: googleAuth.idToken,
-          accessToken: googleAuth.accessToken,
-        );
-        await FirebaseAuth.instance.signInWithCredential(credential);
+        await signInFirebaseWithGoogleAccount(auth, account);
       }
       if (!mounted) return;
-      setState(() => _googleUser = account ?? _googleSignIn.currentUser);
       if (account == null) {
         _showInfo('Google sign-in cancelled');
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('Google sign-in failed: $e');
+      debugPrintStack(stackTrace: st);
       if (!mounted) return;
       _showInfo('Unable to sign in with Google');
     }
   }
 
   Future<void> _handleLogout() async {
+    final auth = ref.read(firebaseAuthProvider);
+    final googleSignIn = ref.read(googleSignInProvider);
+
     try {
-      await FirebaseAuth.instance.signOut();
-      await _googleSignIn.signOut();
+      await auth.signOut();
+      await googleSignIn.signOut();
       if (!mounted) return;
-      setState(() => _googleUser = null);
       _showInfo('Logged out');
     } catch (_) {
       if (!mounted) return;
@@ -375,6 +353,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final authUser = ref.watch(authStateProvider).valueOrNull;
     final syncStatus = ref.watch(syncStatusProvider);
     final lastSynced = ref.watch(lastSyncedAtProvider).valueOrNull;
     _initFromSettings(settings);
@@ -428,11 +407,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         const SizedBox(height: 14),
                         _AccountCard(
                           backupEnabled: _backupEnabled,
-                          displayName: _googleUser?.displayName,
-                          photoUrl: _googleUser?.photoUrl,
-                          isGoogleSignedIn: _googleUser != null,
+                          displayName: authUser?.displayName,
+                          photoUrl: authUser?.photoURL,
+                          isGoogleSignedIn: authUser != null,
                           onGoogleSignInTap:
-                              _googleUser == null ? _handleGoogleSignIn : null,
+                              authUser == null ? _handleGoogleSignIn : null,
                         ),
                         const SizedBox(height: 36),
                         _SectionLabel('PREFERENCES'),

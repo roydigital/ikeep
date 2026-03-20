@@ -9,21 +9,12 @@ import '../domain/models/item.dart';
 import '../domain/models/item_visibility.dart';
 import '../domain/models/shared_item.dart';
 import '../domain/models/sync_status.dart';
+import 'auth_providers.dart';
 import 'history_providers.dart';
 import 'item_providers.dart';
 import 'repository_providers.dart';
 import 'service_providers.dart';
 import 'sync_providers.dart';
-
-/// Stream of the Firebase Auth user. Null when signed out.
-final authStateProvider = StreamProvider<User?>((ref) {
-  return ref.watch(firebaseAuthProvider).authStateChanges();
-});
-
-/// Whether the user is signed in with Firebase Auth.
-final isSignedInProvider = Provider<bool>((ref) {
-  return ref.watch(authStateProvider).valueOrNull != null;
-});
 
 /// Household aggregate for the current signed-in user.
 final currentHouseholdProvider = FutureProvider<Household?>((ref) async {

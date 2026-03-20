@@ -544,14 +544,14 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                           controller: _roomNameController,
                           style: TextStyle(
                             color: textPrimary,
-                            fontSize: 24 / 2,
+                            fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                           decoration: InputDecoration(
                             hintText: 'e.g., Master Bedroom',
                             hintStyle: TextStyle(
                               color: textMuted,
-                              fontSize: 24 / 2,
+                              fontSize: 16,
                               fontWeight: FontWeight.w600,
                             ),
                             filled: true,
@@ -584,7 +584,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 20, vertical: 6),
                           child: DropdownButtonFormField<String>(
-                            value: _selectedParentDropdownValue,
+                            initialValue: _selectedParentDropdownValue,
                             icon: const Icon(Icons.keyboard_arrow_down_rounded,
                                 color: AppColors.primary),
                             dropdownColor: isDark
@@ -672,7 +672,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                             crossAxisCount: 4,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
-                            childAspectRatio: 0.9,
+                            mainAxisExtent: 100,
                           ),
                           itemBuilder: (context, index) {
                             final icon = _roomIcons[index];
@@ -703,15 +703,22 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                                       size: 28,
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(
-                                      icon.label,
-                                      style: TextStyle(
-                                        color: selected
-                                            ? AppColors.primary
-                                            : textMuted,
-                                        fontSize: 32 / 2,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 1,
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6),
+                                      child: Text(
+                                        icon.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: selected
+                                              ? AppColors.primary
+                                              : textMuted,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.8,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -783,7 +790,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                                     'Add Custom Zone',
                                     style: TextStyle(
                                       color: textMuted,
-                                      fontSize: 20 / 2,
+                                      fontSize: 16,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
