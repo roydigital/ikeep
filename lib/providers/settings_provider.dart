@@ -17,6 +17,19 @@ class AppSettingsKeys {
   static const String lentReminders = 'lent_reminders';
   static const String nearbyEnabled = 'nearby_enabled';
   static const String cachedLocality = 'cached_locality';
+  static const String plan = 'app_plan';
+}
+
+enum AppPlan {
+  free('Free'),
+  monthly('Monthly Plus'),
+  yearly('Yearly Plus'),
+  lifetime('Lifetime Plus');
+
+  const AppPlan(this.label);
+  final String label;
+
+  bool get isPremium => this != AppPlan.free;
 }
 
 class AppSettings {
@@ -31,18 +44,20 @@ class AppSettings {
     this.lentRemindersEnabled = true,
     this.nearbyEnabled = false,
     this.cachedLocality,
+    this.plan = AppPlan.free,
   });
 
   final ThemeMode themeMode;
   final bool isOnboardingComplete;
   final bool isBackupEnabled;
-  final bool isPremium;
+  final bool isPremium; // Keep for backward compatibility or convenience
   final bool stillThereRemindersEnabled;
   final bool expiryRemindersEnabled;
   final bool seasonalRemindersEnabled;
   final bool lentRemindersEnabled;
   final bool nearbyEnabled;
   final String? cachedLocality;
+  final AppPlan plan;
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -56,12 +71,13 @@ class AppSettings {
     bool? nearbyEnabled,
     String? cachedLocality,
     bool clearCachedLocality = false,
+    AppPlan? plan,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
       isOnboardingComplete: isOnboardingComplete ?? this.isOnboardingComplete,
       isBackupEnabled: isBackupEnabled ?? this.isBackupEnabled,
-      isPremium: isPremium ?? this.isPremium,
+      isPremium: plan?.isPremium ?? (isPremium ?? this.isPremium),
       stillThereRemindersEnabled:
           stillThereRemindersEnabled ?? this.stillThereRemindersEnabled,
       expiryRemindersEnabled:
@@ -72,6 +88,7 @@ class AppSettings {
       nearbyEnabled: nearbyEnabled ?? this.nearbyEnabled,
       cachedLocality:
           clearCachedLocality ? null : (cachedLocality ?? this.cachedLocality),
+      plan: plan ?? this.plan,
     );
   }
 }
@@ -101,6 +118,10 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           prefs.getBool(AppSettingsKeys.lentReminders) ?? true,
       nearbyEnabled: prefs.getBool(AppSettingsKeys.nearbyEnabled) ?? false,
       cachedLocality: prefs.getString(AppSettingsKeys.cachedLocality),
+      plan: AppPlan.values[prefs.getInt(AppSettingsKeys.plan) ??
+          (prefs.getBool(AppSettingsKeys.isPremium) == true
+              ? AppPlan.monthly.index
+              : AppPlan.free.index)],
     );
   }
 
@@ -123,9 +144,18 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   }
 
   Future<void> setPremium(bool isPremium) async {
-    state = state.copyWith(isPremium: isPremium);
+    final newPlan = isPremium ? AppPlan.monthly : AppPlan.free;
+    state = state.copyWith(isPremium: isPremium, plan: newPlan);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(AppSettingsKeys.isPremium, isPremium);
+    await prefs.setInt(AppSettingsKeys.plan, newPlan.index);
+  }
+
+  Future<void> setPlan(AppPlan plan) async {
+    state = state.copyWith(isPremium: plan.isPremium, plan: plan);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(AppSettingsKeys.isPremium, plan.isPremium);
+    await prefs.setInt(AppSettingsKeys.plan, plan.index);
   }
 
   Future<void> setStillThereReminders(bool enabled) async {

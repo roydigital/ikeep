@@ -25,18 +25,18 @@ class PaywallScreen extends ConsumerWidget {
     final textSecondary =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    Future<void> upgradeToPlus() async {
-      await ref.read(settingsProvider.notifier).setPremium(true);
+    Future<void> upgradeToPlan(AppPlan plan) async {
+      await ref.read(settingsProvider.notifier).setPlan(plan);
       if (context.mounted) {
         Navigator.of(context).pop();
       }
     }
 
-    Widget planButton(String label) {
+    Widget planButton(String label, AppPlan plan) {
       return SizedBox(
         width: double.infinity,
         child: FilledButton(
-          onPressed: upgradeToPlus,
+          onPressed: () => upgradeToPlan(plan),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
@@ -155,11 +155,11 @@ class PaywallScreen extends ConsumerWidget {
                 const SizedBox(height: 14),
                 feature('Support independent developers'),
                 const SizedBox(height: 26),
-                planButton('Monthly - \$1.99'),
+                planButton('Monthly - \$1.99', AppPlan.monthly),
                 const SizedBox(height: 12),
-                planButton('Yearly - \$14.99'),
+                planButton('Yearly - \$14.99', AppPlan.yearly),
                 const SizedBox(height: 12),
-                planButton('Lifetime - \$29.99'),
+                planButton('Lifetime - \$29.99', AppPlan.lifetime),
               ],
             ),
           ),

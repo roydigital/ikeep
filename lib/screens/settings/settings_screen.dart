@@ -514,6 +514,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                     ? _handleGoogleSignIn
                                     : null,
                                 onUpgradeTap: () => PaywallScreen.show(context),
+                                plan: settings.plan,
+                                onManageTap: () => _ManageSubscriptionSheet.show(context),
                               ),
                             ),
                             const SizedBox(height: 36),
@@ -728,6 +730,8 @@ class _AccountCard extends StatelessWidget {
     required this.isGoogleSignedIn,
     this.onGoogleSignInTap,
     required this.onUpgradeTap,
+    required this.onManageTap,
+    required this.plan,
     this.isSigningIn = false,
   });
 
@@ -740,6 +744,8 @@ class _AccountCard extends StatelessWidget {
   final bool isGoogleSignedIn;
   final Future<void> Function()? onGoogleSignInTap;
   final VoidCallback onUpgradeTap;
+  final VoidCallback onManageTap;
+  final AppPlan plan;
   final bool isSigningIn;
 
   @override
@@ -808,7 +814,8 @@ class _AccountCard extends StatelessWidget {
                             const SizedBox(width: 8),
                             Text(
                               'Signing in...',
-                              style: TextStyle(color: _kTextMuted, fontSize: 14),
+                              style:
+                                  TextStyle(color: _kTextMuted, fontSize: 14),
                             ),
                           ],
                         )
@@ -826,8 +833,8 @@ class _AccountCard extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 'Google account connected',
-                                style:
-                                    TextStyle(color: _kTextMuted, fontSize: 14),
+                                style: TextStyle(
+                                    color: _kTextMuted, fontSize: 14),
                               ),
                             ),
                           ],
@@ -847,9 +854,11 @@ class _AccountCard extends StatelessWidget {
             child: _CloudBackupSummary(
               backupEnabled: backupEnabled,
               isPremium: isPremium,
+              plan: plan,
               backedUpCount: backedUpCount,
               isUsageLoading: isUsageLoading,
               onUpgradeTap: onUpgradeTap,
+              onManageTap: onManageTap,
             ),
           ),
         ],
@@ -862,16 +871,20 @@ class _CloudBackupSummary extends StatelessWidget {
   const _CloudBackupSummary({
     required this.backupEnabled,
     required this.isPremium,
+    required this.plan,
     required this.backedUpCount,
     required this.isUsageLoading,
     required this.onUpgradeTap,
+    required this.onManageTap,
   });
 
   final bool backupEnabled;
   final bool isPremium;
+  final AppPlan plan;
   final int backedUpCount;
   final bool isUsageLoading;
   final VoidCallback onUpgradeTap;
+  final VoidCallback onManageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -926,18 +939,27 @@ class _CloudBackupSummary extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: const Text(
-              'Ikeep Plus Member',
-              style: TextStyle(
-                color: AppColors.success,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
+          GestureDetector(
+            onTap: onManageTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    plan.label,
+                    style: const TextStyle(
+                      color: AppColors.success,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.settings, color: AppColors.success, size: 14),
+                ],
               ),
             ),
           ),
@@ -1559,6 +1581,207 @@ class _IkeepSwitch extends StatelessWidget {
               shape: BoxShape.circle,
               color: value ? Colors.white : _kSwitchOffThumb,
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ManageSubscriptionSheet extends ConsumerWidget {
+  const _ManageSubscriptionSheet();
+
+  static Future<void> show(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _ManageSubscriptionSheet(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final border = isDark ? AppColors.borderDark : AppColors.borderLight;
+
+    Widget planOption(AppPlan plan, String price, {bool isCurrent = false}) {
+      final isSelected = plan == settings.plan;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: InkWell(
+          onTap: isSelected
+              ? null
+              : () async {
+                  await ref.read(settingsProvider.notifier).setPlan(plan);
+                  if (context.mounted) Navigator.pop(context);
+                },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppColors.primary.withValues(alpha: 0.1)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isSelected
+                    ? AppColors.primary
+                    : border.withValues(alpha: 0.5),
+                width: isSelected ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        plan.label,
+                        style: TextStyle(
+                          color: textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        price,
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'CURRENT',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(
+                    plan.index > settings.plan.index
+                        ? Icons.upgrade
+                        : Icons.info_outline,
+                    color: AppColors.primary,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(32),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: textSecondary.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Manage Subscription',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Upgrade or change your plan at any time.',
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    planOption(AppPlan.monthly, '\$1.99 / month'),
+                    planOption(AppPlan.yearly, '\$14.99 / year'),
+                    planOption(AppPlan.lifetime, '\$29.99 / once'),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton(
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Cancel Subscription?'),
+                              content: const Text(
+                                  'You will lose access to unlimited cloud backups and other premium features.'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Keep Plan'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('Cancel Plan',
+                                      style: TextStyle(color: AppColors.error)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            await ref
+                                .read(settingsProvider.notifier)
+                                .setPlan(AppPlan.free);
+                            if (context.mounted) Navigator.pop(context);
+                          }
+                        },
+                        child: const Text(
+                          'Cancel Subscription',
+                          style: TextStyle(
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
