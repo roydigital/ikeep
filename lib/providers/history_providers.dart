@@ -4,12 +4,12 @@ import '../domain/models/item_location_history.dart';
 import 'repository_providers.dart';
 
 final itemHistoryProvider =
-    FutureProvider.family<List<ItemLocationHistory>, String>(
+    FutureProvider.autoDispose.family<List<ItemLocationHistory>, String>(
         (ref, itemUuid) async {
   return ref.watch(historyRepositoryProvider).getHistoryForItem(itemUuid);
 });
 
 final itemLatestHistoryProvider =
-    FutureProvider.family<ItemLocationHistory?, String>((ref, itemUuid) async {
+    FutureProvider.autoDispose.family<ItemLocationHistory?, String>((ref, itemUuid) async {
   return ref.watch(historyRepositoryProvider).getLatestHistoryForItem(itemUuid);
 });

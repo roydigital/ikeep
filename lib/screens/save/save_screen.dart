@@ -789,22 +789,28 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   Widget _addLocationButton(bool isDark, Color borderColor) {
     return GestureDetector(
       onTap: _showAddLocationDialog,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isDark
-              ? AppColors.surfaceVariantDark
-              : AppColors.surfaceVariantLight,
-          border: Border.all(color: borderColor),
-        ),
-        child: Icon(
-          Icons.add,
-          size: 18,
-          color: isDark
-              ? AppColors.textSecondaryDark
-              : AppColors.textSecondaryLight,
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isDark
+                  ? AppColors.surfaceVariantDark
+                  : AppColors.surfaceVariantLight,
+              border: Border.all(color: borderColor),
+            ),
+            child: Icon(
+              Icons.add,
+              size: 18,
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+            ),
+          ),
         ),
       ),
     );

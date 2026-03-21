@@ -85,18 +85,18 @@ int _weekOfYear(DateTime date) {
 }
 
 final itemsByLocationProvider =
-    FutureProvider.family<List<Item>, String>((ref, locationUuid) async {
+    FutureProvider.autoDispose.family<List<Item>, String>((ref, locationUuid) async {
   return ref.watch(itemRepositoryProvider).getItemsByLocation(locationUuid);
 });
 
 final singleItemProvider =
-    FutureProvider.family<Item?, String>((ref, uuid) async {
+    FutureProvider.autoDispose.family<Item?, String>((ref, uuid) async {
   return ref.watch(itemRepositoryProvider).getItem(uuid);
 });
 
 /// Derived search results — watches [itemSearchQueryProvider] and re-runs
 /// whenever the query changes.
-final searchResultsProvider = FutureProvider<List<Item>>((ref) async {
+final searchResultsProvider = FutureProvider.autoDispose<List<Item>>((ref) async {
   final query = ref.watch(itemSearchQueryProvider);
   if (query.trim().isEmpty) {
     return ref.watch(itemRepositoryProvider).getAllItems();

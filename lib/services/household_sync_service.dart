@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../data/database/history_dao.dart';
 import '../data/database/item_dao.dart';
@@ -63,13 +64,19 @@ class HouseholdSyncService {
           .snapshots(includeMetadataChanges: true)
           .listen(
         (snapshot) async {
-          for (final change in snapshot.docChanges) {
-            await _handleSharedItemChange(householdId, change);
+          try {
+            for (final change in snapshot.docChanges) {
+              await _handleSharedItemChange(householdId, change);
+            }
+            // Firestore's local cache handles transient offline writes. The
+            // SQLite-backed pending queue below covers app-level replay if a
+            // write fails before Firestore can accept it.
+            await flushPendingOperations();
+          } catch (e, st) {
+            debugPrint(
+              'HouseholdSyncService: listener error (sync continues): $e\n$st',
+            );
           }
-          // Firestore's local cache handles transient offline writes. The
-          // SQLite-backed pending queue below covers app-level replay if a
-          // write fails before Firestore can accept it.
-          await flushPendingOperations();
         },
       );
 
@@ -169,9 +176,12 @@ class HouseholdSyncService {
       try {
         await _replay(operation);
         await _pendingSyncDao.deleteById(operation.id);
-      } catch (_) {
-        // Leave queued for the next sync cycle. Firestore offline persistence
-        // handles transient network loss; this queue covers app-level retries.
+      } catch (e) {
+        debugPrint(
+          'HouseholdSyncService: pending ${operation.operationType} '
+          '${operation.entityType}/${operation.entityUuid} failed, '
+          'will retry next cycle: $e',
+        );
       }
     }
   }

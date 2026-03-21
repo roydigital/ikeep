@@ -170,7 +170,10 @@ class _MainContent extends ConsumerWidget {
 
     return forgottenItemsAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (error, _) {
+        debugPrint('HomeScreen: forgotten items error: $error');
+        return const SizedBox.shrink();
+      },
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
         final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -240,31 +243,37 @@ class _MainContent extends ConsumerWidget {
           const Spacer(),
           GestureDetector(
             onTap: () => context.push(AppRoutes.settings),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: avatarBorderColor,
-                  width: 1.8,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: avatarShadowColor,
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Center(
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: avatarBorderColor,
+                      width: 1.8,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: avatarShadowColor,
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: ClipOval(
-                child: profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
-                    ? Image.network(
-                        profilePhotoUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _buildProfileFallback(),
-                      )
-                    : _buildProfileFallback(),
+                  child: ClipOval(
+                    child: profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
+                        ? Image.network(
+                            profilePhotoUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _buildProfileFallback(),
+                          )
+                        : _buildProfileFallback(),
+                  ),
+                ),
               ),
             ),
           ),

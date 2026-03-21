@@ -252,7 +252,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await notifier.setLentReminders(_lentReminders);
       await notifier.setBackupEnabled(_backupEnabled);
 
-      final items = await ref.read(allItemsProvider.future);
       final updatedSettings = settings.copyWith(
         themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
         stillThereRemindersEnabled: _stillThere,
@@ -262,18 +261,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
       await backgroundScheduler.syncNotificationTasks(updatedSettings);
 
-      await notificationService.rescheduleExpiryReminders(
-        items.where((item) => !item.isArchived),
-      );
-
-      if (_lentReminders) {
-        await notificationService.rescheduleLentReminders(
-          items.where((item) => item.isLent && !item.isArchived),
+      try {
+        final items = await ref.read(allItemsProvider.future);
+        await notificationService.rescheduleExpiryReminders(
+          items.where((item) => !item.isArchived),
         );
-      } else {
-        for (final item in items) {
-          await notificationService.cancelLentReminder(item.uuid);
+
+        if (_lentReminders) {
+          await notificationService.rescheduleLentReminders(
+            items.where((item) => item.isLent && !item.isArchived),
+          );
+        } else {
+          for (final item in items) {
+            await notificationService.cancelLentReminder(item.uuid);
+          }
         }
+      } catch (_) {
+        // Items couldn't be loaded — notification sync will catch up on
+        // next app launch via background scheduler.
       }
 
       if (!mounted) return;

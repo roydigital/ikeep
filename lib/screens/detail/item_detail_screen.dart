@@ -115,9 +115,35 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     return PaywallScreen.show(context);
   }
 
+  int _itemImageLimitFor(bool isPremium) {
+    return isPremium ? premiumItemImageLimit : freeItemImageLimit;
+  }
+
+  Future<bool> _canAddAnotherImage(Item item) async {
+    final settings = ref.read(settingsProvider);
+    final imageLimit = _itemImageLimitFor(settings.isPremium);
+    if (item.imagePaths.length < imageLimit) {
+      return true;
+    }
+
+    final message = settings.isPremium
+        ? 'Paid members can add up to $premiumItemImageLimit photos per item.'
+        : 'Free members can add 1 photo per item. Upgrade to add up to $premiumItemImageLimit photos.';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+    );
+
+    if (!settings.isPremium) {
+      await _showPaywall();
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final itemAsync = ref.watch(singleItemProvider(widget.uuid));
+    final settings = ref.watch(settingsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
@@ -138,6 +164,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
           final historyAsync = ref.watch(itemHistoryProvider(item.uuid));
           final images = item.imagePaths;
+          final imageLimit = _itemImageLimitFor(settings.isPremium);
+          final hasReachedImageLimit = images.length >= imageLimit;
           final selected = images.isEmpty
               ? null
               : images[_selectedImage.clamp(0, images.length - 1)];
@@ -217,7 +245,11 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                         const SizedBox(width: 10),
                                     itemBuilder: (_, i) {
                                       if (i == images.length) {
-                                        return _addImageButton(item);
+                                        return _addImageButton(
+                                          item,
+                                          hasReachedLimit: hasReachedImageLimit,
+                                          imageLimit: imageLimit,
+                                        );
                                       }
                                       return _thumb(images[i], i, isDark);
                                     },
@@ -225,10 +257,18 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                 ),
                               ] else ...[
                                 const SizedBox(height: 10),
-                                _addImageButton(item),
+                                _addImageButton(
+                                  item,
+                                  hasReachedLimit: hasReachedImageLimit,
+                                  imageLimit: imageLimit,
+                                ),
                               ],
                             ] else ...[
-                              _addImageButton(item),
+                              _addImageButton(
+                                item,
+                                hasReachedLimit: hasReachedImageLimit,
+                                imageLimit: imageLimit,
+                              ),
                             ],
 
                             const SizedBox(height: 22),
@@ -1473,6 +1513,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   }
 
   Future<void> _addImage(Item item) async {
+    if (!await _canAddAnotherImage(item)) return;
+
     final source = await _chooseImageSource();
     if (source == null) return;
 
@@ -1676,7 +1718,11 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  Widget _addImageButton(Item item) {
+  Widget _addImageButton(
+    Item item, {
+    required bool hasReachedLimit,
+    required int imageLimit,
+  }) {
     return GestureDetector(
       onTap: () => _addImage(item),
       child: Container(
@@ -1684,11 +1730,38 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         height: 72,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          color: AppColors.primary.withValues(alpha: 0.12),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+          color: hasReachedLimit
+              ? AppColors.primary.withValues(alpha: 0.06)
+              : AppColors.primary.withValues(alpha: 0.12),
+          border: Border.all(
+            color: AppColors.primary.withValues(
+              alpha: hasReachedLimit ? 0.18 : 0.3,
+            ),
+          ),
         ),
-        child:
-            const Icon(Icons.add_a_photo, color: AppColors.primary, size: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              hasReachedLimit ? Icons.lock_outline : Icons.add_a_photo,
+              color: AppColors.primary.withValues(
+                alpha: hasReachedLimit ? 0.7 : 1,
+              ),
+              size: 22,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${item.imagePaths.length}/$imageLimit',
+              style: TextStyle(
+                color: AppColors.primary.withValues(
+                  alpha: hasReachedLimit ? 0.7 : 0.9,
+                ),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

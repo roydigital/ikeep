@@ -590,67 +590,69 @@ class HouseholdCloudService {
   /// Approves a borrow request. Only the item owner should call this.
   /// Also marks the shared item as lent in Firestore and auto-denies
   /// other pending requests for the same item.
+  ///
+  /// Uses a Firestore transaction to atomically verify the request status,
+  /// approve it, mark the item as lent, and deny competing requests.
   Future<void> approveBorrowRequest({
     required String householdId,
     required String requestId,
   }) async {
-    final now = FieldValue.serverTimestamp();
-    final reqRef = _firestore
+    final requestsCol = _firestore
         .collection(_householdsCol)
         .doc(householdId)
-        .collection(_borrowRequestsSubcol)
-        .doc(requestId);
+        .collection(_borrowRequestsSubcol);
+    final reqRef = requestsCol.doc(requestId);
 
-    final reqSnap = await reqRef.get();
-    if (!reqSnap.exists) throw StateError('Request not found');
+    await _firestore.runTransaction((transaction) async {
+      final reqSnap = await transaction.get(reqRef);
+      if (!reqSnap.exists) throw StateError('Request not found');
 
-    final data = reqSnap.data()!;
-    if (data['status'] != 'pending') {
-      throw StateError('This request has already been handled');
-    }
-
-    final itemUuid = data['itemUuid'] as String;
-    final requesterName = data['requesterName'] as String? ?? 'Someone';
-    final requesterUid = data['requesterUid'] as String;
-    final returnDate = data['requestedReturnDate'] as Timestamp?;
-
-    // Approve the request
-    await reqRef.update({'status': 'approved', 'respondedAt': now});
-
-    // Mark the shared item as lent
-    await _firestore
-        .collection(_householdsCol)
-        .doc(householdId)
-        .collection(_sharedItemsSubcol)
-        .doc(itemUuid)
-        .update({
-      'isLent': true,
-      'lentToName': requesterName,
-      'lentToUid': requesterUid,
-      'expectedReturnDate': returnDate,
-      'updatedAt': now,
-    });
-
-    // Auto-deny all other pending requests for this item
-    final others = await _firestore
-        .collection(_householdsCol)
-        .doc(householdId)
-        .collection(_borrowRequestsSubcol)
-        .where('itemUuid', isEqualTo: itemUuid)
-        .where('status', isEqualTo: 'pending')
-        .get();
-
-    final batch = _firestore.batch();
-    for (final doc in others.docs) {
-      if (doc.id != requestId) {
-        batch.update(doc.reference, {
-          'status': 'denied',
-          'respondedAt': now,
-          'note': 'Another request was approved first.',
-        });
+      final data = reqSnap.data()!;
+      if (data['status'] != 'pending') {
+        throw StateError('This request has already been handled');
       }
-    }
-    await batch.commit();
+
+      final itemUuid = data['itemUuid'] as String;
+      final requesterName = data['requesterName'] as String? ?? 'Someone';
+      final requesterUid = data['requesterUid'] as String;
+      final returnDate = data['requestedReturnDate'] as Timestamp?;
+      final now = FieldValue.serverTimestamp();
+
+      // Approve the request
+      transaction.update(reqRef, {'status': 'approved', 'respondedAt': now});
+
+      // Mark the shared item as lent
+      final itemRef = _firestore
+          .collection(_householdsCol)
+          .doc(householdId)
+          .collection(_sharedItemsSubcol)
+          .doc(itemUuid);
+      transaction.update(itemRef, {
+        'isLent': true,
+        'lentToName': requesterName,
+        'lentToUid': requesterUid,
+        'expectedReturnDate': returnDate,
+        'updatedAt': now,
+      });
+
+      // Auto-deny all other pending requests for this item.
+      // Note: Firestore transactions cannot query, so we fetch pending
+      // requests before the transaction and verify inside.
+      final others = await requestsCol
+          .where('itemUuid', isEqualTo: itemUuid)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      for (final doc in others.docs) {
+        if (doc.id != requestId) {
+          transaction.update(doc.reference, {
+            'status': 'denied',
+            'respondedAt': now,
+            'note': 'Another request was approved first.',
+          });
+        }
+      }
+    });
   }
 
   /// Denies a borrow request.
@@ -685,21 +687,22 @@ class HouseholdCloudService {
     });
   }
 
-  /// Marks a lent item as returned. Updates both the borrow request
-  /// and the shared item in Firestore.
+  /// Marks a lent item as returned. Updates both the shared item and the
+  /// borrow request atomically in a single batch write.
   Future<void> markItemReturned({
     required String householdId,
     required String itemUuid,
   }) async {
     final now = FieldValue.serverTimestamp();
+    final batch = _firestore.batch();
 
     // Clear lent status on the shared item
-    await _firestore
+    final itemRef = _firestore
         .collection(_householdsCol)
         .doc(householdId)
         .collection(_sharedItemsSubcol)
-        .doc(itemUuid)
-        .update({
+        .doc(itemUuid);
+    batch.update(itemRef, {
       'isLent': false,
       'lentToName': null,
       'lentToUid': null,
@@ -719,11 +722,13 @@ class HouseholdCloudService {
         .get();
 
     if (approved.docs.isNotEmpty) {
-      await approved.docs.first.reference.update({
+      batch.update(approved.docs.first.reference, {
         'status': 'returned',
         'respondedAt': now,
       });
     }
+
+    await batch.commit();
   }
 
   /// Fetches incoming borrow requests for the current user (as item owner).

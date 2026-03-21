@@ -7,6 +7,6 @@ final syncStatusProvider = StateProvider<SyncResult>(
   (ref) => const SyncResult.idle(),
 );
 
-final lastSyncedAtProvider = FutureProvider<DateTime?>((ref) async {
+final lastSyncedAtProvider = FutureProvider.autoDispose<DateTime?>((ref) async {
   return ref.watch(syncServiceProvider).getLastSyncedAt();
 });

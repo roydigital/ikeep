@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(flutter pub:*)",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/save/**)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/search/**)"
     ]
   }
 }

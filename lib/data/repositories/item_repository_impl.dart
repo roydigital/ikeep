@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/errors/failure.dart';
@@ -43,16 +43,14 @@ class ItemRepositoryImpl implements ItemRepository {
           movedByName: movedByName,
         );
         await historyDao.insertHistory(history);
-        await _syncHistoryIfShared(history);
+        _trySyncHistory(history);
       }
 
       await locationDao.recalculateUsageCounts();
-      await _syncItemVisibility(item: normalized);
+      _trySyncVisibility(item: normalized);
       return null;
     } on DatabaseException catch (e) {
       return Failure('Failed to save item', e);
-    } on FirebaseException catch (e) {
-      return Failure(e.message ?? 'Failed to sync shared item: ${e.code}', e);
     } on StateError catch (e) {
       return Failure(e.message, e);
     } catch (e) {
@@ -84,11 +82,11 @@ class ItemRepositoryImpl implements ItemRepository {
           movedByName: movedByName,
         );
         await historyDao.insertHistory(history);
-        await _syncHistoryIfShared(history);
+        _trySyncHistory(history);
       }
 
       await locationDao.recalculateUsageCounts();
-      await _syncItemVisibility(
+      _trySyncVisibility(
         item: normalized,
         removeRemote:
             wasShared && normalized.visibility == ItemVisibility.private_,
@@ -97,8 +95,6 @@ class ItemRepositoryImpl implements ItemRepository {
       return null;
     } on DatabaseException catch (e) {
       return Failure('Failed to update item', e);
-    } on FirebaseException catch (e) {
-      return Failure(e.message ?? 'Failed to sync shared item: ${e.code}', e);
     } on StateError catch (e) {
       return Failure(e.message, e);
     } catch (e) {
@@ -243,13 +239,32 @@ class ItemRepositoryImpl implements ItemRepository {
     );
   }
 
-  Future<void> _syncHistoryIfShared(ItemLocationHistory history) async {
+  /// Fire-and-forget cloud sync for shared history. Errors are logged but
+  /// never propagate — the local SQLite write is the source of truth.
+  void _trySyncHistory(ItemLocationHistory history) {
     final householdId = history.householdId;
     if (householdId == null || householdId.isEmpty) return;
-    await householdCloudService.syncItemHistory(
-      householdId: householdId,
-      history: history,
-    );
+    householdCloudService
+        .syncItemHistory(householdId: householdId, history: history)
+        .catchError((Object e) {
+      debugPrint('ItemRepository: cloud history sync failed (queued): $e');
+    });
+  }
+
+  /// Fire-and-forget cloud sync for item visibility. Errors are logged but
+  /// never propagate — the local SQLite write is the source of truth.
+  void _trySyncVisibility({
+    required Item item,
+    bool removeRemote = false,
+    String? previousHouseholdId,
+  }) {
+    _syncItemVisibility(
+      item: item,
+      removeRemote: removeRemote,
+      previousHouseholdId: previousHouseholdId,
+    ).catchError((Object e) {
+      debugPrint('ItemRepository: cloud visibility sync failed (queued): $e');
+    });
   }
 
   String _currentUserDisplayName() {

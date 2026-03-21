@@ -10,7 +10,7 @@ class HomeTourKeys {
   static const hasSeenSettingsTour = 'has_seen_settings_tour';
 }
 
-class HomeTourController extends AsyncNotifier<bool> {
+class HomeTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
   Future<bool> build() async {
     final prefs = await SharedPreferences.getInstance();
@@ -25,9 +25,11 @@ class HomeTourController extends AsyncNotifier<bool> {
 }
 
 final homeTourControllerProvider =
-    AsyncNotifierProvider<HomeTourController, bool>(HomeTourController.new);
+    AsyncNotifierProvider.autoDispose<HomeTourController, bool>(
+      HomeTourController.new,
+    );
 
-class ItemListingTourController extends AsyncNotifier<bool> {
+class ItemListingTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
   Future<bool> build() async {
     final prefs = await SharedPreferences.getInstance();
@@ -42,11 +44,11 @@ class ItemListingTourController extends AsyncNotifier<bool> {
 }
 
 final itemListingTourControllerProvider =
-    AsyncNotifierProvider<ItemListingTourController, bool>(
+    AsyncNotifierProvider.autoDispose<ItemListingTourController, bool>(
       ItemListingTourController.new,
     );
 
-class RoomsTourController extends AsyncNotifier<bool> {
+class RoomsTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
   Future<bool> build() async {
     final prefs = await SharedPreferences.getInstance();
@@ -61,11 +63,11 @@ class RoomsTourController extends AsyncNotifier<bool> {
 }
 
 final roomsTourControllerProvider =
-    AsyncNotifierProvider<RoomsTourController, bool>(
+    AsyncNotifierProvider.autoDispose<RoomsTourController, bool>(
       RoomsTourController.new,
     );
 
-class SettingsTourController extends AsyncNotifier<bool> {
+class SettingsTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
   Future<bool> build() async {
     final prefs = await SharedPreferences.getInstance();
@@ -80,6 +82,6 @@ class SettingsTourController extends AsyncNotifier<bool> {
 }
 
 final settingsTourControllerProvider =
-    AsyncNotifierProvider<SettingsTourController, bool>(
+    AsyncNotifierProvider.autoDispose<SettingsTourController, bool>(
       SettingsTourController.new,
     );

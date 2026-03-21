@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/detail/**)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/domain/models/**)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/providers/**)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/data/repositories/**)",
+      "Bash(flutter test:*)"
+    ]
+  }
+}
