@@ -50,15 +50,68 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         _activeOpText = '';
       });
 
+  Future<void> _showCloudQuotaFeedback(bool isPremium) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(cloudBackupQuotaExceededError(isPremium: isPremium)),
+        backgroundColor: AppColors.error,
+      ),
+    );
+    if (!isPremium) {
+      await _showPaywall();
+    }
+  }
+
+  Future<bool> _confirmDisableCloudBackup(Item item) async {
+    if (item.visibility != ItemVisibility.household) {
+      return true;
+    }
+
+    final shouldDisable = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Turn off backup and sharing?'),
+        content: const Text(
+          'This item is currently visible to family members. '
+          'Turning off Backup to Cloud will also switch Visibility off '
+          'and keep the item only on this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Turn Off'),
+          ),
+        ],
+      ),
+    );
+
+    return shouldDisable ?? false;
+  }
+
   Future<void> _toggleCloudBackup(Item item, bool enabled) async {
+    if (!enabled) {
+      final shouldDisable = await _confirmDisableCloudBackup(item);
+      if (!shouldDisable) return;
+    }
+
     _startOp(enabled ? 'Enabling cloud backup...' : 'Disabling cloud backup...');
 
     if (!enabled) {
+      final wasSharedWithHousehold =
+          item.visibility == ItemVisibility.household;
       final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
             item.copyWith(
               isBackedUp: false,
               clearCloudId: true,
               clearLastSyncedAt: true,
+              visibility: ItemVisibility.private_,
+              clearHouseholdId: true,
+              sharedWithMemberUuids: const [],
               updatedAt: DateTime.now(),
             ),
           );
@@ -70,21 +123,29 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cloud backup disabled'), backgroundColor: AppColors.success),
+          SnackBar(
+            content: Text(
+              wasSharedWithHousehold
+                  ? 'Cloud backup disabled. Family visibility turned off because this item is now saved only on this device.'
+                  : 'Cloud backup disabled. This item is now saved only on this device.',
+            ),
+            backgroundColor: AppColors.success,
+          ),
         );
       }
       return;
     }
 
     final settings = ref.read(settingsProvider);
-    if (!settings.isPremium) {
-      final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
-      if (backedUpCount >= freeCloudBackupLimit) {
-        if (!mounted) return;
-        _endOp();
-        await _showPaywall();
-        return;
-      }
+    final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
+    if (hasReachedCloudBackupLimit(
+      isPremium: settings.isPremium,
+      backedUpCount: backedUpCount,
+    )) {
+      if (!mounted) return;
+      _endOp();
+      await _showCloudQuotaFeedback(settings.isPremium);
+      return;
     }
 
     await ref.read(settingsProvider.notifier).setBackupEnabled(true);
@@ -99,14 +160,20 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
     if (error != null) {
       if (error.contains('Cloud quota exceeded')) {
-        await _showPaywall();
+        await _showCloudQuotaFeedback(settings.isPremium);
+        return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error), backgroundColor: AppColors.error),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cloud backup enabled'), backgroundColor: AppColors.success),
+        const SnackBar(
+          content: Text(
+            'Cloud backup enabled. You can now share this item from Visibility.',
+          ),
+          backgroundColor: AppColors.success,
+        ),
       );
     }
   }
@@ -893,10 +960,19 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final settings = ref.watch(settingsProvider);
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
-    final progress = (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
-    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+    final progress = cloudBackupUsageProgress(
+      isPremium: settings.isPremium,
+      backedUpCount: backedUpCount,
+    );
+    final progressColor = backedUpCount >=
+            cloudBackupWarningThresholdFor(settings.isPremium)
         ? AppColors.warning
         : AppColors.primary;
+    final helperText = item.isBackedUp
+        ? item.visibility == ItemVisibility.household
+            ? 'This item is shareable because it is backed up. Turning backup off will also switch Visibility to private.'
+            : 'Only cloud-backed items can be shared with family. Use Visibility if you want to share this item.'
+        : 'This item is stored only on this device. Turn on cloud backup to make family sharing available.';
 
     return Container(
       width: double.infinity,
@@ -926,15 +1002,23 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      settings.isPremium
-                          ? 'Unlimited cloud protection active'
-                          : '$backedUpCount / $freeCloudBackupLimit free backups used',
-                      style: TextStyle(
-                        color:
-                            item.isBackedUp ? AppColors.primary : textSecondary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                    SizedBox(
+                      width: double.infinity,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Turn On/Off Cloud Backup for this Item',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(
+                            color: item.isBackedUp
+                                ? AppColors.primary
+                                : textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -967,6 +1051,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
               borderRadius: BorderRadius.circular(999),
             ),
           ],
+          const SizedBox(height: 12),
+          Text(
+            helperText,
+            style: TextStyle(
+              color: textSecondary,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
         ],
       ),
     );
@@ -1847,6 +1940,10 @@ class _ItemVisibilitySection extends ConsumerStatefulWidget {
 
 class _ItemVisibilitySectionState
     extends ConsumerState<_ItemVisibilitySection> {
+  static const String _backupRequiredMessage =
+      'Turn on Backup to Cloud before sharing this item with family. '
+      'Device-only items stay private on this device.';
+
   bool _isSaving = false;
 
   /// Optimistic override so the switch flips immediately on tap instead of
@@ -1856,7 +1953,9 @@ class _ItemVisibilitySectionState
   Item get _item => widget.item;
 
   bool get _isShared =>
-      _pendingShared ?? _item.visibility == ItemVisibility.household;
+      _pendingShared ??
+      (_item.visibility == ItemVisibility.household &&
+          (!_isCurrentUserOwner || _item.isBackedUp));
 
   String? get _currentUserUid {
     final uid = ref.read(firebaseAuthProvider).currentUser?.uid.trim();
@@ -1885,6 +1984,11 @@ class _ItemVisibilitySectionState
     return ownerMemberUuid == currentUserUid;
   }
 
+  bool get _isCurrentUserOwner => _canChangeShareState;
+
+  bool get _canShareWhileBackupState =>
+      !_isCurrentUserOwner || _item.isBackedUp;
+
   List<String> _normalizedSelectedMemberUuids([Iterable<String>? memberUuids]) {
     final ownerMemberUuid = _itemOwnerMemberUuid;
     final normalized = <String>[];
@@ -1910,6 +2014,12 @@ class _ItemVisibilitySectionState
   ///
   /// Returns a user-facing error string, or null on success.
   Future<String?> _saveItem(Item updatedItem) async {
+    if (updatedItem.visibility == ItemVisibility.household &&
+        _isCurrentUserOwner &&
+        !updatedItem.isBackedUp) {
+      return _backupRequiredMessage;
+    }
+
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
     if (!mounted) return error;
@@ -1941,6 +2051,12 @@ class _ItemVisibilitySectionState
   Future<void> _toggleSharing(bool enabled) async {
     if (_isSaving) return;
     if (!enabled && !_canChangeShareState) return;
+    if (enabled && !_canShareWhileBackupState) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_backupRequiredMessage)),
+      );
+      return;
+    }
 
     // ── Flip the switch immediately (optimistic UI) ──
     setState(() {
@@ -1976,25 +2092,10 @@ class _ItemVisibilitySectionState
       }
 
       // Family sharing requires cloud backup — check quota first.
-      if (!_item.isBackedUp) {
-        final settings = ref.read(settingsProvider);
-        if (!settings.isPremium) {
-          final backedUpCount =
-              await ref.read(backedUpItemsCountProvider.future);
-          if (!mounted) return;
-          if (backedUpCount >= freeCloudBackupLimit) {
-            await PaywallScreen.show(context);
-            return;
-          }
-        }
-        await ref.read(settingsProvider.notifier).setBackupEnabled(true);
-      }
-
       final error = await _saveItem(
         _item.copyWith(
           visibility: ItemVisibility.household,
           householdId: householdId,
-          isBackedUp: true,
           sharedWithMemberUuids: const [],
         ),
       );
@@ -2132,13 +2233,25 @@ class _ItemVisibilitySectionState
                 activeTrackColor: AppColors.primary.withValues(alpha: 0.4),
                 onChanged: _isSaving ||
                         (!hasHousehold && !_isShared) ||
+                        (!_isShared && !_canShareWhileBackupState) ||
                         (_isShared && !_canChangeShareState)
                     ? null
                     : _toggleSharing,
               ),
             ],
           ),
-          if (!hasHousehold && !_isShared) ...[
+          if (!_canShareWhileBackupState) ...[
+            const SizedBox(height: 12),
+            Text(
+              _backupRequiredMessage,
+              style: TextStyle(
+                color: textSecondary,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (_canShareWhileBackupState && !hasHousehold && !_isShared) ...[
             const SizedBox(height: 12),
             Text(
               'Private by default. Create a household in Family Sharing Pool settings to enable sharing.',

@@ -361,15 +361,16 @@ class FirebaseSyncService implements SyncService {
 
   Future<void> _ensureCloudQuotaForItem(Item item) async {
     final isPremium = await _isPremiumUser();
-    if (isPremium) return;
-
     final isExistingCloudItem =
         (item.cloudId?.trim().isNotEmpty ?? false) || item.lastSyncedAt != null;
     if (isExistingCloudItem) return;
 
+    final cloudBackupLimit = cloudBackupLimitFor(isPremium);
     final backedUpItemCount = await _itemDao.countBackedUpItems();
-    if (backedUpItemCount >= freeCloudBackupLimit) {
-      throw const SyncException('Cloud quota exceeded');
+    if (backedUpItemCount > cloudBackupLimit) {
+      throw SyncException(
+        cloudBackupQuotaExceededError(isPremium: isPremium),
+      );
     }
   }
 

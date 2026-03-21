@@ -134,6 +134,10 @@ class HouseholdActionState {
 }
 
 class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
+  static const String _backupRequiredMessage =
+      'Turn on Backup to Cloud before sharing this item with family. '
+      'Device-only items stay private on this device.';
+
   HouseholdNotifier(this._ref) : super(const HouseholdActionState());
 
   final Ref _ref;
@@ -194,6 +198,16 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
       final targetVisibility = item.visibility.isHousehold
           ? ItemVisibility.private_
           : ItemVisibility.household;
+      if (targetVisibility.isHousehold &&
+          _currentUserOwnsItem(item) &&
+          !item.isBackedUp) {
+        state = state.copyWith(
+          isLoading: false,
+          lastError: _backupRequiredMessage,
+        );
+        return _backupRequiredMessage;
+      }
+
       final householdId = targetVisibility.isHousehold
           ? await _requireHouseholdId()
           : item.householdId;
@@ -203,7 +217,7 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
         visibility: targetVisibility,
         householdId: targetVisibility.isHousehold ? householdId : null,
         clearHouseholdId: !targetVisibility.isHousehold,
-        isBackedUp: targetVisibility.isHousehold ? true : item.isBackedUp,
+        isBackedUp: item.isBackedUp,
         sharedWithMemberUuids:
             targetVisibility.isHousehold ? item.sharedWithMemberUuids : const [],
         updatedAt: DateTime.now(),
@@ -344,6 +358,18 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
     _ref.invalidate(householdSharedItemsProvider);
   }
 
+  bool _currentUserOwnsItem(Item item) {
+    final currentUserUid = _ref.read(authStateProvider).valueOrNull?.uid.trim();
+    final cloudId = item.cloudId?.trim();
+    if (currentUserUid == null || currentUserUid.isEmpty) {
+      return true;
+    }
+    if (cloudId == null || cloudId.isEmpty || cloudId == item.uuid) {
+      return true;
+    }
+    return cloudId == currentUserUid;
+  }
+
   String _resolveMoverName(User? user) {
     final displayName = user?.displayName?.trim();
     if (displayName != null && displayName.isNotEmpty) {
@@ -452,7 +478,7 @@ class HouseholdMemberLookupController
     } on StateError catch (e) {
       state = state.copyWith(
         isLoading: false,
-        errorMessage: '${e.message}',
+        errorMessage: e.message,
         clearFoundUser: true,
       );
     } catch (e) {

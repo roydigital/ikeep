@@ -179,26 +179,31 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     }
 
     final settings = ref.read(settingsProvider);
-    if (settings.isPremium) {
-      await ref.read(settingsProvider.notifier).setBackupEnabled(true);
-      if (mounted) {
-        setState(() => _backupToCloud = true);
-      }
-      return;
-    }
-
     final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
-    if (backedUpCount < freeCloudBackupLimit) {
-      await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+    if (hasReachedCloudBackupLimit(
+      isPremium: settings.isPremium,
+      backedUpCount: backedUpCount,
+    )) {
       if (mounted) {
-        setState(() => _backupToCloud = true);
+        setState(() => _backupToCloud = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              cloudBackupQuotaExceededError(isPremium: settings.isPremium),
+            ),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      if (!settings.isPremium) {
+        await _showPaywall();
       }
       return;
     }
 
+    await ref.read(settingsProvider.notifier).setBackupEnabled(true);
     if (mounted) {
-      setState(() => _backupToCloud = false);
-      await _showPaywall();
+      setState(() => _backupToCloud = true);
     }
   }
 
@@ -965,10 +970,17 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     final settings = ref.watch(settingsProvider);
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
-    final progress = (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
-    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+    final progress = cloudBackupUsageProgress(
+      isPremium: settings.isPremium,
+      backedUpCount: backedUpCount,
+    );
+    final progressColor = backedUpCount >=
+            cloudBackupWarningThresholdFor(settings.isPremium)
         ? AppColors.warning
         : AppColors.primary;
+    final helperText = _backupToCloud
+        ? 'Cloud-backed items can later be shared with family members from the item details screen.'
+        : 'Keep this off if the item should stay only on this device. Family sharing stays unavailable while backup is off.';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -998,9 +1010,10 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      settings.isPremium
-                          ? 'Unlimited backups with Ikeep Plus'
-                          : '$backedUpCount / $freeCloudBackupLimit free backups used',
+                      cloudBackupUsageLabel(
+                        isPremium: settings.isPremium,
+                        backedUpCount: backedUpCount,
+                      ),
                       style: TextStyle(color: secondaryColor, fontSize: 12),
                     ),
                   ],
@@ -1023,6 +1036,15 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
               borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
             ),
           ],
+          const SizedBox(height: 10),
+          Text(
+            helperText,
+            style: TextStyle(
+              color: secondaryColor,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
         ],
       ),
     );

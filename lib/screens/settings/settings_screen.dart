@@ -893,9 +893,12 @@ class _CloudBackupSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final usageProgress =
-        (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
-    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+    final usageProgress = cloudBackupUsageProgress(
+      isPremium: isPremium,
+      backedUpCount: backedUpCount,
+    );
+    final progressColor = backedUpCount >=
+            cloudBackupWarningThresholdFor(isPremium)
         ? AppColors.warning
         : _kAccent;
 
@@ -910,13 +913,10 @@ class _CloudBackupSummary extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: const Center(
-              child: Text(
-                '∞',
-                style: TextStyle(
-                  color: _kAccent,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                ),
+              child: Icon(
+                Icons.cloud_done,
+                color: _kAccent,
+                size: 24,
               ),
             ),
           ),
@@ -926,7 +926,7 @@ class _CloudBackupSummary extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Unlimited Backups Active',
+                  'Unlimited Cloud Backup',
                   style: TextStyle(
                     color: _kTextPrimary,
                     fontWeight: FontWeight.w700,
@@ -935,10 +935,8 @@ class _CloudBackupSummary extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  backupEnabled
-                      ? 'Your cloud protection is fully unlocked.'
-                      : 'Turn on backup for any item and it syncs without limits.',
-                  style: TextStyle(color: _kTextMuted, fontSize: 14),
+                  premiumCloudBackupFairUsageDisclaimer,
+                  style: TextStyle(color: _kTextMuted, fontSize: 12),
                 ),
               ],
             ),
@@ -985,7 +983,10 @@ class _CloudBackupSummary extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                '$backedUpCount / $freeCloudBackupLimit Free Cloud Backups Used',
+                cloudBackupUsageLabel(
+                  isPremium: false,
+                  backedUpCount: backedUpCount,
+                ),
                 style: TextStyle(
                   color: _kTextPrimary,
                   fontWeight: FontWeight.w700,
@@ -1742,6 +1743,15 @@ class _ManageSubscriptionSheet extends ConsumerWidget {
                     planOption(AppPlan.monthly, '\$1.99 / month'),
                     planOption(AppPlan.yearly, '\$14.99 / year'),
                     planOption(AppPlan.lifetime, '\$29.99 / once'),
+                    const SizedBox(height: 8),
+                    Text(
+                      premiumCloudBackupFairUsageDisclaimer,
+                      style: TextStyle(
+                        color: textSecondary.withValues(alpha: 0.72),
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     const Divider(),
                     const SizedBox(height: 8),
@@ -1753,7 +1763,8 @@ class _ManageSubscriptionSheet extends ConsumerWidget {
                             builder: (ctx) => AlertDialog(
                               title: const Text('Cancel Subscription?'),
                               content: const Text(
-                                  'You will lose access to unlimited cloud backups and other premium features.'),
+                                'You will lose access to unlimited cloud backups and other premium features.',
+                              ),
                               actions: [
                                 TextButton(
                                   onPressed: () => Navigator.pop(ctx, false),

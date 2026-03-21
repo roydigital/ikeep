@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/subscription_constants.dart';
 import '../../providers/settings_provider.dart';
 import '../../theme/app_colors.dart';
 
@@ -149,11 +150,20 @@ class PaywallScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 22),
-                feature('Unlimited Cloud Backups'),
+                feature(premiumCloudBackupFeatureLabel),
                 const SizedBox(height: 14),
                 feature('Restore across devices'),
                 const SizedBox(height: 14),
                 feature('Unlimited Family Sharing'),
+                const SizedBox(height: 10),
+                Text(
+                  premiumCloudBackupFairUsageDisclaimer,
+                  style: TextStyle(
+                    color: textSecondary.withValues(alpha: 0.72),
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
                 const SizedBox(height: 26),
                 planButton('Monthly - \$1.99', AppPlan.monthly),
                 const SizedBox(height: 12),

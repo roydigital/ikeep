@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/item.dart';
 import '../domain/models/item_visibility.dart';
 import '../providers/household_providers.dart';
+import '../providers/service_providers.dart';
 import '../theme/app_colors.dart';
 
 class ItemVisibilityToggle extends ConsumerStatefulWidget {
@@ -20,9 +21,21 @@ class ItemVisibilityToggle extends ConsumerStatefulWidget {
 }
 
 class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
+  static const String _backupRequiredMessage =
+      'Turn on Backup to Cloud before sharing this item with family. '
+      'Device-only items stay private on this device.';
+
   bool _isToggling = false;
 
   Future<void> _toggle() async {
+    final isHousehold = widget.item.visibility == ItemVisibility.household;
+    if (!isHousehold && !_canShareWhileBackupState) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_backupRequiredMessage)),
+      );
+      return;
+    }
+
     setState(() => _isToggling = true);
 
     final error = await ref
@@ -51,6 +64,22 @@ class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
     }
   }
 
+  bool get _canShareWhileBackupState =>
+      !_currentUserOwnsItem() || widget.item.isBackedUp;
+
+  bool _currentUserOwnsItem() {
+    final currentUserUid =
+        ref.read(firebaseAuthProvider).currentUser?.uid.trim();
+    final cloudId = widget.item.cloudId?.trim();
+    if (currentUserUid == null || currentUserUid.isEmpty) {
+      return true;
+    }
+    if (cloudId == null || cloudId.isEmpty || cloudId == widget.item.uuid) {
+      return true;
+    }
+    return cloudId == currentUserUid;
+  }
+
   @override
   Widget build(BuildContext context) {
     final actionState = ref.watch(householdNotifierProvider);
@@ -63,7 +92,10 @@ class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
     final isDisabled =
-        _isToggling || actionState.isLoading || (!hasHousehold && !isHousehold);
+        _isToggling ||
+        actionState.isLoading ||
+        (!hasHousehold && !isHousehold) ||
+        (!isHousehold && !_canShareWhileBackupState);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -120,7 +152,9 @@ class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
                       Text(
                         isHousehold
                             ? 'This item is shared with your household.'
-                            : 'This item is only visible on this device.',
+                            : !_canShareWhileBackupState
+                                ? 'This item is saved only on this device until cloud backup is turned on.'
+                                : 'This item is only visible on this device.',
                         style: TextStyle(
                           color: textSecondary,
                           fontSize: 13,
@@ -142,7 +176,8 @@ class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
               else
                 Switch.adaptive(
                   value: isHousehold,
-                  activeColor: AppColors.primary,
+                  activeThumbColor: AppColors.primary,
+                  activeTrackColor: AppColors.primary.withValues(alpha: 0.4),
                   onChanged: isDisabled ? null : (_) => _toggle(),
                 ),
             ],
@@ -154,6 +189,16 @@ class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
               style: TextStyle(
                 color: textSecondary,
                 fontSize: 12,
+              ),
+            ),
+          ] else if (!isHousehold && !_canShareWhileBackupState) ...[
+            const SizedBox(height: 12),
+            Text(
+              _backupRequiredMessage,
+              style: TextStyle(
+                color: textSecondary,
+                fontSize: 12,
+                height: 1.35,
               ),
             ),
           ],
