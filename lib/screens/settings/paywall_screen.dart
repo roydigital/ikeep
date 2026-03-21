@@ -153,7 +153,7 @@ class PaywallScreen extends ConsumerWidget {
                 const SizedBox(height: 14),
                 feature('Restore across devices'),
                 const SizedBox(height: 14),
-                feature('Support independent developers'),
+                feature('Unlimited Family Sharing'),
                 const SizedBox(height: 26),
                 planButton('Monthly - \$1.99', AppPlan.monthly),
                 const SizedBox(height: 12),
