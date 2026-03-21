@@ -80,6 +80,7 @@ class DatabaseHelper {
         ${DbConstants.colItemNotes} TEXT,
         ${DbConstants.colItemCloudId} TEXT,
         ${DbConstants.colItemLastSyncedAt} INTEGER,
+        ${DbConstants.colItemIsBackedUp} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemIsLent} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemLentTo} TEXT,
         ${DbConstants.colItemLentOn} INTEGER,
@@ -173,6 +174,8 @@ class DatabaseHelper {
         'CREATE INDEX idx_items_location ON ${DbConstants.tableItems}(${DbConstants.colItemLocationUuid})');
     batch.execute(
         'CREATE INDEX idx_items_archived ON ${DbConstants.tableItems}(${DbConstants.colItemIsArchived})');
+    batch.execute(
+        'CREATE INDEX idx_items_backed_up ON ${DbConstants.tableItems}(${DbConstants.colItemIsBackedUp})');
     batch.execute(
         'CREATE INDEX idx_items_season_category ON ${DbConstants.tableItems}(${DbConstants.colItemSeasonCategory})');
     batch.execute(
@@ -439,6 +442,17 @@ class DatabaseHelper {
       );
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_items_season_category ON ${DbConstants.tableItems}(${DbConstants.colItemSeasonCategory})');
+    }
+
+    if (oldVersion < 11) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemIsBackedUp,
+        'INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_items_backed_up ON ${DbConstants.tableItems}(${DbConstants.colItemIsBackedUp})');
     }
   }
 

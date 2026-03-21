@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Ikeep Help Center with answers to common questions about saving items, backup, reminders, sharing, and privacy.">
+  <title>Ikeep Help Center</title>
+  <style>
+    :root {
+      --bg: #f6f2fb;
+      --panel: #ffffff;
+      --panel-soft: #f0e9f8;
+      --text: #241b33;
+      --muted: #6c627d;
+      --accent: #6d5b8c;
+      --border: #ddd1eb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background:
+        radial-gradient(circle at top right, #efe6fb 0, transparent 35%),
+        linear-gradient(180deg, #fbf9fe 0%, var(--bg) 100%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    .hero,
+    .card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: 0 20px 50px rgba(64, 40, 97, 0.08);
+    }
+
+    .hero {
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    h1, h2 {
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+
+    h1 { font-size: clamp(2rem, 4vw, 3rem); }
+    h2 { font-size: 1.2rem; }
+
+    p { margin: 0 0 14px; color: var(--muted); }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .nav a,
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .faq-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .card {
+      padding: 22px 22px 18px;
+    }
+
+    ul {
+      margin: 12px 0 0 20px;
+      color: var(--muted);
+    }
+
+    .footer {
+      margin-top: 28px;
+      font-size: 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Ikeep Support</div>
+      <h1>Help Center</h1>
+      <p>Ikeep helps you remember where you stored things, track item movement, manage reminders, and optionally sync selected data across devices.</p>
+      <p>If you need direct assistance, contact <a href="mailto:roy@roydigital.in">roy@roydigital.in</a>.</p>
+      <nav class="nav" aria-label="Support pages">
+        <a href="https://roydigital.in/ikeep/contact-us.html">Contact Us</a>
+        <a href="https://roydigital.in/ikeep/terms-privacy.html">Terms &amp; Privacy</a>
+        <a class="button primary" href="mailto:roy@roydigital.in">Email Support</a>
+      </nav>
+    </section>
+
+    <section class="faq-list" aria-label="Frequently asked questions">
+      <article class="card">
+        <h2>How does Ikeep work?</h2>
+        <p>You can save an item with its name, room or storage location, notes, images, tags, and reminder details. Ikeep is designed to make it easier to find things later.</p>
+      </article>
+
+      <article class="card">
+        <h2>Do I need an account to use the app?</h2>
+        <p>No. Core usage can work without signing in. Some optional features, such as cloud backup or cross-device access, may require sign-in and connected services.</p>
+      </article>
+
+      <article class="card">
+        <h2>How do cloud backup and syncing work?</h2>
+        <p>If backup is enabled for an item or feature, Ikeep may sync relevant data through connected backend services so your data can be restored or accessed on another device. Sync availability can depend on your plan, device status, and connectivity.</p>
+      </article>
+
+      <article class="card">
+        <h2>Does Ikeep store my photos and item notes?</h2>
+        <p>It can, depending on how you use the app. Item photos, notes, and location details may be stored locally on your device and, where enabled, in cloud services used by Ikeep.</p>
+      </article>
+
+      <article class="card">
+        <h2>How do reminders work?</h2>
+        <p>Ikeep can create reminder prompts for things like stale items, seasonal checks, due dates, or lent items. Reminder delivery also depends on your device permissions and notification settings.</p>
+      </article>
+
+      <article class="card">
+        <h2>What is Nearby Discovery?</h2>
+        <p>Nearby Discovery is intended to help make lendable items discoverable within a broader locality area. The app is designed to use locality-level information rather than sharing precise GPS coordinates publicly.</p>
+      </article>
+
+      <article class="card">
+        <h2>Can I control what is visible or shared?</h2>
+        <p>Yes. Visibility and sharing are intended to be user-controlled features. Review item-level settings before enabling backup, sharing, family access, or nearby discovery.</p>
+      </article>
+
+      <article class="card">
+        <h2>How do I update or delete my data?</h2>
+        <p>You can edit or remove items directly inside the app. If you need help with account-linked or support-related requests, email <a href="mailto:roy@roydigital.in">roy@roydigital.in</a>.</p>
+      </article>
+
+      <article class="card">
+        <h2>Why is a support page opening in my browser?</h2>
+        <p>The Support section in Ikeep opens web pages hosted at roydigital.in so you can view updated help, contact, and legal information outside the app.</p>
+      </article>
+    </section>
+
+    <p class="footer">Support pages for Ikeep, published by Roy Digital, India.</p>
+  </main>
+</body>
+</html>

@@ -3,7 +3,7 @@ class DbConstants {
   DbConstants._();
 
   static const String dbName = 'ikeep.db';
-  static const int dbVersion = 10;
+  static const int dbVersion = 11;
 
   // households
   static const String tableHouseholds = 'households';
@@ -31,6 +31,7 @@ class DbConstants {
   static const String colItemNotes = 'notes';
   static const String colItemCloudId = 'cloud_id';
   static const String colItemLastSyncedAt = 'last_synced_at'; // Unix ms
+  static const String colItemIsBackedUp = 'is_backed_up'; // 0 or 1
   static const String colItemIsLent = 'is_lent'; // 0 or 1
   static const String colItemLentTo = 'lent_to';
   static const String colItemLentOn = 'lent_on'; // Unix ms

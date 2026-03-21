@@ -125,11 +125,11 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).saveItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(preparedItem);
+    final syncError = await _syncItemToCloud(preparedItem);
     await _syncNotificationsForItem(preparedItem);
 
     _invalidateItemLists();
-    return null;
+    return syncError;
   }
 
   Future<String?> updateItem(Item item) async {
@@ -138,12 +138,14 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).updateItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(preparedItem.copyWith(updatedAt: DateTime.now()));
+    final syncError = await _syncItemToCloud(
+      preparedItem.copyWith(updatedAt: DateTime.now()),
+    );
     await _syncNotificationsForItem(preparedItem);
 
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
-    return null;
+    return syncError;
   }
 
   Future<String?> saveItemWithMover(
@@ -159,11 +161,11 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(preparedItem);
+    final syncError = await _syncItemToCloud(preparedItem);
     await _syncNotificationsForItem(preparedItem);
 
     _invalidateItemLists();
-    return null;
+    return syncError;
   }
 
   Future<String?> updateItemWithMover(
@@ -179,12 +181,14 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    await _syncItemToCloud(preparedItem.copyWith(updatedAt: DateTime.now()));
+    final syncError = await _syncItemToCloud(
+      preparedItem.copyWith(updatedAt: DateTime.now()),
+    );
     await _syncNotificationsForItem(preparedItem);
 
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
-    return null;
+    return syncError;
   }
 
   Future<String?> archiveItem(String uuid) async {
@@ -223,10 +227,43 @@ class ItemsNotifier extends StateNotifier<bool> {
     return null;
   }
 
-  Future<void> _syncItemToCloud(Item item) async {
+  Future<String?> _syncItemToCloud(Item item) async {
+    if (!item.isBackedUp) {
+      final hadRemoteBackup = (item.cloudId?.trim().isNotEmpty ?? false) ||
+          item.lastSyncedAt != null;
+      if (hadRemoteBackup) {
+        await _syncDeleteItem(item.uuid);
+        await _ref.read(itemRepositoryProvider).updateItem(
+              item.copyWith(
+                clearCloudId: true,
+                clearLastSyncedAt: true,
+              ),
+            );
+      }
+      return null;
+    }
+
     final result = await _ref.read(syncServiceProvider).syncItem(item);
     _ref.read(syncStatusProvider.notifier).state = result;
     _ref.invalidate(lastSyncedAtProvider);
+
+    if (result.status != SyncStatus.error) {
+      return null;
+    }
+
+    if (_isCloudQuotaExceeded(result.errorMessage)) {
+      await _ref.read(itemRepositoryProvider).updateItem(
+            item.copyWith(
+              isBackedUp: false,
+              clearCloudId: true,
+              clearLastSyncedAt: true,
+            ),
+          );
+      _invalidateItemLists();
+      _ref.invalidate(singleItemProvider(item.uuid));
+    }
+
+    return result.errorMessage ?? 'Sync failed';
   }
 
   Future<void> _syncDeleteItem(String uuid) async {
@@ -240,8 +277,7 @@ class ItemsNotifier extends StateNotifier<bool> {
   Future<void> _syncNotificationsForItem(Item item) async {
     final notificationService = _ref.read(notificationServiceProvider);
     final settings = _ref.read(settingsProvider);
-    final shouldScheduleNotifications =
-        settings.expiryRemindersEnabled ||
+    final shouldScheduleNotifications = settings.expiryRemindersEnabled ||
         (settings.lentRemindersEnabled && item.isLent);
 
     if (shouldScheduleNotifications) {
@@ -278,6 +314,11 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(forgottenItemsProvider);
     _ref.invalidate(allLocationsProvider);
     _ref.invalidate(rootLocationsProvider);
+    _ref.invalidate(backedUpItemsCountProvider);
+  }
+
+  bool _isCloudQuotaExceeded(String? message) {
+    return (message ?? '').contains('Cloud quota exceeded');
   }
 }
 

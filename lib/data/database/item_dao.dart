@@ -82,6 +82,16 @@ class ItemDao {
     return rows.map(Item.fromMap).toList();
   }
 
+  Future<int> countBackedUpItems() async {
+    final db = await _db;
+    final rows = await db.rawQuery('''
+      SELECT COUNT(*) AS count
+      FROM ${DbConstants.tableItems}
+      WHERE ${DbConstants.colItemIsBackedUp} = 1
+    ''');
+    return (rows.first['count'] as int?) ?? 0;
+  }
+
   Future<List<Item>> getSharedItems({String? householdId}) async {
     final db = await _db;
     final whereClause = householdId == null || householdId.isEmpty

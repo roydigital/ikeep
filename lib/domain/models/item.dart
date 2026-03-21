@@ -18,6 +18,7 @@ class Item {
     this.notes,
     this.cloudId,
     this.lastSyncedAt,
+    this.isBackedUp = false,
     this.isLent = false,
     this.lentTo,
     this.lentOn,
@@ -47,6 +48,7 @@ class Item {
   final String? notes;
   final String? cloudId;
   final DateTime? lastSyncedAt;
+  final bool isBackedUp;
   final bool isLent;
   final String? lentTo;
   final DateTime? lentOn;
@@ -83,6 +85,7 @@ class Item {
     String? notes,
     String? cloudId,
     DateTime? lastSyncedAt,
+    bool? isBackedUp,
     bool? isLent,
     String? lentTo,
     DateTime? lentOn,
@@ -99,6 +102,8 @@ class Item {
     bool clearHouseholdId = false,
     bool clearExpiryDate = false,
     bool clearNotes = false,
+    bool clearCloudId = false,
+    bool clearLastSyncedAt = false,
     bool clearLentTo = false,
     bool clearLentOn = false,
     bool clearExpectedReturnDate = false,
@@ -118,8 +123,10 @@ class Item {
       expiryDate: clearExpiryDate ? null : (expiryDate ?? this.expiryDate),
       isArchived: isArchived ?? this.isArchived,
       notes: clearNotes ? null : (notes ?? this.notes),
-      cloudId: cloudId ?? this.cloudId,
-      lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      cloudId: clearCloudId ? null : (cloudId ?? this.cloudId),
+      lastSyncedAt:
+          clearLastSyncedAt ? null : (lastSyncedAt ?? this.lastSyncedAt),
+      isBackedUp: isBackedUp ?? this.isBackedUp,
       isLent: isLent ?? this.isLent,
       lentTo: clearLentTo ? null : (lentTo ?? this.lentTo),
       lentOn: clearLentOn ? null : (lentOn ?? this.lentOn),
@@ -158,6 +165,7 @@ class Item {
       'notes': notes,
       'cloud_id': cloudId,
       'last_synced_at': lastSyncedAt?.millisecondsSinceEpoch,
+      'is_backed_up': isBackedUp ? 1 : 0,
       'is_lent': isLent ? 1 : 0,
       'lent_to': lentTo,
       'lent_on': lentOn?.millisecondsSinceEpoch,
@@ -197,6 +205,7 @@ class Item {
       lastSyncedAt: map['last_synced_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['last_synced_at'] as int)
           : null,
+      isBackedUp: (map['is_backed_up'] as int? ?? 0) == 1,
       isLent: (map['is_lent'] as int? ?? 0) == 1,
       lentTo: map['lent_to'] as String?,
       lentOn: map['lent_on'] != null
@@ -211,8 +220,7 @@ class Item {
       lentReminderAfterDays: map['lent_reminder_after_days'] as int?,
       isAvailableForLending:
           (map['is_available_for_lending'] as int? ?? 0) == 1,
-      visibility:
-          ItemVisibility.fromString(map['visibility'] as String?),
+      visibility: ItemVisibility.fromString(map['visibility'] as String?),
       householdId:
           map['household_id'] as String? ?? map['householdId'] as String?,
       sharedWithMemberUuids: List<String>.from(
@@ -243,6 +251,9 @@ class Item {
       'expiryDate': expiryDate?.toIso8601String(),
       'isArchived': isArchived,
       'notes': notes,
+      'cloudId': cloudId,
+      'lastSyncedAt': lastSyncedAt?.toIso8601String(),
+      'isBackedUp': isBackedUp,
       'isLent': isLent,
       'lentTo': lentTo,
       'lentOn': lentOn?.toIso8601String(),
@@ -276,6 +287,7 @@ class Item {
       notes: json['notes'] as String?,
       cloudId: json['cloudId'] as String?,
       lastSyncedAt: _dateTimeFromJson(json['lastSyncedAt']),
+      isBackedUp: json['isBackedUp'] as bool? ?? false,
       isLent: json['isLent'] as bool? ?? false,
       lentTo: json['lentTo'] as String?,
       lentOn: _dateTimeFromJson(json['lentOn']),

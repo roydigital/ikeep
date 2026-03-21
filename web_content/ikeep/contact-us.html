@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Us | Ikeep</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4E1FB4;
+            --primary-light: #865ED4;
+            --bg: #0A0728;
+            --surface: #171139;
+            --surface-variant: #231B4D;
+            --text-primary: #E9E5F8;
+            --text-secondary: #C0B8E2;
+            --border: #43396F;
+            --success: #4BBFA0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--bg) 0%, var(--surface) 100%);
+            padding: 4rem 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #865ED4, #4BBFA0);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .contact-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 2rem;
+            padding: 3rem;
+            margin-top: 2rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            transition: transform 0.3s ease;
+        }
+
+        .contact-card:hover {
+            transform: scale(1.02);
+        }
+
+        .contact-item {
+            margin: 2rem 0;
+        }
+
+        .contact-icon {
+            font-size: 2rem;
+            color: var(--primary-light);
+            margin-bottom: 0.5rem;
+        }
+
+        .contact-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 0.5rem;
+        }
+
+        .contact-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .contact-value a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .contact-value a:hover {
+            color: var(--primary-light);
+        }
+
+        .btn {
+            display: inline-block;
+            background: linear-gradient(90deg, #4E1FB4, #865ED4);
+            color: white;
+            padding: 1rem 2.5rem;
+            border-radius: 1rem;
+            text-decoration: none;
+            font-weight: 600;
+            margin-top: 2rem;
+            transition: opacity 0.3s ease;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .footer {
+            margin-top: 5rem;
+            padding: 2rem 1rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: var(--primary-light);
+            text-decoration: none;
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">Ikeep</div>
+        <h1>Get in touch</h1>
+        <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
+            Have a question, feedback, or just want to tell us where you found your missing keys? We'd love to hear from you.
+        </p>
+    </header>
+
+    <div class="container">
+        <div class="contact-card">
+            <div class="contact-item">
+                <div class="contact-label">Email Support</div>
+                <div class="contact-value"><a href="mailto:roy@roydigital.in">roy@roydigital.in</a></div>
+            </div>
+            
+            <div class="contact-item">
+                <div class="contact-label">Our Base</div>
+                <div class="contact-value">Made with ❤️ in India</div>
+            </div>
+
+            <a href="mailto:roy@roydigital.in" class="btn">Send us an Email</a>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2026 Roy Digital. All rights reserved.</p>
+            <p>
+                <a href="help-center.html">Help Center</a> | 
+                <a href="terms-privacy.html">Terms & Privacy</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

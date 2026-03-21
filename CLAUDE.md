@@ -46,10 +46,13 @@ flutter clean                            # Clean build artifacts
 | Cloud Database | **Cloud Firestore** (`cloud_firestore`) — household sharing, nearby items, borrow requests |
 | Location | **Geolocator** (`geolocator`) + **Geocoding** (`geocoding`) — GPS → locality string |
 | Permissions | `permission_handler` — location permission requests |
-| Cloud Sync (future) | Firebase Storage for images (not yet wired) + Appwrite sync stub |
+| Cloud Sync | Firebase Storage for images (wired via `FirebaseImageUploadService` + `ImageOptimizerService`) + `FirebaseSyncService` for item/location backup |
+| Background Tasks | **Workmanager** (`workmanager`) — weekly stale-item checks, monthly seasonal checks |
+| In-App Tours | **ShowCaseView** (`showcaseview`) — guided product tours for Home, Item Listing, Rooms, Settings |
+| Animations | `flutter_animate` — UI animations (save screen, etc.) |
 | ML (future) | Google ML Kit stub |
 
-> Firebase Auth and Firestore are actively used for the Network feature (household sharing + nearby lending). Local data is still SQLite-first. Images remain **local file paths**, not cloud URLs.
+> Firebase Auth and Firestore are actively used for the Network feature (household sharing + nearby lending) and Online Backup. Local data is still SQLite-first. Images are uploaded to Firebase Storage during backup; local paths remain the primary reference.
 
 ---
 
@@ -61,13 +64,13 @@ lib/
 ├── app.dart                      # IkeepApp (ConsumerWidget): router + theme + settings wiring
 │
 ├── core/
-│   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants
+│   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants, subscription_constants
 │   ├── errors/                   # app_exception.dart, failure.dart
 │   └── utils/                    # uuid_generator, date_formatter, path_utils, fuzzy_search
 │
 ├── domain/
 │   └── models/
-│       ├── item.dart             # Item (with lending + visibility fields)
+│       ├── item.dart             # Item (with lending + visibility + isBackedUp fields; computed getters: isShared→false, isNearby→false)
 │       ├── location_model.dart   # LocationModel (hierarchical)
 │       ├── item_location_history.dart # History entry (with member attribution)
 │       ├── item_visibility.dart  # ItemVisibility enum: private_, household, nearby
@@ -84,7 +87,7 @@ lib/
 │
 ├── data/
 │   ├── database/
-│   │   ├── database_helper.dart  # SQLite singleton (v8), creates all 7 tables
+│   │   ├── database_helper.dart  # SQLite singleton (v11), creates all 7 tables
 │   │   ├── item_dao.dart         # CRUD for items table
 │   │   ├── location_dao.dart     # CRUD for locations table
 │   │   ├── history_dao.dart      # CRUD for item_location_history (with member attribution)
@@ -102,12 +105,15 @@ lib/
 ├── providers/
 │   ├── database_provider.dart    # Riverpod providers for DAOs and DatabaseHelper
 │   ├── repository_providers.dart # Riverpod providers for repositories
-│   ├── item_providers.dart       # allItemsProvider, searchResultsProvider, ItemsNotifier
+│   ├── auth_providers.dart       # authStateProvider, authSessionBootstrapProvider, isSignedInProvider, signInFirebaseWithGoogleAccount helper
+│   ├── item_providers.dart       # allItemsProvider, archivedItemsProvider, lentItemsProvider, lendableItemsProvider, forgottenItemsProvider, ItemsNotifier
 │   ├── location_providers.dart   # Location Riverpod providers
+│   ├── location_usage_providers.dart # locationsWithDerivedUsageProvider — derived usage counts for locations
 │   ├── history_providers.dart    # History Riverpod providers
 │   ├── settings_provider.dart    # AppSettings + SettingsNotifier (SharedPreferences-backed)
-│   ├── service_providers.dart    # notificationServiceProvider, etc.
-│   ├── household_providers.dart  # Auth state, household members, shared items, borrow requests
+│   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, etc.
+│   ├── household_providers.dart  # Household members, shared items, borrow requests
+│   ├── home_tour_provider.dart   # HomeTourController, ItemListingTourController, RoomsTourController, SettingsTourController — showcaseview tour state
 │   ├── nearby_providers.dart     # Locality, nearby items, combined catalog, all request providers
 │   ├── borrow_request_providers.dart # Local borrow request providers
 │   ├── sync_providers.dart       # SyncService providers
@@ -116,8 +122,11 @@ lib/
 ├── services/
 │   ├── notification_service.dart # flutter_local_notifications: expiry + "still there" + lent reminders
 │   ├── image_service.dart        # Image pick + compress + local save
+│   ├── image_optimizer_service.dart # OptimizedImageResult + optimizeForUpload() — platform-specific format handling for cloud uploads
 │   ├── sync_service.dart         # Cloud sync orchestration (interface)
-│   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations
+│   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations; requires isPremiumUser callback
+│   ├── firebase_image_upload_service.dart # Firebase Storage uploads with ImageOptimizerService + upload caching (_CachedUpload)
+│   ├── background_scheduler_service.dart  # Workmanager-based: weeklyStaleCheckTask, monthlySeasonalCheckTask; ikeepWorkmanagerDispatcher entry point
 │   ├── household_cloud_service.dart # Firestore ops for household sharing & borrow requests
 │   ├── household_sync_service.dart  # Real-time Firestore listener sync for household items + history; uses PendingSyncDao for offline queue
 │   ├── nearby_cloud_service.dart # Firestore ops for geo-based nearby lending
@@ -144,10 +153,14 @@ lib/
 │   ├── onboarding/onboarding_screen.dart
 │   ├── settings/settings_screen.dart
 │   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
+│   ├── settings/paywall_screen.dart             # Ikeep Plus upgrade modal (shown via PaywallScreen.show(context)); plans: Monthly $1.99 / Yearly $14.99 / Lifetime $29.99
 │   └── network/network_screen.dart  # Network tab: Catalog, Activity, My Lends
 │
 └── widgets/
-    ├── app_nav_bar.dart              # 5 tabs: Items, Locations, Search, Network, Settings
+    ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings
+    ├── adaptive_image.dart           # Loads both local File and remote Network images with fallback handling
+    ├── app_info_tooltip.dart         # Info icon that shows modal bottom sheet with title + description
+    ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + _AppShowcaseActionButton for showcaseview
     ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
     └── item_visibility_toggle.dart   # Toggle widget for private/household visibility (requires active household)
 ```
@@ -173,8 +186,8 @@ Screens / Widgets
 - **Providers** expose `FutureProvider`, `StateNotifierProvider`, etc. Mutations go through `*Notifier` classes which call `ref.invalidate(...)` to refresh derived providers.
 - **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths). Current named routes: `/`, `/onboarding`, `/home`, `/save`, `/item/:uuid`, `/rooms`, `/settings`, `/settings/manage-family`, `/search`.
 
-### SQLite Schema (7 tables, v8)
-- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`) and `visibility` (private/household/nearby)
+### SQLite Schema (7 tables, v11)
+- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes `is_backed_up` (per-item cloud backup opt-in), lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`) and `visibility` (private/household)
 - `locations` — hierarchical (self-referencing `parent_uuid`), tree via `full_path`
 - `item_location_history` — log of location changes per item; includes `moved_by_member_uuid` and `moved_by_name` for household attribution
 - `pending_sync_operations` — offline-first cloud sync queue; managed by `PendingSyncDao` (enqueue, getAll, deleteById); `HouseholdSyncService` flushes on reconnect
@@ -197,17 +210,23 @@ Screens / Widgets
 ### Key Providers to Know
 | Provider | Type | Purpose |
 |----------|------|---------|
-| `settingsProvider` | `StateNotifierProvider<SettingsNotifier, AppSettings>` | Theme mode, onboarding flag, notification toggles |
+| `settingsProvider` | `StateNotifierProvider<SettingsNotifier, AppSettings>` | Theme mode, onboarding flag, `isPremium`, `isBackupEnabled`, notification toggles |
+| `backedUpItemsCountProvider` | `FutureProvider<int>` | Count of items with `isBackedUp = true`; used for quota display in settings |
 | `allItemsProvider` | `FutureProvider<List<Item>>` | All non-archived items |
-| `searchResultsProvider` | `FutureProvider<List<Item>>` | SQL pre-filter + in-memory fuzzy sort |
+| `archivedItemsProvider` | `FutureProvider<List<Item>>` | All archived items |
+| `lentItemsProvider` | `FutureProvider<List<Item>>` | Items currently lent out |
+| `lendableItemsProvider` | `FutureProvider<List<Item>>` | Items available for lending |
+| `forgottenItemsProvider` | `FutureProvider<List<Item>>` | Items not used in 8+ months (weekly shuffle) |
 | `itemSearchQueryProvider` | `StateProvider<String>` | Current search query |
 | `itemsNotifierProvider` | `StateNotifierProvider<ItemsNotifier, bool>` | save / update / archive / delete mutations |
 | `routerProvider` | `Provider<GoRouter>` | App router; watches `settingsProvider` for redirect |
+| `authStateProvider` | `StreamProvider<User?>` | Firebase Auth state stream (in `auth_providers.dart`) |
+| `authSessionBootstrapProvider` | `FutureProvider` | Bootstrap auth session on app start (in `auth_providers.dart`) |
+| `isSignedInProvider` | `Provider<bool>` | Whether user is authenticated (in `auth_providers.dart`) |
+| `locationsWithDerivedUsageProvider` | `FutureProvider` | Locations with derived item usage counts |
 | `householdDaoProvider` | `Provider<HouseholdDao>` | DAO for local `households` SQLite table |
 | `pendingSyncDaoProvider` | `Provider<PendingSyncDao>` | DAO for local `pending_sync_operations` SQLite queue |
 | `householdSyncServiceProvider` | `Provider<HouseholdSyncService>` | Real-time Firestore sync; call `startSync(householdId)` to activate |
-| `authStateProvider` | `StreamProvider<User?>` | Firebase Auth state stream |
-| `isSignedInProvider` | `Provider<bool>` | Whether user is authenticated |
 | `hasHouseholdProvider` | `Provider<bool>` | Whether current user belongs to a household |
 | `currentHouseholdProvider` | `FutureProvider<Household?>` | Full Household model for current user |
 | `currentHouseholdIdProvider` | `FutureProvider<String?>` | Current user's household ID |
@@ -216,12 +235,18 @@ Screens / Widgets
 | `householdSyncBootstrapProvider` | `FutureProvider<SyncResult>` | Starts/stops Firestore listeners based on household membership |
 | `householdLocalChangesProvider` | `StreamProvider<void>` | Emits void whenever HouseholdSyncService writes a local change |
 | `householdMemberLookupProvider` | `StateNotifierProvider<HouseholdMemberLookupController, HouseholdMemberLookupState>` | Email-based user search for adding household members |
+| `imageOptimizerServiceProvider` | `Provider<ImageOptimizerService>` | Image optimization for cloud uploads |
+| `firebaseImageUploadServiceProvider` | `Provider<FirebaseImageUploadService>` | Firebase Storage uploads with caching + optimization |
 | `allIncomingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby incoming requests |
 | `allOutgoingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby outgoing requests |
 | `allPendingIncomingCountProvider` | `Provider<int>` | Badge count for Network tab |
 | `userLocalityProvider` | `FutureProvider<String?>` | User's GPS-derived locality (cached 24h) |
 | `nearbyItemsProvider` | `FutureProvider<List<NearbyItem>>` | Nearby items from strangers in same locality |
 | `combinedCatalogProvider` | `FutureProvider<CombinedCatalog>` | Merged household + nearby items for Network catalog |
+| `homeTourControllerProvider` | `StateNotifierProvider` | Controls Home screen showcase tour state |
+| `itemListingTourControllerProvider` | `StateNotifierProvider` | Controls Item listing tour state |
+| `roomsTourControllerProvider` | `StateNotifierProvider` | Controls Rooms screen tour state |
+| `settingsTourControllerProvider` | `StateNotifierProvider` | Controls Settings screen tour state |
 
 ---
 
@@ -262,8 +287,9 @@ Never hardcode colors — use `app_colors.dart` constants, then reference via `A
 | Search | Built |
 | Item Detail | Built |
 | Rooms / Add Room | Built |
-| Settings | Built |
+| Settings | Built (includes Online Backup section with sync status + last-synced time) |
 | Household Settings | Built (`/settings/manage-family`) — create household, add members via email lookup, view members list |
+| Paywall / Ikeep Plus | Built (`PaywallScreen.show(context)` — modal bottom sheet, no dedicated route) |
 | Network | Future aspect only for now; detailed notes retained below for later implementation |
 | Login / Auth | Built (currently used for account/backup flows; previous Network-related notes remain below for future reference) |
 | History Timeline | **Not built** |
@@ -334,17 +360,49 @@ Shows a sign-in prompt if the user is not authenticated.
 5. (Firestore only) Item returned → status: `returned`
 
 ### Item Lending / Sharing Fields (on Item model)
+- `isBackedUp` — whether this item is opted into cloud backup (default: `false`); set to `true` by `FirebaseSyncService` after first successful sync; free-tier cap: 50 items
+- `cloudId` — Firestore document ID after first backup (defaults to item's own `uuid`)
+- `lastSyncedAt` — timestamp of last successful cloud sync
 - `isLent`, `lentTo`, `lentOn`, `expectedReturnDate`, `lentReminderAfterDays` — track active lends
 - `isAvailableForLending` — whether the item can be requested by others
 - `seasonCategory` — string tag for seasonal classification (default: `'all_year'`)
 - `visibility` — controls sharing scope (`private_` or `household`; `nearby` was removed)
 - `householdId` — ID of the household this item is shared with (null for private items)
 - `sharedWithMemberUuids` — list of member UUIDs this item is explicitly shared with (empty = all household members); cleared when item goes private
+- **Computed getters:** `isShared` → always `false`, `isNearby` → always `false` (social sharing disabled)
+
+### Premium / Subscription System
+- **`isPremium`** — stored in `AppSettings` / SharedPreferences (`is_premium` key); toggled by `SettingsNotifier.setPremium(bool)`
+- **`isBackupEnabled`** — separate flag; user must explicitly enable backup (stored as `backup_enabled`)
+- **Free tier:** `freeCloudBackupLimit = 50` items (defined in `subscription_constants.dart`); warning at `freeCloudBackupWarningThreshold = 45`
+- **`FirebaseSyncService`** — constructor requires `isPremiumUser` callback; `_ensureCloudQuotaForItem()` throws `SyncException('Cloud quota exceeded')` when a new (non-previously-synced) item would exceed the free limit; premium users skip this check
+- **`PaywallScreen`** — modal bottom sheet triggered when user hits the paywall; calls `setPremium(true)` on button tap (no real payment integration yet — stub)
+- **`backedUpItemsCountProvider`** — tracks how many items are currently backed up; used to render quota UI in settings
 
 ### Notification Channels
 - `ikeep_expiry` — Expiry reminders
 - `ikeep_still_there` — "Still there?" reminders
 - `ikeep_lent` — Lent item return reminders
+
+### Background Task Scheduling (Workmanager)
+- `weeklyStaleCheckTask` — Runs weekly; uses `ItemDao.getRandomStaleItem()` to find items not interacted with recently, triggers "still there?" notifications
+- `monthlySeasonalCheckTask` — Runs monthly; checks for seasonal item reminders
+- Entry point: `ikeepWorkmanagerDispatcher` (top-level function in `background_scheduler_service.dart`)
+
+### In-App Product Tours (ShowCaseView)
+- Guided tours for first-time users on Home, Item Listing, Rooms, and Settings screens
+- Tour state tracked per-screen via `*TourController` notifiers in `home_tour_provider.dart`
+- Auto-triggers on first app load if tour hasn't been seen
+- Tooltip configuration via `app_showcase.dart` widget
+
+### Image Upload Pipeline
+- `ImageOptimizerService` — Optimizes images before cloud upload with platform-specific format selection (`optimizeForUpload()` → `OptimizedImageResult`)
+- `FirebaseImageUploadService` — Uploads to Firebase Storage; uses `ImageOptimizerService` + internal `_CachedUpload` cache to avoid re-uploading unchanged images
+
+### ItemDao Extra Methods
+- `getRandomStaleItem(DateTime cutoff)` — Finds a random item not accessed since cutoff date; used by background scheduler
+- `countBackedUpItems()` — Counts items with `isBackedUp = 1`; used for quota checks
+- `getSharedItems({String? householdId})` — Fetches items shared with a specific household
 
 ---
 
@@ -352,8 +410,8 @@ Shows a sign-in prompt if the user is not authenticated.
 
 ### Next Up
 1. History screen (timeline: saved/moved/archived events from `item_location_history`)
-2. Cloud sync (Firebase Storage for images, Firestore for item data backup)
-3. Collections screen (items grouped by room/location)
+2. Collections screen (items grouped by room/location)
+3. Real payment integration for Ikeep Plus (currently a stub — `setPremium(true)` fires immediately on button tap)
 
 ### Future (V2)
 - Voice search, ML Kit auto-labeling

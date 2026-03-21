@@ -81,6 +81,15 @@ class FirebaseImageUploadService {
             downloadUrl: downloadUrl,
           );
         }
+      } catch (e) {
+        // Firebase Storage may throw "No object exists at the desired
+        // reference" when the item was never uploaded before or the
+        // storage object was removed externally. Skip this image rather
+        // than failing the entire sync.
+        if (!_isMissingObjectError(e)) rethrow;
+        debugPrint(
+          'FirebaseImageUploadService: skipped image $index – $e',
+        );
       } finally {
         await _safeDelete(optimized.file);
       }
@@ -103,11 +112,19 @@ class FirebaseImageUploadService {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
       final list = await folder.listAll();
       for (final ref in list.items) {
-        await ref.delete();
+        try {
+          await ref.delete();
+        } catch (e) {
+          if (!_isMissingObjectError(e)) rethrow;
+        }
       }
-    } on FirebaseException catch (e) {
-      if (e.code != 'object-not-found') rethrow;
+    } catch (e) {
+      if (!_isMissingObjectError(e)) rethrow;
     }
+
+    _uploadCache.removeWhere(
+      (_, cached) => cached.fullPath.startsWith(_itemFolder(userId, itemUuid)),
+    );
   }
 
   Future<void> _pruneUnexpectedImages({
@@ -120,14 +137,32 @@ class FirebaseImageUploadService {
       final list = await folder.listAll();
       for (final ref in list.items) {
         if (!keepStoragePaths.contains(ref.fullPath)) {
-          await ref.delete();
+          try {
+            await ref.delete();
+          } catch (e) {
+            if (!_isMissingObjectError(e)) rethrow;
+          }
         }
       }
-    } on FirebaseException catch (e) {
-      if (e.code != 'object-not-found') {
-        debugPrint('FirebaseImageUploadService prune error: ${e.message}');
+    } catch (e) {
+      if (!_isMissingObjectError(e)) {
+        debugPrint('FirebaseImageUploadService prune error: $e');
       }
     }
+  }
+
+  bool _isMissingObjectError(dynamic error) {
+    final str = error.toString().toLowerCase();
+    if (str.contains('object-not-found') || 
+        str.contains('no object exists') ||
+        str.contains('not-found')) {
+      return true;
+    }
+    if (error is FirebaseException) {
+      return error.code == 'object-not-found' ||
+          (error.message?.toLowerCase().contains('no object exists') ?? false);
+    }
+    return false;
   }
 
   String _itemFolder(String userId, String itemUuid) {

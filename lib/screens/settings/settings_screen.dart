@@ -7,7 +7,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants/subscription_constants.dart';
 import '../../domain/models/sync_status.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/home_tour_provider.dart';
@@ -17,6 +19,7 @@ import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/sync_providers.dart';
 import '../../routing/app_routes.dart';
+import 'paywall_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
@@ -127,6 +130,13 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  static final Uri _helpCenterUri =
+      Uri.parse('https://roydigital.in/ikeep/help-center.html');
+  static final Uri _contactUsUri =
+      Uri.parse('https://roydigital.in/ikeep/contact-us.html');
+  static final Uri _termsPrivacyUri =
+      Uri.parse('https://roydigital.in/ikeep/terms-privacy.html');
+
   bool _initialized = false;
   bool _darkMode = true;
   bool _stillThere = true;
@@ -134,12 +144,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _lentReminders = true;
   bool _backupEnabled = false;
   bool _isSaving = false;
+  bool _isSigningIn = false;
+  bool _isLoggingOut = false;
   final GlobalKey _accountShowcaseKey = GlobalKey();
   final GlobalKey _preferencesShowcaseKey = GlobalKey();
   final GlobalKey _premiumShowcaseKey = GlobalKey();
   bool _settingsTourQueued = false;
 
   Future<void> _handleGoogleSignIn() async {
+    setState(() => _isSigningIn = true);
     final googleSignIn = ref.read(googleSignInProvider);
     final auth = ref.read(firebaseAuthProvider);
 
@@ -149,18 +162,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         await signInFirebaseWithGoogleAccount(auth, account);
       }
       if (!mounted) return;
+      setState(() => _isSigningIn = false);
       if (account == null) {
         _showInfo('Google sign-in cancelled');
+      } else {
+        _showInfo('Signed in successfully');
       }
     } catch (e, st) {
       debugPrint('Google sign-in failed: $e');
       debugPrintStack(stackTrace: st);
       if (!mounted) return;
+      setState(() => _isSigningIn = false);
       _showInfo('Unable to sign in with Google');
     }
   }
 
   Future<void> _handleLogout() async {
+    setState(() => _isLoggingOut = true);
     final auth = ref.read(firebaseAuthProvider);
     final googleSignIn = ref.read(googleSignInProvider);
 
@@ -168,9 +186,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await auth.signOut();
       await googleSignIn.signOut();
       if (!mounted) return;
+      setState(() => _isLoggingOut = false);
       _showInfo('Logged out');
     } catch (_) {
       if (!mounted) return;
+      setState(() => _isLoggingOut = false);
       _showInfo('Unable to log out');
     }
   }
@@ -207,8 +227,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final notifier = ref.read(settingsProvider.notifier);
       final notificationService = ref.read(notificationServiceProvider);
       final backgroundScheduler = ref.read(backgroundSchedulerServiceProvider);
-      final wantsNotificationFeatures =
-          settings.expiryRemindersEnabled ||
+      final wantsNotificationFeatures = settings.expiryRemindersEnabled ||
           _stillThere ||
           _seasonal ||
           _lentReminders;
@@ -275,7 +294,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _runSync() async {
     if (!_backupEnabled) {
-      _showInfo('Buy Data & Backup to enable cloud sync');
+      _showInfo('Enable cloud backup on an item to start syncing');
       return;
     }
 
@@ -293,7 +312,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _exportData() async {
     if (!_backupEnabled) {
-      _showInfo('Buy Data & Backup to export your data');
+      _showInfo('Enable cloud backup on an item to export your data');
       return;
     }
 
@@ -382,6 +401,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _openSupportPage(Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted || opened) return;
+    _showInfo('Unable to open support page');
+  }
+
   String _formatLastSynced(DateTime? dateTime) {
     if (dateTime == null) return 'Never';
     final now = DateTime.now();
@@ -401,6 +426,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final hasSeenSettingsTour = ref.watch(settingsTourControllerProvider);
     final syncStatus = ref.watch(syncStatusProvider);
     final lastSynced = ref.watch(lastSyncedAtProvider).valueOrNull;
+    final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     _initFromSettings(settings);
     _activeColors = _darkMode ? _darkColors : _lightColors;
 
@@ -476,11 +502,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   'Connect your account, confirm your membership status, and see whether backup is active.',
                               child: _AccountCard(
                                 backupEnabled: _backupEnabled,
+                                isPremium: settings.isPremium,
+                                backedUpCount:
+                                    backedUpCountAsync.valueOrNull ?? 0,
+                                isUsageLoading: backedUpCountAsync.isLoading,
                                 displayName: authUser?.displayName,
                                 photoUrl: authUser?.photoURL,
                                 isGoogleSignedIn: authUser != null,
-                                onGoogleSignInTap:
-                                    authUser == null ? _handleGoogleSignIn : null,
+                                isSigningIn: _isSigningIn,
+                                onGoogleSignInTap: authUser == null
+                                    ? _handleGoogleSignIn
+                                    : null,
+                                onUpgradeTap: () => PaywallScreen.show(context),
                               ),
                             ),
                             const SizedBox(height: 36),
@@ -528,11 +561,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             _SectionLabel('SUPPORT'),
                             const SizedBox(height: 14),
                             _SupportCard(
-                              onHelp: () => _showInfo('Help Center coming soon'),
-                              onContact: () =>
-                                  _showInfo('Contact: support@ikeep.app'),
+                              onHelp: () => _openSupportPage(_helpCenterUri),
+                              onContact: () => _openSupportPage(_contactUsUri),
                               onTerms: () =>
-                                  _showInfo('Terms & Privacy coming soon'),
+                                  _openSupportPage(_termsPrivacyUri),
                             ),
                             const SizedBox(height: 52),
                             Center(
@@ -540,23 +572,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 'Ikeep Version 2.4.0 (b892)',
                                 style: TextStyle(
                                   color: _kTextMuted,
-                                  fontSize: 15,
+                                  fontSize: 12,
                                 ),
                               ),
                             ),
                             const SizedBox(height: 18),
                             Center(
-                              child: TextButton(
-                                onPressed: _handleLogout,
-                                child: const Text(
-                                  'Log Out',
-                                  style: TextStyle(
-                                    color: AppColors.error,
-                                    fontSize: 33 / 2,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
+                              child: _isLoggingOut
+                                  ? Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: AppColors.error.withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            'Logging out...',
+                                            style: TextStyle(
+                                              color: AppColors.error,
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : TextButton(
+                                      onPressed: _handleLogout,
+                                      child: const Text(
+                                        'Log Out',
+                                        style: TextStyle(
+                                          color: AppColors.error,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ],
                         ),
@@ -609,7 +667,7 @@ class _Header extends StatelessWidget {
             'Settings',
             style: TextStyle(
               color: _kTextPrimary,
-              fontSize: 19,
+              fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -629,7 +687,7 @@ class _Header extends StatelessWidget {
                     'Save',
                     style: TextStyle(
                       color: canSave ? _kAccent : _kTextMuted,
-                      fontSize: 16.5,
+                      fontSize: 15,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -662,17 +720,27 @@ class _SectionLabel extends StatelessWidget {
 class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.backupEnabled,
+    required this.isPremium,
+    required this.backedUpCount,
+    required this.isUsageLoading,
     required this.displayName,
     required this.photoUrl,
     required this.isGoogleSignedIn,
     this.onGoogleSignInTap,
+    required this.onUpgradeTap,
+    this.isSigningIn = false,
   });
 
   final bool backupEnabled;
+  final bool isPremium;
+  final int backedUpCount;
+  final bool isUsageLoading;
   final String? displayName;
   final String? photoUrl;
   final bool isGoogleSignedIn;
   final Future<void> Function()? onGoogleSignInTap;
+  final VoidCallback onUpgradeTap;
+  final bool isSigningIn;
 
   @override
   Widget build(BuildContext context) {
@@ -721,12 +789,30 @@ class _AccountCard extends StatelessWidget {
                         isGuestUser ? 'Guest User' : displayName!,
                         style: TextStyle(
                           color: _kTextPrimary,
-                          fontSize: 19,
+                          fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 10),
-                      if (!isGoogleSignedIn && googleSignInTap != null)
+                      if (isSigningIn)
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _kAccent.withValues(alpha: 0.7),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Signing in...',
+                              style: TextStyle(color: _kTextMuted, fontSize: 14),
+                            ),
+                          ],
+                        )
+                      else if (!isGoogleSignedIn && googleSignInTap != null)
                         _GoogleSignInButton(onPressed: googleSignInTap)
                       else
                         Row(
@@ -741,7 +827,7 @@ class _AccountCard extends StatelessWidget {
                               child: Text(
                                 'Google account connected',
                                 style:
-                                    TextStyle(color: _kTextMuted, fontSize: 16),
+                                    TextStyle(color: _kTextMuted, fontSize: 14),
                               ),
                             ),
                           ],
@@ -758,43 +844,158 @@ class _AccountCard extends StatelessWidget {
               color: _kCardSoft,
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
             ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.cloud_done,
-                  color: backupEnabled ? _kAccent : AppColors.error,
-                  size: 24,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    backupEnabled
-                        ? 'Backup & Sync Active'
-                        : 'Backup & Sync Inactive',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _kTextPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 17,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    backupEnabled ? 'Premium Member' : 'Free Member',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(color: _kTextMuted, fontSize: 15),
-                  ),
-                ),
-              ],
+            child: _CloudBackupSummary(
+              backupEnabled: backupEnabled,
+              isPremium: isPremium,
+              backedUpCount: backedUpCount,
+              isUsageLoading: isUsageLoading,
+              onUpgradeTap: onUpgradeTap,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CloudBackupSummary extends StatelessWidget {
+  const _CloudBackupSummary({
+    required this.backupEnabled,
+    required this.isPremium,
+    required this.backedUpCount,
+    required this.isUsageLoading,
+    required this.onUpgradeTap,
+  });
+
+  final bool backupEnabled;
+  final bool isPremium;
+  final int backedUpCount;
+  final bool isUsageLoading;
+  final VoidCallback onUpgradeTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final usageProgress =
+        (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
+    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+        ? AppColors.warning
+        : _kAccent;
+
+    if (isPremium) {
+      return Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _kAccent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Center(
+              child: Text(
+                '∞',
+                style: TextStyle(
+                  color: _kAccent,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Unlimited Backups Active',
+                  style: TextStyle(
+                    color: _kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  backupEnabled
+                      ? 'Your cloud protection is fully unlocked.'
+                      : 'Turn on backup for any item and it syncs without limits.',
+                  style: TextStyle(color: _kTextMuted, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: const Text(
+              'Ikeep Plus Member',
+              style: TextStyle(
+                color: AppColors.success,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.cloud_done,
+              color: backupEnabled ? _kAccent : AppColors.error,
+              size: 24,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '$backedUpCount / $freeCloudBackupLimit Free Cloud Backups Used',
+                style: TextStyle(
+                  color: _kTextPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        LinearProgressIndicator(
+          value: isUsageLoading ? null : usageProgress,
+          minHeight: 9,
+          backgroundColor: _kBorder.withValues(alpha: 0.35),
+          valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: onUpgradeTap,
+            style: FilledButton.styleFrom(
+              backgroundColor: _kAccent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            child: const Text(
+              'Upgrade to Ikeep Plus',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -908,7 +1109,7 @@ class _PreferencesCard extends StatelessWidget {
                 color: _kTextMuted,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.6,
-                fontSize: 16,
+                fontSize: 14,
               ),
             ),
             const SizedBox(height: 14),
@@ -971,7 +1172,7 @@ class _NotificationRow extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: TextStyle(color: _kTextMuted, fontSize: 16.5),
+                style: TextStyle(color: _kTextMuted, fontSize: 14),
               ),
             ],
           ),
@@ -1109,8 +1310,7 @@ class _NearbyLendingCard extends ConsumerWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.shield_outlined,
-                      color: AppColors.info, size: 18),
+                  Icon(Icons.shield_outlined, color: AppColors.info, size: 18),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -1171,15 +1371,25 @@ class _PremiumFeaturesCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.sync, color: _kAccent, size: 28),
+                      if (isSyncing)
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: _kAccent.withValues(alpha: 0.8),
+                          ),
+                        )
+                      else
+                        const Icon(Icons.sync, color: _kAccent, size: 28),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Online Backup',
+                          isSyncing ? 'Syncing...' : 'Online Backup',
                           style: TextStyle(
                             color: _kTextPrimary,
                             fontWeight: FontWeight.w700,
-                            fontSize: 19,
+                            fontSize: 18,
                           ),
                         ),
                       ),
@@ -1188,7 +1398,7 @@ class _PremiumFeaturesCard extends StatelessWidget {
                         style: TextStyle(
                           color: statusColor,
                           fontWeight: FontWeight.w700,
-                          fontSize: 16.5,
+                          fontSize: 15,
                         ),
                       ),
                     ],
@@ -1208,7 +1418,7 @@ class _PremiumFeaturesCard extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(
                         'Last Synced: $lastSyncedText',
-                        style: TextStyle(color: _kTextMuted, fontSize: 15),
+                        style: TextStyle(color: _kTextMuted, fontSize: 14),
                       ),
                     ],
                   ),
@@ -1305,7 +1515,7 @@ class _ActionRow extends StatelessWidget {
                 title,
                 style: TextStyle(
                   color: _kTextPrimary,
-                  fontSize: 19,
+                  fontSize: 18,
                   fontWeight: FontWeight.w500,
                 ),
               ),

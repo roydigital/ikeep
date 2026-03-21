@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms & Privacy | Ikeep</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4E1FB4;
+            --primary-light: #865ED4;
+            --bg: #0A0728;
+            --surface: #171139;
+            --surface-variant: #231B4D;
+            --text-primary: #E9E5F8;
+            --text-secondary: #C0B8E2;
+            --border: #43396F;
+            --success: #4BBFA0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            line-height: 1.8;
+            padding-bottom: 50px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--bg) 0%, var(--surface) 100%);
+            padding: 4rem 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #865ED4, #4BBFA0);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
+        }
+
+        h1 {
+            font-size: 2.8rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-top: 3rem;
+            margin-bottom: 1.5rem;
+            color: var(--primary-light);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        p {
+            margin-bottom: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        ul {
+            margin-bottom: 2rem;
+            padding-left: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin-bottom: 0.8rem;
+        }
+
+        .update-date {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-style: italic;
+            margin-bottom: 3rem;
+        }
+
+        .nav-links {
+            margin-bottom: 2rem;
+            background: var(--surface);
+            padding: 1rem;
+            border-radius: 1rem;
+            border: 1px solid var(--border);
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            color: var(--primary-light);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer {
+            margin-top: 5rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: var(--primary-light);
+            text-decoration: none;
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">Ikeep</div>
+        <h1>Legal Notice</h1>
+        <p class="update-date">Last updated: March 21, 2026</p>
+    </header>
+
+    <div class="container">
+        
+        <div class="nav-links">
+            <a href="#terms">TERMS OF SERVICE</a>
+            <a href="#privacy">PRIVACY POLICY</a>
+        </div>
+
+        <section id="terms">
+            <h2>Terms of Service</h2>
+            <p>Welcome to Ikeep! By using our application, you agree to these terms.</p>
+            
+            <h3>1. Use of Service</h3>
+            <p>Ikeep is a personal item tracking tool. You are responsible for ensuring your account details are accurate. We grant you a limited, non-exclusive license to use the app for personal, non-commercial purposes.</p>
+
+            <h3>2. User Content</h3>
+            <p>You retain all rights to the photos and descriptions you add to Ikeep. However, if you enable Cloud Backup, you grant us permission to store this data on our secure servers (Firebase/Google Cloud) solely to provide the sync functionality.</p>
+
+            <h3>3. Premium Subscriptions</h3>
+            <p>Some features (e.g., Family Sharing, Unlimited Cloud Storage) require a subscription. Subscriptions are handled through Google Play Store or Apple App Store and are subject to their respective terms.</p>
+
+            <h3>4. Limitation of Liability</h3>
+            <p>Ikeep is provided "as is." While we strive to help you remember where your items are, we are not responsible for any lost, stolen, or misplaced items recorded in the app.</p>
+        </section>
+
+        <section id="privacy">
+            <h2>Privacy Policy</h2>
+            <p>Your privacy is our priority. We design Ikeep to collect as little personal data as possible.</p>
+
+            <h3>1. Data Collection</h3>
+            <p>We collect only what is necessary to run the app:</p>
+            <ul>
+                <li><strong>Account Info:</strong> When you sign in with Google, we store your email and name to manage your account.</li>
+                <li><strong>Inventory Data:</strong> Item names, photos, and location labels are stored locally on your device.</li>
+                <li><strong>Cloud Data:</strong> If you enable Cloud Backup, your inventory data is synced to our secure Firebase database.</li>
+                <li><strong>Usage Stats:</strong> We may collect anonymous crash reports to improve app stability.</li>
+            </ul>
+
+            <h3>2. Image Processing</h3>
+            <p>We use on-device Machine Learning (ML Kit) to analyze your photos for automatic labeling. No photos are sent to our servers for analysis; all processing happens right on your phone.</p>
+
+            <h3>3. Data Security</h3>
+            <p>We use industry-standard encryption and secure authentication protocols to protect your data. In compliance with Indian data protection regulations (DPDP Act), we ensure your data is handled with care.</p>
+
+            <h3>4. Contact Us</h3>
+            <p>If you have any questions about these terms or your privacy, please email us at <a href="mailto:roy@roydigital.in" style="color: var(--primary-light);">roy@roydigital.in</a>.</p>
+        </section>
+
+        <div class="footer">
+            <p>&copy; 2026 Roy Digital. All rights reserved.</p>
+            <p>
+                <a href="help-center.html">Help Center</a> | 
+                <a href="contact-us.html">Contact Us</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

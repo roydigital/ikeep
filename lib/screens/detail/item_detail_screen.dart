@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/constants/subscription_constants.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/household_member.dart';
@@ -15,7 +16,9 @@ import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
+import '../../providers/settings_provider.dart';
 import '../../routing/app_routes.dart';
+import '../settings/paywall_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/adaptive_image.dart';
 import '../../widgets/app_nav_bar.dart';
@@ -31,6 +34,86 @@ class ItemDetailScreen extends ConsumerStatefulWidget {
 
 class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   int _selectedImage = 0;
+  bool _expiryLoading = false;
+  String _expiryStatusText = '';
+
+  // General-purpose loading state for async actions
+  String? _activeOp; // non-null = an operation is in progress
+  String _activeOpText = '';
+
+  void _startOp(String text) => setState(() {
+        _activeOp = text;
+        _activeOpText = text;
+      });
+  void _endOp() => setState(() {
+        _activeOp = null;
+        _activeOpText = '';
+      });
+
+  Future<void> _toggleCloudBackup(Item item, bool enabled) async {
+    _startOp(enabled ? 'Enabling cloud backup...' : 'Disabling cloud backup...');
+
+    if (!enabled) {
+      final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+            item.copyWith(
+              isBackedUp: false,
+              clearCloudId: true,
+              clearLastSyncedAt: true,
+              updatedAt: DateTime.now(),
+            ),
+          );
+      if (!mounted) return;
+      _endOp();
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cloud backup disabled'), backgroundColor: AppColors.success),
+        );
+      }
+      return;
+    }
+
+    final settings = ref.read(settingsProvider);
+    if (!settings.isPremium) {
+      final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
+      if (backedUpCount >= freeCloudBackupLimit) {
+        if (!mounted) return;
+        _endOp();
+        await _showPaywall();
+        return;
+      }
+    }
+
+    await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+          item.copyWith(
+            isBackedUp: true,
+            updatedAt: DateTime.now(),
+          ),
+        );
+    if (!mounted) return;
+    _endOp();
+
+    if (error != null) {
+      if (error.contains('Cloud quota exceeded')) {
+        await _showPaywall();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cloud backup enabled'), backgroundColor: AppColors.success),
+      );
+    }
+  }
+
+  Future<void> _showPaywall() {
+    return PaywallScreen.show(context);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -167,9 +250,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                   data: (history) => Text(
                                     _location(
                                       item,
-                                      latestHistory: history.isEmpty
-                                          ? null
-                                          : history.last,
+                                      latestHistory:
+                                          history.isEmpty ? null : history.last,
                                     ),
                                     style: const TextStyle(
                                         color: AppColors.primary,
@@ -203,6 +285,17 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                               isDark,
                               textPrimary,
                             ),
+
+                            // ── Expiry status ───────────────────────
+                            _buildExpirySection(
+                              context,
+                              item,
+                              isDark,
+                              textPrimary,
+                            ),
+
+                            const SizedBox(height: 18),
+                            _buildCloudBackupSection(item, isDark, textPrimary),
 
                             const SizedBox(height: 18),
                             _ItemVisibilitySection(item: item),
@@ -294,6 +387,47 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                 child: const AppNavBar(activeTab: AppNavTab.items),
               ),
               const _DetailFab(),
+              // ── Global loading banner for async ops ──
+              if (_activeOp != null)
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: AppNavBar.navBarHeight(context) + 16,
+                  child: Material(
+                    elevation: 8,
+                    borderRadius: BorderRadius.circular(14),
+                    color: isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.primary.withValues(alpha: 0.8),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _activeOpText,
+                              style: TextStyle(
+                                color: isDark
+                                    ? AppColors.textPrimaryDark
+                                    : AppColors.textPrimaryLight,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -364,7 +498,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: () => _markReturned(item),
+                    onPressed: _activeOp != null ? null : () => _markReturned(item),
                     icon: const Icon(Icons.assignment_turned_in, size: 18),
                     style: FilledButton.styleFrom(
                         backgroundColor: AppColors.primary),
@@ -379,7 +513,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: () => _lendItem(item),
+              onPressed: _activeOp != null ? null : () => _lendItem(item),
               icon: const Icon(Icons.outbox, size: 18),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
@@ -395,6 +529,406 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  // ── Expiry section ───────────────────────────────────────────────────────
+
+  Widget _buildExpirySection(
+    BuildContext context,
+    Item item,
+    bool isDark,
+    Color textPrimary,
+  ) {
+    final expiryDate = item.expiryDate;
+
+    // No expiry set — show "Add expiry" button or loading state
+    if (expiryDate == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 18),
+        child: _expiryLoading
+            ? _buildExpiryLoadingIndicator(isDark)
+            : SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _editExpiryDate(item),
+                  icon: const Icon(Icons.event, size: 18),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: BorderSide(
+                        color: AppColors.primary.withValues(alpha: 0.5)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  label: const Text('Add Expiry Date',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+      );
+    }
+
+    // Expiry is set — compute urgency
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiryDay = DateTime(
+      expiryDate.year,
+      expiryDate.month,
+      expiryDate.day,
+    );
+    final daysLeft = expiryDay.difference(today).inDays;
+
+    // Color scheme based on urgency
+    final Color accentColor;
+    final Color bgColor;
+    final IconData icon;
+    final String statusText;
+    final String subtitle;
+
+    if (daysLeft < 0) {
+      // Expired
+      accentColor = AppColors.error;
+      bgColor = AppColors.error.withValues(alpha: 0.12);
+      icon = Icons.error_outline;
+      statusText = 'Expired';
+      subtitle = '${-daysLeft} ${-daysLeft == 1 ? "day" : "days"} ago  ·  '
+          'Consider replacing or removing this item';
+    } else if (daysLeft == 0) {
+      // Expires today
+      accentColor = AppColors.error;
+      bgColor = AppColors.error.withValues(alpha: 0.12);
+      icon = Icons.warning_amber_rounded;
+      statusText = 'Expires Today';
+      subtitle = 'Check this item before using it';
+    } else if (daysLeft <= 7) {
+      // Critical — within 7 days
+      accentColor = AppColors.error;
+      bgColor = AppColors.error.withValues(alpha: 0.10);
+      icon = Icons.warning_amber_rounded;
+      statusText = 'Expires in $daysLeft ${daysLeft == 1 ? "day" : "days"}';
+      subtitle = DateFormat('dd MMM yyyy').format(expiryDate);
+    } else if (daysLeft <= 30) {
+      // Warning — within 30 days
+      accentColor = AppColors.warning;
+      bgColor = AppColors.warning.withValues(alpha: 0.10);
+      icon = Icons.schedule;
+      statusText = 'Expires in $daysLeft days';
+      subtitle = DateFormat('dd MMM yyyy').format(expiryDate);
+    } else {
+      // Safe — more than 30 days
+      accentColor = AppColors.success;
+      bgColor = AppColors.success.withValues(alpha: 0.08);
+      icon = Icons.event_available;
+      statusText = 'Expires ${DateFormat('dd MMM yyyy').format(expiryDate)}';
+      final months = (daysLeft / 30).floor();
+      subtitle = months > 0
+          ? '~$months ${months == 1 ? "month" : "months"} remaining'
+          : '$daysLeft days remaining';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: accentColor.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: accentColor, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: accentColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_expiryLoading)
+              _buildExpiryLoadingIndicator(isDark)
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _editExpiryDate(item),
+                      icon: const Icon(Icons.edit_calendar, size: 16),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: accentColor,
+                        side: BorderSide(
+                            color: accentColor.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      label: const Text('Change Date',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _removeExpiryDate(item),
+                      icon: const Icon(Icons.event_busy, size: 16),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isDark
+                            ? AppColors.textSecondaryDark
+                            : AppColors.textSecondaryLight,
+                        side: BorderSide(
+                          color: isDark
+                              ? AppColors.borderDark
+                              : AppColors.borderLight,
+                        ),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      label: const Text('Remove',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpiryLoadingIndicator(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.primary.withValues(alpha: 0.7),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _expiryStatusText,
+            style: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editExpiryDate(Item item) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate:
+          item.expiryDate ?? DateTime.now().add(const Duration(days: 30)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+      helpText: 'SELECT EXPIRY DATE',
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      _expiryLoading = true;
+      _expiryStatusText = item.expiryDate == null
+          ? 'Setting expiry date...'
+          : 'Updating expiry date...';
+    });
+
+    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+          item.copyWith(expiryDate: picked, updatedAt: DateTime.now()),
+        );
+    if (!mounted) return;
+
+    setState(() {
+      _expiryLoading = false;
+      _expiryStatusText = '';
+    });
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Expiry set to ${DateFormat('dd MMM yyyy').format(picked)}',
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    }
+  }
+
+  Future<void> _removeExpiryDate(Item item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Expiry Date'),
+        content: Text(
+          'Remove the expiry date from "${item.name}"? '
+          'You won\'t receive expiry notifications for this item anymore.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove',
+                style: TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _expiryLoading = true;
+      _expiryStatusText = 'Removing expiry date...';
+    });
+
+    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+          item.copyWith(clearExpiryDate: true, updatedAt: DateTime.now()),
+        );
+    if (!mounted) return;
+
+    setState(() {
+      _expiryLoading = false;
+      _expiryStatusText = '';
+    });
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Expiry date removed'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    }
+  }
+
+  Widget _buildCloudBackupSection(Item item, bool isDark, Color textPrimary) {
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final settings = ref.watch(settingsProvider);
+    final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
+    final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
+    final progress = (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
+    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+        ? AppColors.warning
+        : AppColors.primary;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.borderLight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Backup to Cloud',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      settings.isPremium
+                          ? 'Unlimited cloud protection active'
+                          : '$backedUpCount / $freeCloudBackupLimit free backups used',
+                      style: TextStyle(
+                        color:
+                            item.isBackedUp ? AppColors.primary : textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_activeOp != null && _activeOp!.contains('backup'))
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary.withValues(alpha: 0.7),
+                  ),
+                )
+              else
+                Switch.adaptive(
+                  value: item.isBackedUp,
+                  activeThumbColor: AppColors.primary,
+                  onChanged: (value) => _toggleCloudBackup(item, value),
+                ),
+            ],
+          ),
+          if (!settings.isPremium) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: backedUpCountAsync.isLoading ? null : progress,
+              minHeight: 8,
+              backgroundColor: textSecondary.withValues(alpha: 0.18),
+              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -474,6 +1008,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (!mounted || updatedName == null || updatedName.isEmpty) return;
     if (updatedName == item.name) return;
 
+    _startOp('Updating item name...');
     final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
           item.copyWith(
             name: updatedName,
@@ -482,16 +1017,17 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         );
 
     if (!mounted) return;
+    _endOp();
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
       );
       return;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Item name updated')),
+      const SnackBar(content: Text('Item name updated'), backgroundColor: AppColors.success),
     );
   }
 
@@ -607,6 +1143,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final lentTo = lentToController.text.trim();
     if (confirmed != true || lentTo.isEmpty) return;
 
+    _startOp('Lending item...');
     final updated = item.copyWith(
       isLent: true,
       lentTo: lentTo,
@@ -616,6 +1153,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
     if (!mounted) return;
+    _endOp();
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -624,7 +1162,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     } else {
       ref.invalidate(singleItemProvider(widget.uuid));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lent to $lentTo')),
+        SnackBar(content: Text('Lent to $lentTo'), backgroundColor: AppColors.success),
       );
     }
   }
@@ -662,6 +1200,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         false;
     if (!confirmed) return;
 
+    _startOp('Marking as returned...');
     final updated = item.copyWith(
       isLent: false,
       clearLentTo: true,
@@ -672,11 +1211,12 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
     if (!mounted) return;
+    _endOp();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(error ?? '${item.name} marked as returned'),
-        backgroundColor: error != null ? AppColors.error : null,
+        backgroundColor: error != null ? AppColors.error : AppColors.success,
       ),
     );
   }
@@ -713,9 +1253,17 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         ) ??
         false;
     if (!ok) return;
+    _startOp('Archiving item...');
     final error =
         await ref.read(itemsNotifierProvider.notifier).archiveItem(item.uuid);
-    if (!mounted || error != null) return;
+    if (!mounted) return;
+    _endOp();
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+      return;
+    }
     context.pop();
   }
 
@@ -928,22 +1476,35 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     final source = await _chooseImageSource();
     if (source == null) return;
 
+    _startOp('Processing photo...');
     String picked;
     try {
       picked = source == ImageSourceOption.camera
           ? await ref.read(imageServiceProvider).pickFromCamera()
           : await ref.read(imageServiceProvider).pickFromGallery();
     } catch (_) {
+      if (mounted) _endOp();
       return;
     }
 
     if (!mounted) return;
+    setState(() => _activeOpText = 'Saving photo...');
     final updated = item.copyWith(imagePaths: [...item.imagePaths, picked]);
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
-    if (!mounted || error != null) return;
+    if (!mounted) return;
+    _endOp();
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+      return;
+    }
     setState(() => _selectedImage = updated.imagePaths.length - 1);
     ref.invalidate(singleItemProvider(widget.uuid));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Photo added'), backgroundColor: AppColors.success),
+    );
   }
 
   Future<ImageSourceOption?> _chooseImageSource() {
@@ -1139,8 +1700,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (item.locationName?.trim().isNotEmpty ?? false) {
       return item.locationName!;
     }
-    if (latestHistory?.locationName.trim().isNotEmpty ?? false) {
-      return latestHistory!.locationName;
+    if (latestHistory != null && latestHistory.locationName.trim().isNotEmpty) {
+      return latestHistory.locationName;
     }
     return 'No location set';
   }
@@ -1215,20 +1776,31 @@ class _ItemVisibilitySectionState
     extends ConsumerState<_ItemVisibilitySection> {
   bool _isSaving = false;
 
+  /// Optimistic override so the switch flips immediately on tap instead of
+  /// waiting for cloud sync to finish. Null = use the actual item state.
+  bool? _pendingShared;
+
   Item get _item => widget.item;
 
-  bool get _isShared => _item.visibility == ItemVisibility.household;
+  bool get _isShared =>
+      _pendingShared ?? _item.visibility == ItemVisibility.household;
 
   String? get _currentUserUid {
-    final uid = ref.read(firebaseAuthProvider).currentUser?.uid?.trim();
+    final uid = ref.read(firebaseAuthProvider).currentUser?.uid.trim();
     if (uid == null || uid.isEmpty) return null;
     return uid;
   }
 
   String? get _itemOwnerMemberUuid {
-    final ownerMemberUuid = _item.cloudId?.trim();
-    if (ownerMemberUuid != null && ownerMemberUuid.isNotEmpty) {
-      return ownerMemberUuid;
+    final cloudId = _item.cloudId?.trim();
+    // cloudId stores the item's own UUID when set by FirebaseSyncService
+    // (personal backup), but stores the actual ownerUid when synced from
+    // the household Firestore collection. Only treat it as an owner UID
+    // when it differs from the item UUID (i.e. it came from another member).
+    if (cloudId != null &&
+        cloudId.isNotEmpty &&
+        cloudId != _item.uuid) {
+      return cloudId;
     }
     return _currentUserUid;
   }
@@ -1259,83 +1831,159 @@ class _ItemVisibilitySectionState
     return normalized;
   }
 
-  Future<void> _saveItem(Item updatedItem) async {
-    if (_isSaving) return;
-
-    setState(() => _isSaving = true);
+  /// Saves the item locally, syncs to personal cloud backup, and — when the
+  /// item has household visibility — also pushes it to the household Firestore
+  /// collection so other family members can see it.
+  ///
+  /// Returns a user-facing error string, or null on success.
+  Future<String?> _saveItem(Item updatedItem) async {
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
-    if (!mounted) return;
-    setState(() => _isSaving = false);
+    if (!mounted) return error;
 
-    if (error == null) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error)));
+    // Sync to household Firestore when item is shared with family
+    if (error == null && updatedItem.visibility == ItemVisibility.household) {
+      final syncResult = await ref
+          .read(householdSyncServiceProvider)
+          .syncLocalItemChange(updatedItem);
+      if (syncResult.hasError) {
+        return syncResult.errorMessage ?? 'Failed to sync to household';
+      }
+    }
+
+    // Remove from household Firestore when switching to private
+    if (error == null && updatedItem.visibility == ItemVisibility.private_) {
+      final previousHouseholdId = _item.householdId;
+      if (previousHouseholdId != null && previousHouseholdId.isNotEmpty) {
+        await ref.read(householdSyncServiceProvider).syncLocalDeletion(
+              itemUuid: updatedItem.uuid,
+              householdId: previousHouseholdId,
+            );
+      }
+    }
+
+    return error;
   }
 
   Future<void> _toggleSharing(bool enabled) async {
-    if (!enabled && !_canChangeShareState) {
-      return;
-    }
+    if (_isSaving) return;
+    if (!enabled && !_canChangeShareState) return;
 
-    if (!enabled) {
-      await _saveItem(
+    // ── Flip the switch immediately (optimistic UI) ──
+    setState(() {
+      _isSaving = true;
+      _pendingShared = enabled;
+    });
+
+    try {
+      if (!enabled) {
+        final error = await _saveItem(
+          _item.copyWith(
+            visibility: ItemVisibility.private_,
+            clearHouseholdId: true,
+            sharedWithMemberUuids: const [],
+          ),
+        );
+        if (error != null && mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(error)));
+        }
+        return;
+      }
+
+      final householdId = await ref.read(currentHouseholdIdProvider.future);
+      if (!mounted) return;
+      if (householdId == null || householdId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Create a household before sharing this item.'),
+          ),
+        );
+        return;
+      }
+
+      // Family sharing requires cloud backup — check quota first.
+      if (!_item.isBackedUp) {
+        final settings = ref.read(settingsProvider);
+        if (!settings.isPremium) {
+          final backedUpCount =
+              await ref.read(backedUpItemsCountProvider.future);
+          if (!mounted) return;
+          if (backedUpCount >= freeCloudBackupLimit) {
+            await PaywallScreen.show(context);
+            return;
+          }
+        }
+        await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+      }
+
+      final error = await _saveItem(
         _item.copyWith(
-          visibility: ItemVisibility.private_,
-          clearHouseholdId: true,
+          visibility: ItemVisibility.household,
+          householdId: householdId,
+          isBackedUp: true,
           sharedWithMemberUuids: const [],
         ),
       );
-      return;
+      if (error != null && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error)));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _pendingShared = null;
+        });
+      }
     }
-
-    final householdId = await ref.read(currentHouseholdIdProvider.future);
-    if (!mounted) return;
-    if (householdId == null || householdId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Create a household before sharing this item.'),
-        ),
-      );
-      return;
-    }
-
-    await _saveItem(
-      _item.copyWith(
-        visibility: ItemVisibility.household,
-        householdId: householdId,
-        sharedWithMemberUuids: const [],
-      ),
-    );
   }
 
   Future<void> _shareWithAll() async {
-    await _saveItem(
-      _item.copyWith(
-        visibility: ItemVisibility.household,
-        sharedWithMemberUuids: const [],
-      ),
-    );
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    try {
+      final error = await _saveItem(
+        _item.copyWith(
+          visibility: ItemVisibility.household,
+          sharedWithMemberUuids: const [],
+        ),
+      );
+      if (error != null && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error)));
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Future<void> _toggleMember(String memberUuid, bool selected) async {
-    if (memberUuid == _itemOwnerMemberUuid) {
-      return;
-    }
+    if (_isSaving) return;
+    if (memberUuid == _itemOwnerMemberUuid) return;
 
-    final next = {..._normalizedSelectedMemberUuids()};
-    if (selected) {
-      next.add(memberUuid);
-    } else {
-      next.remove(memberUuid);
-    }
+    setState(() => _isSaving = true);
+    try {
+      final next = {..._normalizedSelectedMemberUuids()};
+      if (selected) {
+        next.add(memberUuid);
+      } else {
+        next.remove(memberUuid);
+      }
 
-    await _saveItem(
-      _item.copyWith(
-        visibility: ItemVisibility.household,
-        sharedWithMemberUuids: _normalizedSelectedMemberUuids(next),
-      ),
-    );
+      final error = await _saveItem(
+        _item.copyWith(
+          visibility: ItemVisibility.household,
+          sharedWithMemberUuids: _normalizedSelectedMemberUuids(next),
+        ),
+      );
+      if (error != null && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error)));
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -1378,9 +2026,11 @@ class _ItemVisibilitySectionState
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _isShared
-                          ? 'Shared'
-                          : 'Private (Only visible to you)',
+                      _isSaving
+                          ? (_isShared ? 'Sharing…' : 'Removing…')
+                          : _isShared
+                              ? 'Shared'
+                              : 'Private (Only visible to you)',
                       style: TextStyle(
                         color: _isShared ? AppColors.primary : textSecondary,
                         fontSize: 13,
@@ -1390,9 +2040,23 @@ class _ItemVisibilitySectionState
                   ],
                 ),
               ),
+              // Show a spinner next to the switch while cloud sync runs
+              if (_isSaving)
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
               Switch.adaptive(
                 value: _isShared,
-                activeColor: AppColors.primary,
+                activeThumbColor: AppColors.primary,
+                activeTrackColor: AppColors.primary.withValues(alpha: 0.4),
                 onChanged: _isSaving ||
                         (!hasHousehold && !_isShared) ||
                         (_isShared && !_canChangeShareState)
@@ -1445,8 +2109,9 @@ class _ItemVisibilitySectionState
                 ),
               ),
             ),
-            crossFadeState:
-                _isShared ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _isShared
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 180),
           ),
         ],
@@ -1526,7 +2191,7 @@ class _VisibilityMembersList extends StatelessWidget {
           ...selectableMembers.map(
             (member) => _VisibilityOptionTile(
               title: member.name,
-              subtitle: member.email?.trim().isNotEmpty == true
+              subtitle: ((member.email ?? '').trim().isNotEmpty)
                   ? member.email!
                   : 'Visible to this member only',
               value: selectedMemberUuids.contains(member.uuid),
@@ -1612,7 +2277,7 @@ class _BorrowRequestTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(returnText,
               style: TextStyle(color: textSecondary, fontSize: 12)),
-          if (request.note?.trim().isNotEmpty ?? false) ...[
+          if ((request.note ?? '').trim().isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               '"${request.note!.trim()}"',

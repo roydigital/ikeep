@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help Center | Ikeep</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4E1FB4;
+            --primary-light: #865ED4;
+            --bg: #0A0728;
+            --surface: #171139;
+            --surface-variant: #231B4D;
+            --text-primary: #E9E5F8;
+            --text-secondary: #C0B8E2;
+            --border: #43396F;
+            --success: #4BBFA0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding-bottom: 40px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--bg) 0%, var(--surface) 100%);
+            padding: 4rem 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #865ED4, #4BBFA0);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .faq-item {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            margin-bottom: 1.2rem;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .faq-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            border-color: var(--primary-light);
+        }
+
+        .faq-question {
+            padding: 1.5rem;
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-primary);
+        }
+
+        .faq-answer {
+            padding: 0 1.5rem 1.5rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .footer {
+            margin-top: 4rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: var(--primary-light);
+            text-decoration: none;
+            margin: 0 10px;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .badge {
+            background: var(--surface-variant);
+            color: var(--success);
+            padding: 0.3rem 0.8rem;
+            border-radius: 1rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">Ikeep</div>
+        <div class="badge">HELP CENTER</div>
+        <h1>How can we help you?</h1>
+    </header>
+
+    <div class="container">
+        <div class="faq-item">
+            <div class="faq-question">What exactly is Ikeep?</div>
+            <div class="faq-answer">
+                Ikeep is your personal "Where Did I Keep It?" assistant. It's a smart item location tracker designed to help you organize your home, track seasonal belongings, and remember exactly where you put that one tool you use once a year.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">How does the automatic labeling work?</div>
+            <div class="faq-answer">
+                When you take a photo of an item, Ikeep uses on-device Machine Learning to analyze the image and suggest names and categories. This happens locally on your phone, ensuring your photos never leave your device unless you enable cloud backup.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">What are "Still there" reminders?</div>
+            <div class="faq-answer">
+                For items you don't use often, it's easy to forget if they are still where you left them. Ikeep can send you periodic "Still there?" check-ins. You simply tap to confirm, or update the location if you've moved it.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">Can I track expiry dates?</div>
+            <div class="faq-answer">
+                Absolutely! Ikeep is great for tracking batteries, documents, or even food items. Just set an expiry date when adding the item, and we'll notify you before it's too late.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">What is "Lent Status"?</div>
+            <div class="faq-answer">
+                Borrowed a book to a friend? Toggle "Lent" on the item, record who has it, and set a return reminder. Ikeep will help you manage your lent items so they always come back home.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">How do I safely backup my data?</div>
+            <div class="faq-answer">
+                In the Settings menu, sign in with your Google account and enable "Cloud Backup." Your data will be securely synced with our cloud database, allowing you to restore it on any device.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">Does Ikeep support Family Sharing?</div>
+            <div class="faq-answer">
+                Yes! With Ikeep Plus, you can manage a shared inventory. This is perfect for households where everyone needs to know where the spare keys, passports, or camping gear are located.
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2026 Roy Digital. All rights reserved.</p>
+            <p>
+                <a href="contact-us.html">Contact Us</a> | 
+                <a href="terms-privacy.html">Terms & Privacy</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

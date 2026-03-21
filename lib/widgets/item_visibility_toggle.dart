@@ -6,7 +6,7 @@ import '../domain/models/item_visibility.dart';
 import '../providers/household_providers.dart';
 import '../theme/app_colors.dart';
 
-class ItemVisibilityToggle extends ConsumerWidget {
+class ItemVisibilityToggle extends ConsumerStatefulWidget {
   const ItemVisibilityToggle({
     super.key,
     required this.item,
@@ -15,15 +15,55 @@ class ItemVisibilityToggle extends ConsumerWidget {
   final Item item;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ItemVisibilityToggle> createState() =>
+      _ItemVisibilityToggleState();
+}
+
+class _ItemVisibilityToggleState extends ConsumerState<ItemVisibilityToggle> {
+  bool _isToggling = false;
+
+  Future<void> _toggle() async {
+    setState(() => _isToggling = true);
+
+    final error = await ref
+        .read(householdNotifierProvider.notifier)
+        .toggleItemVisibility(widget.item);
+
+    if (!mounted) return;
+    setState(() => _isToggling = false);
+
+    final wasHousehold =
+        widget.item.visibility == ItemVisibility.household;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(wasHousehold
+              ? 'Item set to private'
+              : 'Item shared with household'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final actionState = ref.watch(householdNotifierProvider);
     final hasHousehold = ref.watch(hasHouseholdProvider);
-    final isHousehold = item.visibility == ItemVisibility.household;
+    final isHousehold = widget.item.visibility == ItemVisibility.household;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final textSecondary =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    final isDisabled =
+        _isToggling || actionState.isLoading || (!hasHousehold && !isHousehold);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -52,26 +92,59 @@ class ItemVisibilityToggle extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      isHousehold
-                          ? 'This item is shared with your household.'
-                          : 'This item is only visible on this device.',
-                      style: TextStyle(
-                        color: textSecondary,
-                        fontSize: 13,
-                        height: 1.35,
+                    if (_isToggling)
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.primary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isHousehold
+                                ? 'Setting to private...'
+                                : 'Sharing with household...',
+                            style: TextStyle(
+                              color: textSecondary,
+                              fontSize: 13,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        isHousehold
+                            ? 'This item is shared with your household.'
+                            : 'This item is only visible on this device.',
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
-              Switch.adaptive(
-                value: isHousehold,
-                activeColor: AppColors.primary,
-                onChanged: actionState.isLoading || (!hasHousehold && !isHousehold)
-                    ? null
-                    : (_) => _toggle(context, ref),
-              ),
+              if (_isToggling)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  ),
+                )
+              else
+                Switch.adaptive(
+                  value: isHousehold,
+                  activeColor: AppColors.primary,
+                  onChanged: isDisabled ? null : (_) => _toggle(),
+                ),
             ],
           ),
           if (!hasHousehold && !isHousehold) ...[
@@ -87,14 +160,5 @@ class ItemVisibilityToggle extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Future<void> _toggle(BuildContext context, WidgetRef ref) async {
-    final error =
-        await ref.read(householdNotifierProvider.notifier).toggleItemVisibility(item);
-    if (error == null || !context.mounted) return;
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error)));
   }
 }

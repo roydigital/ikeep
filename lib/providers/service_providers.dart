@@ -17,6 +17,7 @@ import '../services/ml_label_service.dart';
 import '../services/nearby_cloud_service.dart';
 import '../services/notification_service.dart';
 import '../services/sync_service.dart';
+import 'settings_provider.dart';
 
 final imageServiceProvider = Provider<ImageService>(
   (ref) => ImageService(),
@@ -60,6 +61,7 @@ final syncServiceProvider = Provider<SyncService>(
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
     imageUploadService: ref.watch(firebaseImageUploadServiceProvider),
+    isPremiumUser: () async => ref.read(settingsProvider).isPremium,
   ),
 );
 

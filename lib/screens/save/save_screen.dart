@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/constants/subscription_constants.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/item_visibility.dart';
@@ -16,6 +17,8 @@ import '../../providers/location_providers.dart';
 import '../../providers/location_usage_providers.dart';
 import '../../providers/ml_label_providers.dart';
 import '../../providers/service_providers.dart';
+import '../../providers/settings_provider.dart';
+import '../settings/paywall_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 
@@ -36,10 +39,13 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   bool _showTagInput = false;
   final _tagController = TextEditingController();
   final _tagFocusNode = FocusNode();
+  bool _hasExpiry = false;
+  DateTime? _expiryDate;
   bool _isLentFlow = false;
   final _lentToController = TextEditingController();
   DateTime _lentOnDate = DateTime.now();
   DateTime? _expectedReturnDate;
+  bool _backupToCloud = false;
 
   @override
   void initState() {
@@ -137,6 +143,8 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       imagePaths: _imagePath != null ? [_imagePath!] : [],
       tags: _tags,
       savedAt: DateTime.now(),
+      expiryDate: _hasExpiry ? _expiryDate : null,
+      isBackedUp: _backupToCloud,
       isLent: _isLentFlow,
       lentTo: _isLentFlow ? _lentToController.text.trim() : null,
       lentOn: _isLentFlow ? _lentOnDate : null,
@@ -160,6 +168,42 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     } else {
       context.pop();
     }
+  }
+
+  Future<void> _handleBackupToggle(bool enabled) async {
+    if (!enabled) {
+      if (mounted) {
+        setState(() => _backupToCloud = false);
+      }
+      return;
+    }
+
+    final settings = ref.read(settingsProvider);
+    if (settings.isPremium) {
+      await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+      if (mounted) {
+        setState(() => _backupToCloud = true);
+      }
+      return;
+    }
+
+    final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
+    if (backedUpCount < freeCloudBackupLimit) {
+      await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+      if (mounted) {
+        setState(() => _backupToCloud = true);
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _backupToCloud = false);
+      await _showPaywall();
+    }
+  }
+
+  Future<void> _showPaywall() {
+    return PaywallScreen.show(context);
   }
 
   Future<void> _showAddLocationDialog() async {
@@ -562,6 +606,19 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
 
         const SizedBox(height: 20),
 
+        _buildCloudBackupSection(
+          isDark,
+          textColor,
+          secondaryColor,
+          borderColor,
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Expiry Date ─────────────────────────────────────────────────────
+        _buildExpirySection(isDark, borderColor, textColor, secondaryColor),
+
+        const SizedBox(height: 20),
 
         // ── Metadata ────────────────────────────────────────────────────────
         _buildLentSection(
@@ -890,6 +947,269 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCloudBackupSection(
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+    Color borderColor,
+  ) {
+    final settings = ref.watch(settingsProvider);
+    final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
+    final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
+    final progress = (backedUpCount / freeCloudBackupLimit).clamp(0.0, 1.0);
+    final progressColor = backedUpCount >= freeCloudBackupWarningThreshold
+        ? AppColors.warning
+        : AppColors.primary;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark
+            ? AppColors.surfaceVariantDark
+            : AppColors.surfaceVariantLight,
+        borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Backup to Cloud',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      settings.isPremium
+                          ? 'Unlimited backups with Ikeep Plus'
+                          : '$backedUpCount / $freeCloudBackupLimit free backups used',
+                      style: TextStyle(color: secondaryColor, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                value: _backupToCloud,
+                activeThumbColor: AppColors.primary,
+                onChanged: _handleBackupToggle,
+              ),
+            ],
+          ),
+          if (!settings.isPremium) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(
+              value: backedUpCountAsync.isLoading ? null : progress,
+              minHeight: 8,
+              backgroundColor: borderColor.withValues(alpha: 0.4),
+              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+              borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpirySection(
+    bool isDark,
+    Color borderColor,
+    Color textColor,
+    Color secondaryColor,
+  ) {
+    // Quick-preset durations covering food, medicine, household items
+    const presets = <(String label, int days)>[
+      ('1 week', 7),
+      ('1 month', 30),
+      ('3 months', 90),
+      ('6 months', 180),
+      ('1 year', 365),
+      ('2 years', 730),
+    ];
+
+    String? expiryLabel;
+    if (_expiryDate != null) {
+      final diff = _expiryDate!.difference(DateTime.now()).inDays;
+      if (diff < 0) {
+        expiryLabel = 'Expired ${-diff}d ago';
+      } else if (diff == 0) {
+        expiryLabel = 'Expires today';
+      } else {
+        expiryLabel = DateFormat('dd MMM yyyy').format(_expiryDate!);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('Expires', secondaryColor),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _hasExpiry
+                    ? (expiryLabel ?? 'Pick a date below')
+                    : 'Set an expiry for food, medicine, etc.',
+                style: TextStyle(
+                  color: _hasExpiry && _expiryDate != null
+                      ? textColor
+                      : secondaryColor,
+                  fontSize: 12,
+                  fontWeight:
+                      _hasExpiry && _expiryDate != null ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            Switch(
+              value: _hasExpiry,
+              activeThumbColor: AppColors.primary,
+              onChanged: (value) {
+                setState(() {
+                  _hasExpiry = value;
+                  if (!value) _expiryDate = null;
+                });
+              },
+            ),
+          ],
+        ),
+        if (_hasExpiry) ...[
+          const SizedBox(height: 10),
+          // Quick presets
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ...presets.map((preset) {
+                final target = DateTime.now().add(Duration(days: preset.$2));
+                final targetDay =
+                    DateTime(target.year, target.month, target.day);
+                final isSelected = _expiryDate != null &&
+                    _expiryDate!.year == targetDay.year &&
+                    _expiryDate!.month == targetDay.month &&
+                    _expiryDate!.day == targetDay.day;
+
+                return GestureDetector(
+                  onTap: () => setState(() => _expiryDate = targetDay),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.primary
+                          : AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius:
+                          BorderRadius.circular(AppDimensions.radiusFull),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primary
+                            : borderColor,
+                      ),
+                    ),
+                    child: Text(
+                      preset.$1,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : textColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              // Custom date button
+              GestureDetector(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate:
+                        _expiryDate ?? DateTime.now().add(const Duration(days: 30)),
+                    firstDate: DateTime.now(),
+                    lastDate:
+                        DateTime.now().add(const Duration(days: 3650)),
+                    helpText: 'SELECT EXPIRY DATE',
+                  );
+                  if (picked != null) {
+                    setState(() => _expiryDate = picked);
+                  }
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    borderRadius:
+                        BorderRadius.circular(AppDimensions.radiusFull),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.calendar_month,
+                          size: 14, color: secondaryColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Pick date',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_expiryDate != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                border: Border.all(
+                  color: AppColors.warning.withValues(alpha: 0.30),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event, color: AppColors.warning, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Expires ${DateFormat('dd MMM yyyy').format(_expiryDate!)}  ·  '
+                      "You'll be notified on the day",
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => setState(() => _expiryDate = null),
+                    child: Icon(Icons.close, size: 16, color: secondaryColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ],
     );
   }
 

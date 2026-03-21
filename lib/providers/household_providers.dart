@@ -198,10 +198,12 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
           ? await _requireHouseholdId()
           : item.householdId;
 
+      // Family sharing requires cloud backup — ensure isBackedUp is set.
       final updated = item.copyWith(
         visibility: targetVisibility,
         householdId: targetVisibility.isHousehold ? householdId : null,
         clearHouseholdId: !targetVisibility.isHousehold,
+        isBackedUp: targetVisibility.isHousehold ? true : item.isBackedUp,
         sharedWithMemberUuids:
             targetVisibility.isHousehold ? item.sharedWithMemberUuids : const [],
         updatedAt: DateTime.now(),

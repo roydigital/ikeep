@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/constants/subscription_constants.dart';
+import '../core/errors/app_exception.dart';
 import '../data/database/item_dao.dart';
 import '../data/database/location_dao.dart';
 import '../domain/models/item.dart';
@@ -18,17 +20,20 @@ class FirebaseSyncService implements SyncService {
     required ItemDao itemDao,
     required LocationDao locationDao,
     required FirebaseImageUploadService imageUploadService,
+    required Future<bool> Function() isPremiumUser,
   })  : _auth = auth,
         _firestore = firestore,
         _itemDao = itemDao,
         _locationDao = locationDao,
-        _imageUploadService = imageUploadService;
+        _imageUploadService = imageUploadService,
+        _isPremiumUser = isPremiumUser;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final ItemDao _itemDao;
   final LocationDao _locationDao;
   final FirebaseImageUploadService _imageUploadService;
+  final Future<bool> Function() _isPremiumUser;
 
   DateTime? _lastSyncedAt;
 
@@ -59,8 +64,15 @@ class FirebaseSyncService implements SyncService {
       return const SyncResult.error('Sign in to sync items to Firebase');
     }
 
+    if (!item.isBackedUp) {
+      return SyncResult.success();
+    }
+
     try {
+      await _ensureCloudQuotaForItem(item);
+
       final now = FieldValue.serverTimestamp();
+      final syncedAt = DateTime.now();
       final uploadedImageUrls = await _imageUploadService.uploadItemImages(
         userId: user.uid,
         itemUuid: item.uuid,
@@ -69,14 +81,31 @@ class FirebaseSyncService implements SyncService {
 
       await _ensureUserDocument(user);
       await _itemsRef.doc(item.uuid).set({
-        ...item.copyWith(imagePaths: uploadedImageUrls).toJson(),
+        ...item
+            .copyWith(
+              imagePaths: uploadedImageUrls,
+              cloudId: item.cloudId ?? item.uuid,
+              lastSyncedAt: syncedAt,
+              isBackedUp: true,
+            )
+            .toJson(),
         'userId': user.uid,
         'updatedAt': _toIsoString(item.updatedAt ?? DateTime.now()),
         'createdAt': _toIsoString(item.savedAt),
         'lastSyncedAt': now,
       }, SetOptions(merge: true));
+      await _itemDao.updateItem(
+        item.copyWith(
+          cloudId: item.cloudId ?? item.uuid,
+          lastSyncedAt: syncedAt,
+          isBackedUp: true,
+        ),
+      );
       _lastSyncedAt = DateTime.now();
       return SyncResult.success();
+    } on SyncException catch (e) {
+      debugPrint('FirebaseSyncService.syncItem quota error: $e');
+      return SyncResult.error(e.message);
     } catch (e) {
       debugPrint('FirebaseSyncService.syncItem error: $e');
       return SyncResult.error(e.toString());
@@ -120,10 +149,8 @@ class FirebaseSyncService implements SyncService {
       await _itemsRef.doc(uuid).delete();
       _lastSyncedAt = DateTime.now();
       return SyncResult.success();
-    } on FirebaseException catch (e) {
-      if (e.code == 'not-found') return SyncResult.success();
-      return SyncResult.error(e.message ?? 'Failed to delete remote item');
     } catch (e) {
+      if (_isMissingRemoteResource(e)) return SyncResult.success();
       return SyncResult.error(e.toString());
     }
   }
@@ -199,6 +226,14 @@ class FirebaseSyncService implements SyncService {
       for (final item in localItems) {
         final remoteData = remoteItems[item.uuid];
         final localUpdatedAt = item.updatedAt ?? item.savedAt;
+
+        if (!item.isBackedUp) {
+          if (remoteData != null) {
+            await deleteRemoteItem(item.uuid);
+          }
+          continue;
+        }
+
         if (remoteData == null) {
           await syncItem(item);
           continue;
@@ -281,6 +316,7 @@ class FirebaseSyncService implements SyncService {
       notes: data['notes'] as String?,
       cloudId: data['cloudId'] as String? ?? data['uuid'] as String?,
       lastSyncedAt: _parseDateTime(data['lastSyncedAt']),
+      isBackedUp: data['isBackedUp'] as bool? ?? true,
       isLent: data['isLent'] as bool? ?? false,
       lentTo: data['lentTo'] as String?,
       lentOn: _parseDateTime(data['lentOn']),
@@ -321,5 +357,35 @@ class FirebaseSyncService implements SyncService {
 
   String _toIsoString(DateTime? value) {
     return (value ?? DateTime.now()).toIso8601String();
+  }
+
+  Future<void> _ensureCloudQuotaForItem(Item item) async {
+    final isPremium = await _isPremiumUser();
+    if (isPremium) return;
+
+    final isExistingCloudItem =
+        (item.cloudId?.trim().isNotEmpty ?? false) || item.lastSyncedAt != null;
+    if (isExistingCloudItem) return;
+
+    final backedUpItemCount = await _itemDao.countBackedUpItems();
+    if (backedUpItemCount >= freeCloudBackupLimit) {
+      throw const SyncException('Cloud quota exceeded');
+    }
+  }
+
+  bool _isMissingRemoteResource(dynamic error) {
+    final str = error.toString().toLowerCase();
+    if (str.contains('object-not-found') || 
+        str.contains('no object exists') ||
+        str.contains('not-found')) {
+      return true;
+    }
+    if (error is FirebaseException) {
+      final message = error.message?.toLowerCase() ?? '';
+      return error.code == 'not-found' ||
+          error.code == 'object-not-found' ||
+          message.contains('no object exists at the desired reference');
+    }
+    return false;
   }
 }

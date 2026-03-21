@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../providers/database_provider.dart';
+
 class AppSettingsKeys {
   const AppSettingsKeys._();
 
   static const String themeMode = 'theme_mode';
   static const String onboardingComplete = 'onboarding_complete';
   static const String backupEnabled = 'backup_enabled';
+  static const String isPremium = 'is_premium';
   static const String stillThereReminders = 'still_there_reminders';
   static const String expiryReminders = 'expiry_reminders';
   static const String seasonalReminders = 'seasonal_reminders';
@@ -21,6 +24,7 @@ class AppSettings {
     this.themeMode = ThemeMode.dark,
     this.isOnboardingComplete = false,
     this.isBackupEnabled = false,
+    this.isPremium = false,
     this.stillThereRemindersEnabled = true,
     this.expiryRemindersEnabled = true,
     this.seasonalRemindersEnabled = true,
@@ -32,6 +36,7 @@ class AppSettings {
   final ThemeMode themeMode;
   final bool isOnboardingComplete;
   final bool isBackupEnabled;
+  final bool isPremium;
   final bool stillThereRemindersEnabled;
   final bool expiryRemindersEnabled;
   final bool seasonalRemindersEnabled;
@@ -43,6 +48,7 @@ class AppSettings {
     ThemeMode? themeMode,
     bool? isOnboardingComplete,
     bool? isBackupEnabled,
+    bool? isPremium,
     bool? stillThereRemindersEnabled,
     bool? expiryRemindersEnabled,
     bool? seasonalRemindersEnabled,
@@ -55,6 +61,7 @@ class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       isOnboardingComplete: isOnboardingComplete ?? this.isOnboardingComplete,
       isBackupEnabled: isBackupEnabled ?? this.isBackupEnabled,
+      isPremium: isPremium ?? this.isPremium,
       stillThereRemindersEnabled:
           stillThereRemindersEnabled ?? this.stillThereRemindersEnabled,
       expiryRemindersEnabled:
@@ -63,9 +70,8 @@ class AppSettings {
           seasonalRemindersEnabled ?? this.seasonalRemindersEnabled,
       lentRemindersEnabled: lentRemindersEnabled ?? this.lentRemindersEnabled,
       nearbyEnabled: nearbyEnabled ?? this.nearbyEnabled,
-      cachedLocality: clearCachedLocality
-          ? null
-          : (cachedLocality ?? this.cachedLocality),
+      cachedLocality:
+          clearCachedLocality ? null : (cachedLocality ?? this.cachedLocality),
     );
   }
 }
@@ -84,6 +90,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       isOnboardingComplete:
           prefs.getBool(AppSettingsKeys.onboardingComplete) ?? false,
       isBackupEnabled: prefs.getBool(AppSettingsKeys.backupEnabled) ?? false,
+      isPremium: prefs.getBool(AppSettingsKeys.isPremium) ?? false,
       stillThereRemindersEnabled:
           prefs.getBool(AppSettingsKeys.stillThereReminders) ?? true,
       expiryRemindersEnabled:
@@ -113,6 +120,12 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     state = state.copyWith(isBackupEnabled: enabled);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(AppSettingsKeys.backupEnabled, enabled);
+  }
+
+  Future<void> setPremium(bool isPremium) async {
+    state = state.copyWith(isPremium: isPremium);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(AppSettingsKeys.isPremium, isPremium);
   }
 
   Future<void> setStillThereReminders(bool enabled) async {
@@ -163,3 +176,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 final settingsProvider = StateNotifierProvider<SettingsNotifier, AppSettings>(
   (ref) => SettingsNotifier(),
 );
+
+final backedUpItemsCountProvider = FutureProvider<int>((ref) async {
+  return ref.watch(itemDaoProvider).countBackedUpItems();
+});
