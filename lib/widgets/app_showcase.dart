@@ -10,80 +10,31 @@ const appShowcaseTooltipActionConfig = TooltipActionConfig(
   crossAxisAlignment: CrossAxisAlignment.center,
 );
 
+/// Tooltip action buttons for showcase tours.
+///
+/// Uses the built-in [TooltipDefaultActionType] instead of custom widgets
+/// because tooltip actions are rendered in an overlay — not as a descendant
+/// of [ShowCaseWidget] — so [ShowCaseWidget.of(context)] would fail.
 List<TooltipActionButton> appShowcaseTooltipActions() {
   return [
-    TooltipActionButton.custom(
-      button: const _AppShowcaseActionButton(
-        label: 'Skip',
-        outlined: true,
-        action: _AppShowcaseAction.skip,
+    TooltipActionButton(
+      type: TooltipDefaultActionType.skip,
+      backgroundColor: Colors.transparent,
+      textStyle: const TextStyle(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
       ),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      border: Border.all(color: Colors.white24),
     ),
-    TooltipActionButton.custom(
-      button: const _AppShowcaseActionButton(
-        label: 'Next',
-        action: _AppShowcaseAction.next,
+    TooltipActionButton(
+      type: TooltipDefaultActionType.next,
+      backgroundColor: AppColors.primary,
+      textStyle: const TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.w700,
       ),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
     ),
   ];
-}
-
-enum _AppShowcaseAction { skip, next }
-
-class _AppShowcaseActionButton extends StatelessWidget {
-  const _AppShowcaseActionButton({
-    required this.label,
-    required this.action,
-    this.outlined = false,
-  });
-
-  final String label;
-  final _AppShowcaseAction action;
-  final bool outlined;
-
-  @override
-  Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-
-    return SafeArea(
-      top: false,
-      left: false,
-      right: false,
-      minimum: EdgeInsets.only(bottom: bottomInset > 0 ? 6 : 0),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            final showcase = ShowCaseWidget.of(context);
-            switch (action) {
-              case _AppShowcaseAction.skip:
-                showcase.dismiss();
-              case _AppShowcaseAction.next:
-                showcase.next();
-            }
-          },
-          borderRadius: BorderRadius.circular(999),
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 92),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(
-              color: outlined ? Colors.transparent : AppColors.primary,
-              borderRadius: BorderRadius.circular(999),
-              border: outlined
-                  ? Border.all(color: Colors.white24)
-                  : null,
-            ),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: outlined ? Colors.white70 : Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
