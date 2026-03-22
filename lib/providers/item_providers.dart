@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/fuzzy_search.dart';
 import '../domain/models/item.dart';
+import 'database_provider.dart';
 import '../domain/models/sync_status.dart';
 import 'location_providers.dart';
 import 'repository_providers.dart';
@@ -19,6 +20,10 @@ final itemSearchQueryProvider = StateProvider<String>((ref) => '');
 
 final allItemsProvider = FutureProvider<List<Item>>((ref) async {
   return ref.watch(itemRepositoryProvider).getAllItems();
+});
+
+final itemTagsProvider = FutureProvider<List<String>>((ref) async {
+  return ref.watch(itemDaoProvider).getAllTags();
 });
 
 final archivedItemsProvider = FutureProvider<List<Item>>((ref) async {
@@ -84,8 +89,8 @@ int _weekOfYear(DateTime date) {
   return ((dayOfYear - date.weekday + 10) / 7).floor();
 }
 
-final itemsByLocationProvider =
-    FutureProvider.autoDispose.family<List<Item>, String>((ref, locationUuid) async {
+final itemsByLocationProvider = FutureProvider.autoDispose
+    .family<List<Item>, String>((ref, locationUuid) async {
   return ref.watch(itemRepositoryProvider).getItemsByLocation(locationUuid);
 });
 
@@ -96,7 +101,8 @@ final singleItemProvider =
 
 /// Derived search results — watches [itemSearchQueryProvider] and re-runs
 /// whenever the query changes.
-final searchResultsProvider = FutureProvider.autoDispose<List<Item>>((ref) async {
+final searchResultsProvider =
+    FutureProvider.autoDispose<List<Item>>((ref) async {
   final query = ref.watch(itemSearchQueryProvider);
   if (query.trim().isEmpty) {
     return ref.watch(itemRepositoryProvider).getAllItems();
@@ -207,6 +213,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(lentItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
+    _ref.invalidate(itemTagsProvider);
     _ref.invalidate(singleItemProvider(uuid));
     return null;
   }
@@ -224,6 +231,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(lentItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
+    _ref.invalidate(itemTagsProvider);
     return null;
   }
 
@@ -312,6 +320,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(lentItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
+    _ref.invalidate(itemTagsProvider);
     _ref.invalidate(allLocationsProvider);
     _ref.invalidate(rootLocationsProvider);
     _ref.invalidate(backedUpItemsCountProvider);

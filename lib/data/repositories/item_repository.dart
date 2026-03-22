@@ -27,7 +27,12 @@ abstract class ItemRepository {
 
   Future<Item?> getItem(String uuid);
 
-  Future<List<Item>> getAllItems();
+  Future<List<Item>> getAllItems({int? limit});
+
+  Future<List<Item>> getItemsPage({
+    required int limit,
+    required int offset,
+  });
 
   Future<List<Item>> getItemsByLocation(String locationUuid);
 

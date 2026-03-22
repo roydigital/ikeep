@@ -145,7 +145,15 @@ class ItemRepositoryImpl implements ItemRepository {
   Future<Item?> getItem(String uuid) => itemDao.getItemByUuid(uuid);
 
   @override
-  Future<List<Item>> getAllItems() => itemDao.getAllItems();
+  Future<List<Item>> getAllItems({int? limit}) =>
+      itemDao.getAllItems(limit: limit);
+
+  @override
+  Future<List<Item>> getItemsPage({
+    required int limit,
+    required int offset,
+  }) =>
+      itemDao.getItemsPage(limit: limit, offset: offset);
 
   @override
   Future<List<Item>> getItemsByLocation(String locationUuid) =>

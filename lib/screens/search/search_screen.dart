@@ -10,6 +10,8 @@ import '../../providers/history_providers.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
+import '../../providers/location_providers.dart';
+import '../../providers/repository_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
@@ -125,33 +127,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     ref.read(itemSearchQueryProvider.notifier).state = '';
   }
 
-  List<String> _locationOptions(List<Item> items) {
-    final locations = <String>{};
-    for (final item in items) {
-      final location =
-          (item.locationName ?? item.locationFullPath ?? '').trim();
-      if (location.isNotEmpty) {
-        locations.add(location);
-      }
-    }
-    final sorted = locations.toList()..sort();
-    return sorted;
-  }
-
-  List<String> _tagOptions(List<Item> items) {
-    final tags = <String>{};
-    for (final item in items) {
-      for (final tag in item.tags) {
-        final value = tag.trim();
-        if (value.isNotEmpty) {
-          tags.add(value);
-        }
-      }
-    }
-    final sorted = tags.toList()..sort();
-    return sorted;
-  }
-
   void _onPrimaryFilterSelected(_FilterType filter) {
     setState(() {
       _activeFilter = filter;
@@ -161,8 +136,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   void _onLocationSelected(String? location) {
     setState(() {
       _selectedLocation = location;
-      _activeFilter =
-          location == null ? _FilterType.all : _FilterType.location;
+      _activeFilter = location == null ? _FilterType.all : _FilterType.location;
     });
   }
 
@@ -213,14 +187,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final allItemsAsync = ref.watch(allItemsProvider);
+    final locationOptionsAsync = ref.watch(allLocationsProvider);
+    final tagOptionsAsync = ref.watch(itemTagsProvider);
     final hasSeenItemListingTour = ref.watch(itemListingTourControllerProvider);
-    final locationOptions = allItemsAsync.maybeWhen(
-      data: _locationOptions,
+    final locationOptions = locationOptionsAsync.maybeWhen(
+      data: (locations) {
+        final labels = locations
+            .map((location) => (location.fullPath ?? location.name).trim())
+            .where((label) => label.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+        return labels;
+      },
       orElse: () => const <String>[],
     );
-    final tagOptions = allItemsAsync.maybeWhen(
-      data: _tagOptions,
+    final tagOptions = tagOptionsAsync.maybeWhen(
+      data: (tags) => tags,
       orElse: () => const <String>[],
     );
     final shouldAutofocusSearch = hasSeenItemListingTour.valueOrNull == true;
@@ -272,7 +255,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   child: _ResultsList(
                     isDark: isDark,
                     applyFilter: _applyFilter,
-                    sourceItemsAsync: allItemsAsync,
+                    activeFilter: _activeFilter,
                   ),
                 ),
               ),
@@ -753,20 +736,202 @@ class _DropdownFilterChip extends StatelessWidget {
 
 // ── My Inventory results list ─────────────────────────────────────────────────
 
-class _ResultsList extends ConsumerWidget {
+class _ResultsList extends ConsumerStatefulWidget {
   const _ResultsList({
     required this.isDark,
     required this.applyFilter,
-    required this.sourceItemsAsync,
+    required this.activeFilter,
   });
 
   final bool isDark;
   final List<Item> Function(List<Item>) applyFilter;
-  final AsyncValue<List<Item>> sourceItemsAsync;
+  final _FilterType activeFilter;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ResultsList> createState() => _ResultsListState();
+}
+
+class _ResultsListState extends ConsumerState<_ResultsList> {
+  static const int _pageSize = 10;
+  static const double _loadMoreThreshold = 240;
+
+  late final ScrollController _scrollController;
+  final List<Item> _lazyItems = <Item>[];
+  bool _isInitialLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  Object? _loadingError;
+  String _lastQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController()..addListener(_handleScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refreshLazyItems();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ResultsList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeFilter != widget.activeFilter) {
+      _refreshLazyItems();
+    }
+  }
+
+  Future<void> _refreshLazyItems() async {
+    final query = ref.read(itemSearchQueryProvider);
+    _lastQuery = query;
+    if (!_usesLazyLoading(widget.activeFilter, query)) {
+      if (!mounted) return;
+      setState(() {
+        _lazyItems.clear();
+        _isInitialLoading = false;
+        _isLoadingMore = false;
+        _hasMore = true;
+        _loadingError = null;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _lazyItems.clear();
+      _isInitialLoading = true;
+      _isLoadingMore = false;
+      _hasMore = true;
+      _loadingError = null;
+    });
+    await _loadMore();
+  }
+
+  Future<void> _loadMore() async {
+    final query = ref.read(itemSearchQueryProvider);
+    if (!_usesLazyLoading(widget.activeFilter, query) ||
+        _isLoadingMore ||
+        !_hasMore) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingMore = true;
+        _loadingError = null;
+      });
+    }
+
+    try {
+      final nextPage = await ref.read(itemRepositoryProvider).getItemsPage(
+            limit: _pageSize,
+            offset: _lazyItems.length,
+          );
+      if (!mounted) return;
+      setState(() {
+        _lazyItems.addAll(nextPage);
+        _hasMore = nextPage.length == _pageSize;
+        _isInitialLoading = false;
+        _isLoadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingError = error;
+        _isInitialLoading = false;
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    final query = ref.read(itemSearchQueryProvider);
+    if (!_usesLazyLoading(widget.activeFilter, query)) return;
+    final position = _scrollController.position;
+    if (position.extentAfter > _loadMoreThreshold) return;
+    _loadMore();
+  }
+
+  bool _usesLazyLoading(_FilterType activeFilter, String query) {
+    return query.trim().isEmpty &&
+        activeFilter != _FilterType.location &&
+        activeFilter != _FilterType.tags;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final query = ref.watch(itemSearchQueryProvider);
+    if (query != _lastQuery) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _refreshLazyItems();
+        }
+      });
+    }
+    final useLazyLoading = _usesLazyLoading(widget.activeFilter, query);
+
+    if (useLazyLoading) {
+      if (_isInitialLoading) {
+        return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        );
+      }
+      if (_loadingError != null && _lazyItems.isEmpty) {
+        return Center(
+          child: Text(
+            'Something went wrong',
+            style: TextStyle(
+              color: widget.isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+            ),
+          ),
+        );
+      }
+
+      final filtered = widget.applyFilter(_lazyItems);
+      if (filtered.isEmpty) {
+        return _EmptyState(
+          query: query,
+          isDark: widget.isDark,
+          isHouseholdMode: false,
+        );
+      }
+
+      return ListView.separated(
+        controller: _scrollController,
+        padding: const EdgeInsets.all(AppDimensions.spacingMd),
+        itemCount: filtered.length + (_isLoadingMore ? 1 : 0),
+        separatorBuilder: (_, __) =>
+            const SizedBox(height: AppDimensions.spacingMd),
+        itemBuilder: (context, i) {
+          if (i >= filtered.length) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppDimensions.spacingSm),
+              child: Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
+            );
+          }
+          final item = filtered[i];
+          if (item.imagePaths.isNotEmpty) {
+            return _RichResultCard(item: item, isDark: widget.isDark);
+          }
+          return _CompactResultItem(item: item, isDark: widget.isDark);
+        },
+      );
+    }
+
+    final sourceItemsAsync = ref.watch(allItemsProvider);
 
     return sourceItemsAsync.when(
       loading: () => const Center(
@@ -776,7 +941,7 @@ class _ResultsList extends ConsumerWidget {
         child: Text(
           'Something went wrong',
           style: TextStyle(
-            color: isDark
+            color: widget.isDark
                 ? AppColors.textSecondaryDark
                 : AppColors.textSecondaryLight,
           ),
@@ -795,15 +960,16 @@ class _ResultsList extends ConsumerWidget {
                     tags.contains(queryLower) ||
                     location.contains(queryLower);
               }).toList();
-        final filtered = applyFilter(queryFiltered);
+        final filtered = widget.applyFilter(queryFiltered);
         if (filtered.isEmpty) {
           return _EmptyState(
             query: query,
-            isDark: isDark,
+            isDark: widget.isDark,
             isHouseholdMode: false,
           );
         }
         return ListView.separated(
+          controller: _scrollController,
           padding: const EdgeInsets.all(AppDimensions.spacingMd),
           itemCount: filtered.length,
           separatorBuilder: (_, __) =>
@@ -811,9 +977,9 @@ class _ResultsList extends ConsumerWidget {
           itemBuilder: (context, i) {
             final item = filtered[i];
             if (item.imagePaths.isNotEmpty) {
-              return _RichResultCard(item: item, isDark: isDark);
+              return _RichResultCard(item: item, isDark: widget.isDark);
             }
-            return _CompactResultItem(item: item, isDark: isDark);
+            return _CompactResultItem(item: item, isDark: widget.isDark);
           },
         );
       },
@@ -921,9 +1087,8 @@ class _ModeSwitcher extends StatelessWidget {
           Expanded(
             child: _ModePill(
               label: 'Household',
-              subtitle: isSignedIn
-                  ? 'Items shared by members'
-                  : 'Sign in to access',
+              subtitle:
+                  isSignedIn ? 'Items shared by members' : 'Sign in to access',
               active: isHouseholdMode,
               onTap: isSignedIn ? () => onChanged(true) : null,
             ),
@@ -1060,8 +1225,7 @@ class _SharedItemCard extends ConsumerWidget {
                   color: isAvailable
                       ? AppColors.success.withValues(alpha: 0.12)
                       : AppColors.warning.withValues(alpha: 0.12),
-                  borderRadius:
-                      BorderRadius.circular(AppDimensions.radiusFull),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
                 ),
                 child: Text(
                   isAvailable ? 'Available' : 'Lent out',
@@ -1249,8 +1413,7 @@ Future<void> _showBorrowRequestSheet(
                     controller: noteController,
                     maxLines: 3,
                     decoration: const InputDecoration(
-                      hintText:
-                          'Optional note — tell them why you need it.',
+                      hintText: 'Optional note — tell them why you need it.',
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1258,15 +1421,12 @@ Future<void> _showBorrowRequestSheet(
                     onPressed: () async {
                       final picked = await showDatePicker(
                         context: ctx,
-                        initialDate:
-                            requestedReturnDate ?? DateTime.now(),
+                        initialDate: requestedReturnDate ?? DateTime.now(),
                         firstDate: DateTime.now(),
-                        lastDate:
-                            DateTime.now().add(const Duration(days: 365)),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
                       if (picked == null) return;
-                      setSheetState(
-                          () => requestedReturnDate = picked);
+                      setSheetState(() => requestedReturnDate = picked);
                     },
                     icon: const Icon(Icons.event_available),
                     label: Text(
@@ -1473,8 +1633,7 @@ class _RichResultCard extends ConsumerWidget {
                   child: AdaptiveImage(
                     path: item.imagePaths.first,
                     fit: BoxFit.cover,
-                    errorBuilder: (_) =>
-                        _ThumbnailPlaceholder(isDark: isDark),
+                    errorBuilder: (_) => _ThumbnailPlaceholder(isDark: isDark),
                   ),
                 ),
               ),
@@ -1746,4 +1905,3 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
-

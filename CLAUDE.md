@@ -73,7 +73,7 @@ lib/
 │       ├── item.dart             # Item (with lending + visibility + isBackedUp fields; computed getters: isShared→false, isNearby→false)
 │       ├── location_model.dart   # LocationModel (hierarchical)
 │       ├── item_location_history.dart # History entry (with member attribution)
-│       ├── item_visibility.dart  # ItemVisibility enum: private_, household, nearby
+│       ├── item_visibility.dart  # ItemVisibility enum: private_, household
 │       ├── household.dart        # Household (local SQLite model — id, ownerId, name, memberIds)
 │       ├── household_member.dart # HouseholdMember (local SQLite model)
 │       ├── household_member_lookup_state.dart # HouseholdMemberLookupState — state for email-based member search UI
@@ -114,8 +114,7 @@ lib/
 │   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, etc.
 │   ├── household_providers.dart  # Household members, shared items, borrow requests
 │   ├── home_tour_provider.dart   # HomeTourController, ItemListingTourController, RoomsTourController, SettingsTourController — showcaseview tour state
-│   ├── nearby_providers.dart     # Locality, nearby items, combined catalog, all request providers
-│   ├── borrow_request_providers.dart # Local borrow request providers
+│   ├── borrow_request_providers.dart # Stub — social borrow requests currently disabled
 │   ├── sync_providers.dart       # SyncService providers
 │   └── ml_label_providers.dart   # ML label providers
 │
@@ -153,8 +152,7 @@ lib/
 │   ├── onboarding/onboarding_screen.dart
 │   ├── settings/settings_screen.dart
 │   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
-│   ├── settings/paywall_screen.dart             # Ikeep Plus upgrade modal (shown via PaywallScreen.show(context)); plans: Monthly $1.99 / Yearly $14.99 / Lifetime $29.99
-│   └── network/network_screen.dart  # Network tab: Catalog, Activity, My Lends
+│   └── settings/paywall_screen.dart             # Ikeep Plus upgrade modal (shown via PaywallScreen.show(context)); plans: Monthly $1.99 / Yearly $14.99 / Lifetime $29.99
 │
 └── widgets/
     ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings
@@ -163,6 +161,18 @@ lib/
     ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + _AppShowcaseActionButton for showcaseview
     ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
     └── item_visibility_toggle.dart   # Toggle widget for private/household visibility (requires active household)
+
+web_content/
+└── ikeep/
+    ├── contact-us.html               # Contact page (email: roy@roydigital.in)
+    ├── help-center.html              # Help center / FAQ page
+    └── terms-privacy.html            # Terms of service & privacy policy
+
+test/
+├── widget_test.dart
+├── core/utils/fuzzy_search_test.dart
+├── domain/models/item_test.dart
+└── screens/save_screen_test.dart
 ```
 
 ---
@@ -237,12 +247,6 @@ Screens / Widgets
 | `householdMemberLookupProvider` | `StateNotifierProvider<HouseholdMemberLookupController, HouseholdMemberLookupState>` | Email-based user search for adding household members |
 | `imageOptimizerServiceProvider` | `Provider<ImageOptimizerService>` | Image optimization for cloud uploads |
 | `firebaseImageUploadServiceProvider` | `Provider<FirebaseImageUploadService>` | Firebase Storage uploads with caching + optimization |
-| `allIncomingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby incoming requests |
-| `allOutgoingRequestsProvider` | `FutureProvider<List<FirestoreBorrowRequest>>` | Combined household + nearby outgoing requests |
-| `allPendingIncomingCountProvider` | `Provider<int>` | Badge count for Network tab |
-| `userLocalityProvider` | `FutureProvider<String?>` | User's GPS-derived locality (cached 24h) |
-| `nearbyItemsProvider` | `FutureProvider<List<NearbyItem>>` | Nearby items from strangers in same locality |
-| `combinedCatalogProvider` | `FutureProvider<CombinedCatalog>` | Merged household + nearby items for Network catalog |
 | `homeTourControllerProvider` | `StateNotifierProvider` | Controls Home screen showcase tour state |
 | `itemListingTourControllerProvider` | `StateNotifierProvider` | Controls Item listing tour state |
 | `roomsTourControllerProvider` | `StateNotifierProvider` | Controls Rooms screen tour state |
@@ -372,7 +376,8 @@ Shows a sign-in prompt if the user is not authenticated.
 - **Computed getters:** `isShared` → always `false`, `isNearby` → always `false` (social sharing disabled)
 
 ### Premium / Subscription System
-- **`isPremium`** — stored in `AppSettings` / SharedPreferences (`is_premium` key); toggled by `SettingsNotifier.setPremium(bool)`
+- **`AppPlan` enum** — `free`, `monthly`, `yearly`, `lifetime`; each has `isPremium` computed getter (`!= free`); stored in `AppSettings.plan`
+- **`isPremium`** — also stored in `AppSettings` / SharedPreferences (`is_premium` key) for backward compatibility; toggled by `SettingsNotifier.setPremium(bool)`
 - **`isBackupEnabled`** — separate flag; user must explicitly enable backup (stored as `backup_enabled`)
 - **Free tier:** `freeCloudBackupLimit = 50` items (defined in `subscription_constants.dart`); warning at `freeCloudBackupWarningThreshold = 45`
 - **`FirebaseSyncService`** — constructor requires `isPremiumUser` callback; `_ensureCloudQuotaForItem()` throws `SyncException('Cloud quota exceeded')` when a new (non-previously-synced) item would exceed the free limit; premium users skip this check

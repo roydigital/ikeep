@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/constants/db_constants.dart';
@@ -80,6 +82,47 @@ class ItemDao {
       ORDER BY i.${DbConstants.colItemSavedAt} DESC
     ''');
     return rows.map(Item.fromMap).toList();
+  }
+
+  Future<List<Item>> getItemsPage({
+    required int limit,
+    required int offset,
+  }) async {
+    final db = await _db;
+    final rows = await db.rawQuery('''
+      SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
+      FROM ${DbConstants.tableItems} i
+      LEFT JOIN ${DbConstants.tableLocations} l
+        ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
+      WHERE i.${DbConstants.colItemIsArchived} = 0
+      ORDER BY i.${DbConstants.colItemSavedAt} DESC
+      LIMIT ? OFFSET ?
+    ''', [limit, offset]);
+    return rows.map(Item.fromMap).toList();
+  }
+
+  Future<List<String>> getAllTags() async {
+    final db = await _db;
+    final rows = await db.query(
+      DbConstants.tableItems,
+      columns: [DbConstants.colItemTags],
+      where: '${DbConstants.colItemIsArchived} = 0',
+    );
+
+    final tags = <String>{};
+    for (final row in rows) {
+      final rawTags = row[DbConstants.colItemTags] as String? ?? '[]';
+      final decoded = jsonDecode(rawTags) as List<dynamic>;
+      for (final tag in decoded.cast<String>()) {
+        final normalized = tag.trim();
+        if (normalized.isNotEmpty) {
+          tags.add(normalized);
+        }
+      }
+    }
+
+    final sorted = tags.toList()..sort();
+    return sorted;
   }
 
   Future<int> countBackedUpItems() async {

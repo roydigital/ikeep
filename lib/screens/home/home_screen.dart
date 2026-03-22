@@ -234,7 +234,7 @@ class _MainContent extends ConsumerWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
             child: Image.asset(
-              'assets/icon.png',
+              'assets/optimized/icon.png',
               width: 42,
               height: 42,
               fit: BoxFit.cover,
@@ -265,13 +265,15 @@ class _MainContent extends ConsumerWidget {
                     ],
                   ),
                   child: ClipOval(
-                    child: profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
-                        ? Image.network(
-                            profilePhotoUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => _buildProfileFallback(),
-                          )
-                        : _buildProfileFallback(),
+                    child:
+                        profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
+                            ? Image.network(
+                                profilePhotoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _buildProfileFallback(),
+                              )
+                            : _buildProfileFallback(),
                   ),
                 ),
               ),
@@ -648,11 +650,9 @@ class _ActionNeededCard extends ConsumerWidget {
           return daysUntilExpiry >= 0 && daysUntilExpiry <= 14;
         }).length;
 
-        final hasUrgentItems =
-            overdueReturnCount > 0 || expiringSoonCount > 0;
+        final hasUrgentItems = overdueReturnCount > 0 || expiringSoonCount > 0;
         final headline = switch ((overdueReturnCount, expiringSoonCount)) {
-          (final overdue, final expiring)
-              when overdue > 0 && expiring > 0 =>
+          (final overdue, final expiring) when overdue > 0 && expiring > 0 =>
             '$overdue ${_pluralize(overdue, "return")} overdue and '
                 '$expiring ${_pluralize(expiring, "item")} expiring soon.',
           (final overdue, _) when overdue > 0 =>
@@ -827,8 +827,9 @@ class _DashboardMetric extends StatelessWidget {
           Text(
             value,
             style: TextStyle(
-              color:
-                  isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+              color: isDark
+                  ? AppColors.textPrimaryDark
+                  : AppColors.textPrimaryLight,
               fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
@@ -864,9 +865,8 @@ class _TopLocationsGrid extends ConsumerWidget {
         Text(
           'Top Locations',
           style: TextStyle(
-            color: isDark
-                ? AppColors.textPrimaryDark
-                : AppColors.textPrimaryLight,
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
             fontSize: 18,
             fontWeight: FontWeight.w800,
           ),
@@ -902,9 +902,8 @@ class _TopLocationsGrid extends ConsumerWidget {
                       isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
                   borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
                   border: Border.all(
-                    color: isDark
-                        ? AppColors.borderDark
-                        : AppColors.borderLight,
+                    color:
+                        isDark ? AppColors.borderDark : AppColors.borderLight,
                   ),
                 ),
                 child: Text(
@@ -1545,8 +1544,7 @@ class _Fab extends StatelessWidget {
         child: Showcase(
           key: showcaseKey,
           title: 'Start Here!',
-          description:
-              'Tap to save your first item, document, or memory.',
+          description: 'Tap to save your first item, document, or memory.',
           tooltipBackgroundColor: AppColors.surfaceDark,
           textColor: AppColors.textPrimaryDark,
           titleTextStyle: const TextStyle(
