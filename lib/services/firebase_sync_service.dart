@@ -59,6 +59,13 @@ class FirebaseSyncService implements SyncService {
 
   @override
   Future<SyncResult> syncItem(Item item) async {
+    return _syncItemInternal(item, ensureUserDocument: true);
+  }
+
+  Future<SyncResult> _syncItemInternal(
+    Item item, {
+    required bool ensureUserDocument,
+  }) async {
     final user = _user;
     if (user == null) {
       return const SyncResult.error('Sign in to sync items to Firebase');
@@ -79,7 +86,9 @@ class FirebaseSyncService implements SyncService {
         imagePaths: item.imagePaths,
       );
 
-      await _ensureUserDocument(user);
+      if (ensureUserDocument) {
+        await _ensureUserDocument(user);
+      }
       await _itemsRef.doc(item.uuid).set({
         ...item
             .copyWith(
@@ -114,13 +123,22 @@ class FirebaseSyncService implements SyncService {
 
   @override
   Future<SyncResult> syncLocation(LocationModel location) async {
+    return _syncLocationInternal(location, ensureUserDocument: true);
+  }
+
+  Future<SyncResult> _syncLocationInternal(
+    LocationModel location, {
+    required bool ensureUserDocument,
+  }) async {
     final user = _user;
     if (user == null) {
       return const SyncResult.error('Sign in to sync locations to Firebase');
     }
 
     try {
-      await _ensureUserDocument(user);
+      if (ensureUserDocument) {
+        await _ensureUserDocument(user);
+      }
       await _locationsRef.doc(location.uuid).set({
         ...location.toJson(),
         'userId': user.uid,
@@ -200,7 +218,11 @@ class FirebaseSyncService implements SyncService {
       for (final location in localLocations) {
         final remoteData = remoteLocations[location.uuid];
         if (remoteData == null) {
-          await syncLocation(location);
+          await _syncLocationInternal(location, ensureUserDocument: false);
+          continue;
+        }
+
+        if (_isLocationInSync(location, remoteData)) {
           continue;
         }
 
@@ -210,7 +232,7 @@ class FirebaseSyncService implements SyncService {
             remoteUpdatedAt.isAfter(localUpdatedAt)) {
           await _locationDao.insertLocation(_locationFromFirestore(remoteData));
         } else {
-          await syncLocation(location);
+          await _syncLocationInternal(location, ensureUserDocument: false);
         }
       }
 
@@ -235,17 +257,24 @@ class FirebaseSyncService implements SyncService {
         }
 
         if (remoteData == null) {
-          await syncItem(item);
+          await _syncItemInternal(item, ensureUserDocument: false);
           continue;
         }
 
         final remoteUpdatedAt = _parseDateTime(remoteData['updatedAt']) ??
             _parseDateTime(remoteData['savedAt']);
+        if (_isItemInSync(
+          item: item,
+          localUpdatedAt: localUpdatedAt,
+          remoteUpdatedAt: remoteUpdatedAt,
+        )) {
+          continue;
+        }
         if (remoteUpdatedAt != null &&
             remoteUpdatedAt.isAfter(localUpdatedAt)) {
           await _itemDao.insertItem(_itemFromFirestore(remoteData));
         } else {
-          await syncItem(item);
+          await _syncItemInternal(item, ensureUserDocument: false);
         }
       }
 
@@ -357,6 +386,32 @@ class FirebaseSyncService implements SyncService {
 
   String _toIsoString(DateTime? value) {
     return (value ?? DateTime.now()).toIso8601String();
+  }
+
+  bool _isLocationInSync(
+    LocationModel local,
+    Map<String, dynamic> remoteData,
+  ) {
+    return local.uuid == ((remoteData['uuid'] as String?) ?? local.uuid) &&
+        local.name == (remoteData['name'] as String? ?? '') &&
+        local.fullPath == remoteData['fullPath'] as String? &&
+        local.parentUuid == remoteData['parentUuid'] as String? &&
+        local.iconName == ((remoteData['iconName'] as String?) ?? 'folder');
+  }
+
+  bool _isItemInSync({
+    required Item item,
+    required DateTime localUpdatedAt,
+    required DateTime? remoteUpdatedAt,
+  }) {
+    final lastSyncedAt = item.lastSyncedAt;
+    if (lastSyncedAt == null || remoteUpdatedAt == null) {
+      return false;
+    }
+
+    final localUnchangedSinceLastSync = !localUpdatedAt.isAfter(lastSyncedAt);
+    final remoteUnchangedSinceLastSync = !remoteUpdatedAt.isAfter(lastSyncedAt);
+    return localUnchangedSinceLastSync && remoteUnchangedSinceLastSync;
   }
 
   Future<void> _ensureCloudQuotaForItem(Item item) async {

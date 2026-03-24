@@ -91,7 +91,8 @@ class HouseholdCloudService {
       }
     }
 
-    await householdRef.set({
+    final batch = _firestore.batch();
+    batch.set(householdRef, {
       'householdId': householdRef.id,
       'ownerId': user.uid,
       'ownerUid': user.uid,
@@ -102,22 +103,33 @@ class HouseholdCloudService {
       'updatedAt': now,
     });
 
-    await _firestore.collection(_usersCol).doc(user.uid).set({
-      'uid': user.uid,
-      'email': user.email,
-      'displayName': _displayName(user),
-      'householdId': householdRef.id,
-      'isOwner': true,
-      'updatedAt': now,
-    }, SetOptions(merge: true));
-
-    await _upsertMember(
-      householdId: householdRef.id,
-      uid: user.uid,
-      email: user.email,
-      name: _displayName(user),
-      isOwner: true,
+    batch.set(
+      _firestore.collection(_usersCol).doc(user.uid),
+      {
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': _displayName(user),
+        'householdId': householdRef.id,
+        'isOwner': true,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
     );
+
+    batch.set(
+      householdRef.collection(_membersSubcol).doc(user.uid),
+      {
+        'uid': user.uid,
+        'name': _displayName(user),
+        'email': user.email?.trim().toLowerCase(),
+        'isOwner': true,
+        'joinedAt': now,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
 
     return Household(
       householdId: householdRef.id,
@@ -155,27 +167,49 @@ class HouseholdCloudService {
             ? email!.trim()
             : 'Member';
 
-    await _upsertMember(
-      householdId: householdId,
-      uid: userId,
-      email: email,
-      name: memberName,
-      isOwner: false,
+    final now = FieldValue.serverTimestamp();
+    final batch = _firestore.batch();
+
+    batch.set(
+      _firestore
+          .collection(_householdsCol)
+          .doc(householdId)
+          .collection(_membersSubcol)
+          .doc(userId),
+      {
+        'uid': userId,
+        'name': memberName,
+        'email': email?.trim().toLowerCase(),
+        'isOwner': false,
+        'joinedAt': now,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
     );
 
-    await _firestore.collection(_householdsCol).doc(householdId).set({
-      'householdId': householdId,
-      'members': FieldValue.arrayUnion([userId]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    batch.set(
+      _firestore.collection(_householdsCol).doc(householdId),
+      {
+        'householdId': householdId,
+        'members': FieldValue.arrayUnion([userId]),
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
+    );
 
-    await _firestore.collection(_usersCol).doc(userId).set({
-      'uid': userId,
-      'email': email?.trim().toLowerCase(),
-      'householdId': householdId,
-      'isOwner': false,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    batch.set(
+      _firestore.collection(_usersCol).doc(userId),
+      {
+        'uid': userId,
+        'email': email?.trim().toLowerCase(),
+        'householdId': householdId,
+        'isOwner': false,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
   }
 
   // ── Household management ────────────────────────────────────────────────

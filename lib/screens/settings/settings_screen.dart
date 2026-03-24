@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -148,10 +149,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isSaving = false;
   bool _isSigningIn = false;
   bool _isLoggingOut = false;
+  bool _canLoadRemoteSyncMetadata = false;
+  String? _lastObservedAuthUid;
+  Timer? _remoteSyncMetadataTimer;
   final GlobalKey _accountShowcaseKey = GlobalKey();
   final GlobalKey _preferencesShowcaseKey = GlobalKey();
   final GlobalKey _premiumShowcaseKey = GlobalKey();
   bool _settingsTourQueued = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialAuthUid = ref.read(firebaseAuthProvider).currentUser?.uid;
+    _lastObservedAuthUid = initialAuthUid;
+    _canLoadRemoteSyncMetadata = initialAuthUid != null;
+  }
 
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isSigningIn = true);
@@ -159,10 +171,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final auth = ref.read(firebaseAuthProvider);
 
     try {
-      final account = await googleSignIn.signIn();
-      if (account != null) {
-        await signInFirebaseWithGoogleAccount(auth, account);
-      }
+      final account = await runInteractiveGoogleSignInFlow(
+        () async {
+          final selectedAccount = await googleSignIn.signIn();
+          if (selectedAccount != null) {
+            await signInFirebaseWithGoogleAccount(auth, selectedAccount);
+          }
+          return selectedAccount;
+        },
+      );
       if (!mounted) return;
       setState(() => _isSigningIn = false);
       if (account == null) {
@@ -305,6 +322,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
+    _enableRemoteSyncMetadataNow();
     ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     final result = await ref.read(syncServiceProvider).fullSync();
     ref.read(syncStatusProvider.notifier).state = result;
@@ -430,9 +448,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final authUser = ref.watch(authStateProvider).valueOrNull;
+    final authUid = authUser?.uid;
+    if (authUid != _lastObservedAuthUid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _handleAuthUidChange(authUid);
+      });
+    }
     final hasSeenSettingsTour = ref.watch(settingsTourControllerProvider);
     final syncStatus = ref.watch(syncStatusProvider);
-    final lastSynced = ref.watch(lastSyncedAtProvider).valueOrNull;
+    final shouldLoadLastSynced =
+        _backupEnabled && authUser != null && _canLoadRemoteSyncMetadata;
+    final lastSynced = shouldLoadLastSynced
+        ? ref.watch(lastSyncedAtProvider).valueOrNull
+        : syncStatus.lastSyncedAt;
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     _initFromSettings(settings);
     _activeColors = _darkMode ? _darkColors : _lightColors;
@@ -450,6 +479,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             : syncStatus.hasError
                 ? 'Error'
                 : 'Connected';
+    final lastSyncedText = authUser != null &&
+            _backupEnabled &&
+            !_canLoadRemoteSyncMetadata
+        ? 'Loading...'
+        : _formatLastSynced(lastSynced);
     return ShowCaseWidget(
       blurValue: 1.5,
       enableAutoScroll: true,
@@ -561,7 +595,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 statusColor: statusColor,
                                 isSyncing: syncStatus.isSyncing,
                                 progress: _backupEnabled ? 0.85 : 0.25,
-                                lastSyncedText: _formatLastSynced(lastSynced),
+                                lastSyncedText: lastSyncedText,
                                 onSyncTap: _runSync,
                                 onManageFamily: () =>
                                     context.push(AppRoutes.manageFamily),
@@ -647,6 +681,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       },
     );
+  }
+
+  void _handleAuthUidChange(String? authUid) {
+    _remoteSyncMetadataTimer?.cancel();
+    final previousUid = _lastObservedAuthUid;
+    _lastObservedAuthUid = authUid;
+
+    if (authUid == null) {
+      if (_canLoadRemoteSyncMetadata) {
+        setState(() => _canLoadRemoteSyncMetadata = false);
+      }
+      return;
+    }
+
+    if (previousUid == null) {
+      if (_canLoadRemoteSyncMetadata) {
+        setState(() => _canLoadRemoteSyncMetadata = false);
+      }
+      _remoteSyncMetadataTimer = Timer(
+        const Duration(milliseconds: 450),
+        () {
+          if (!mounted || _lastObservedAuthUid != authUid) return;
+          setState(() => _canLoadRemoteSyncMetadata = true);
+          ref.invalidate(lastSyncedAtProvider);
+        },
+      );
+      return;
+    }
+
+    _enableRemoteSyncMetadataNow();
+  }
+
+  void _enableRemoteSyncMetadataNow() {
+    _remoteSyncMetadataTimer?.cancel();
+    if (!_canLoadRemoteSyncMetadata) {
+      setState(() => _canLoadRemoteSyncMetadata = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _remoteSyncMetadataTimer?.cancel();
+    super.dispose();
   }
 }
 

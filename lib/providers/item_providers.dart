@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math';
 
+import '../core/constants/subscription_constants.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/fuzzy_search.dart';
@@ -131,26 +133,38 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).saveItem(preparedItem);
     if (failure != null) return failure.message;
 
-    final syncError = await _syncItemToCloud(preparedItem);
     await _syncNotificationsForItem(preparedItem);
+    final syncError = await _preflightCloudSync(item: preparedItem);
 
     _invalidateItemLists();
+    if (syncError == null) {
+      _scheduleCloudSync(item: preparedItem);
+    }
     return syncError;
   }
 
   Future<String?> updateItem(Item item) async {
+    final existingItem = await _ref.read(itemRepositoryProvider).getItem(item.uuid);
     final preparedItem = await _prepareItem(item);
     final failure =
         await _ref.read(itemRepositoryProvider).updateItem(preparedItem);
     if (failure != null) return failure.message;
 
-    final syncError = await _syncItemToCloud(
-      preparedItem.copyWith(updatedAt: DateTime.now()),
-    );
     await _syncNotificationsForItem(preparedItem);
+    final syncItem = preparedItem.copyWith(updatedAt: DateTime.now());
+    final syncError = await _preflightCloudSync(
+      item: syncItem,
+      hadRemoteBackup: _hasRemoteBackup(existingItem),
+    );
 
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
+    if (syncError == null) {
+      _scheduleCloudSync(
+        item: syncItem,
+        hadRemoteBackup: _hasRemoteBackup(existingItem),
+      );
+    }
     return syncError;
   }
 
@@ -167,10 +181,13 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    final syncError = await _syncItemToCloud(preparedItem);
     await _syncNotificationsForItem(preparedItem);
+    final syncError = await _preflightCloudSync(item: preparedItem);
 
     _invalidateItemLists();
+    if (syncError == null) {
+      _scheduleCloudSync(item: preparedItem);
+    }
     return syncError;
   }
 
@@ -179,6 +196,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     String? movedByMemberUuid,
     String? movedByName,
   }) async {
+    final existingItem = await _ref.read(itemRepositoryProvider).getItem(item.uuid);
     final preparedItem = await _prepareItem(item);
     final failure = await _ref.read(itemRepositoryProvider).updateItem(
           preparedItem,
@@ -187,13 +205,21 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    final syncError = await _syncItemToCloud(
-      preparedItem.copyWith(updatedAt: DateTime.now()),
-    );
     await _syncNotificationsForItem(preparedItem);
+    final syncItem = preparedItem.copyWith(updatedAt: DateTime.now());
+    final syncError = await _preflightCloudSync(
+      item: syncItem,
+      hadRemoteBackup: _hasRemoteBackup(existingItem),
+    );
 
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
+    if (syncError == null) {
+      _scheduleCloudSync(
+        item: syncItem,
+        hadRemoteBackup: _hasRemoteBackup(existingItem),
+      );
+    }
     return syncError;
   }
 
@@ -282,6 +308,58 @@ class ItemsNotifier extends StateNotifier<bool> {
     }
   }
 
+  Future<String?> _preflightCloudSync({
+    required Item item,
+    bool hadRemoteBackup = false,
+  }) async {
+    if (!item.isBackedUp) {
+      return null;
+    }
+
+    if (hadRemoteBackup || _hasRemoteBackup(item)) {
+      return null;
+    }
+
+    final settings = _ref.read(settingsProvider);
+    final backedUpCount = await _ref.read(backedUpItemsCountProvider.future);
+    if (backedUpCount <= cloudBackupLimitFor(settings.isPremium)) {
+      return null;
+    }
+
+    await _ref.read(itemRepositoryProvider).updateItem(
+          item.copyWith(
+            isBackedUp: false,
+            clearCloudId: true,
+            clearLastSyncedAt: true,
+          ),
+        );
+    _invalidateItemLists();
+    _ref.invalidate(singleItemProvider(item.uuid));
+    return cloudBackupQuotaExceededError(isPremium: settings.isPremium);
+  }
+
+  void _scheduleCloudSync({
+    required Item item,
+    bool hadRemoteBackup = false,
+  }) {
+    final needsDelete = !item.isBackedUp && hadRemoteBackup;
+    final needsSync = item.isBackedUp;
+    if (!needsDelete && !needsSync) {
+      return;
+    }
+
+    _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
+    unawaited(() async {
+      if (needsDelete) {
+        await _syncDeleteItem(item.uuid);
+      } else {
+        await _syncItemToCloud(item);
+      }
+      _invalidateItemLists();
+      _ref.invalidate(singleItemProvider(item.uuid));
+    }());
+  }
+
   Future<void> _syncNotificationsForItem(Item item) async {
     final notificationService = _ref.read(notificationServiceProvider);
     final settings = _ref.read(settingsProvider);
@@ -328,6 +406,15 @@ class ItemsNotifier extends StateNotifier<bool> {
 
   bool _isCloudQuotaExceeded(String? message) {
     return (message ?? '').contains('Cloud quota exceeded');
+  }
+
+  bool _hasRemoteBackup(Item? item) {
+    if (item == null) {
+      return false;
+    }
+
+    return (item.cloudId?.trim().isNotEmpty ?? false) ||
+        item.lastSyncedAt != null;
   }
 }
 

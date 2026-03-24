@@ -1,4 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../core/errors/failure.dart';
@@ -39,15 +40,20 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
 
   @override
   Future<Household?> getCurrentHousehold() async {
+    final localHousehold = await householdDao.getLatestHousehold();
     try {
       final householdId = await cloudService.getUserHouseholdId();
       if (householdId == null || householdId.isEmpty) {
-        return householdDao.getLatestHousehold();
+        return localHousehold;
       }
 
-      final remote = await cloudService.fetchHousehold(householdId);
+      if (localHousehold != null && localHousehold.householdId == householdId) {
+        unawaited(_refreshHouseholdCache(householdId));
+        return localHousehold;
+      }
+
+      final remote = await _refreshHouseholdCache(householdId);
       if (remote != null) {
-        await householdDao.upsertHousehold(remote);
         return remote;
       }
     } on FirebaseAuthException {
@@ -58,7 +64,7 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
       // Fall back to local cache.
     }
 
-    return householdDao.getLatestHousehold();
+    return localHousehold;
   }
 
   @override
@@ -81,7 +87,23 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
     try {
       final household = await cloudService.createHousehold(name: name);
       await householdDao.upsertHousehold(household);
-      await memberDao.ensureOwnerMember();
+      final user = cloudService.currentUser;
+      if (user != null) {
+        final now = DateTime.now();
+        await memberDao.insertMember(
+          HouseholdMember(
+            uuid: user.uid,
+            name: _resolveCurrentUserName(user),
+            invitedAt: now,
+            isOwner: true,
+            email: user.email,
+            householdId: household.householdId,
+            joinedAt: now,
+          ),
+        );
+      } else {
+        await memberDao.ensureOwnerMember();
+      }
       return null;
     } on FirebaseAuthException catch (e) {
       return Failure(e.message ?? 'Authentication failed: ${e.code}', e);
@@ -98,17 +120,22 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
   Future<List<HouseholdMember>> getAllMembers() async {
     try {
       await memberDao.ensureOwnerMember();
-
       final household = await getCurrentHousehold();
+      final localMembers = await memberDao.getAllMembers();
       if (household == null) {
-        return memberDao.getAllMembers();
+        return localMembers;
       }
 
-      final members = await cloudService.fetchMembers(household.householdId);
-      if (members.isNotEmpty) {
-        await memberDao.replaceAllMembers(members);
+      final hasCachedMembers = localMembers.any(
+        (member) => member.householdId == household.householdId,
+      );
+      if (hasCachedMembers) {
+        unawaited(_refreshMembersCache(household.householdId));
+        return localMembers;
       }
-      return memberDao.getAllMembers();
+
+      final members = await _refreshMembersCache(household.householdId);
+      return members.isNotEmpty ? members : localMembers;
     } on FirebaseAuthException {
       return memberDao.getAllMembers();
     } on FirebaseException {
@@ -132,16 +159,12 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
         name: name,
         email: email,
       );
-
-      final updatedHousehold = await cloudService.fetchHousehold(householdId);
-      if (updatedHousehold != null) {
-        await householdDao.upsertHousehold(updatedHousehold);
-      }
-
-      final members = await cloudService.fetchMembers(householdId);
-      if (members.isNotEmpty) {
-        await memberDao.replaceAllMembers(members);
-      }
+      await _cacheAddedMember(
+        householdId: householdId,
+        userId: userId,
+        name: name,
+        email: email,
+      );
       return null;
     } on FirebaseAuthException catch (e) {
       return Failure(e.message ?? 'Authentication failed: ${e.code}', e);
@@ -152,5 +175,78 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
     } catch (e) {
       return Failure('Failed to add household member: $e', e);
     }
+  }
+
+  Future<Household?> _refreshHouseholdCache(String householdId) async {
+    final remote = await cloudService.fetchHousehold(householdId);
+    if (remote != null) {
+      await householdDao.upsertHousehold(remote);
+    }
+    return remote;
+  }
+
+  Future<List<HouseholdMember>> _refreshMembersCache(String householdId) async {
+    final members = await cloudService.fetchMembers(householdId);
+    if (members.isNotEmpty) {
+      await memberDao.replaceAllMembers(members);
+      return memberDao.getAllMembers();
+    }
+    return memberDao.getAllMembers();
+  }
+
+  Future<void> _cacheAddedMember({
+    required String householdId,
+    required String userId,
+    String? name,
+    String? email,
+  }) async {
+    final latestHousehold = await householdDao.getLatestHousehold();
+    final cachedHousehold =
+        await householdDao.getHouseholdById(householdId) ??
+            (latestHousehold?.householdId == householdId
+                ? latestHousehold
+                : null);
+    if (cachedHousehold != null) {
+      final nextMemberIds = <String>{
+        ...cachedHousehold.memberIds,
+        userId,
+      }.toList();
+      await householdDao.upsertHousehold(
+        cachedHousehold.copyWith(
+          memberIds: nextMemberIds,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
+
+    final now = DateTime.now();
+    final memberName = (name?.trim().isNotEmpty ?? false)
+        ? name!.trim()
+        : (email?.trim().isNotEmpty ?? false)
+            ? email!.trim()
+            : 'Member';
+    await memberDao.insertMember(
+      HouseholdMember(
+        uuid: userId,
+        name: memberName,
+        invitedAt: now,
+        isOwner: false,
+        email: email?.trim().toLowerCase(),
+        householdId: householdId,
+        joinedAt: now,
+      ),
+    );
+  }
+
+  String _resolveCurrentUserName(User user) {
+    final displayName = user.displayName?.trim();
+    if (displayName != null && displayName.isNotEmpty) {
+      return displayName;
+    }
+    final email = user.email?.trim();
+    if (email != null && email.isNotEmpty) {
+      return email.split('@').first;
+    }
+    return 'You';
   }
 }

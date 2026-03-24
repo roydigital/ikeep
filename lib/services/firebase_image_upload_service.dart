@@ -17,6 +17,8 @@ class FirebaseImageUploadService {
   final FirebaseStorage _storage;
   final ImageOptimizerService _optimizer;
   final Map<String, _CachedUpload> _uploadCache = {};
+  static const String _sourceModifiedMsKey = 'sourceModifiedMs';
+  static const String _sourceBytesKey = 'sourceBytes';
 
   Future<List<String>> uploadItemImages({
     required String userId,
@@ -48,7 +50,16 @@ class FirebaseImageUploadService {
         index: index,
         extension: _optimizer.preferredUploadExtension,
       );
-      final cacheKey = await _cacheKeyFor(path, storagePath);
+      final ref = _storage.ref().child(storagePath);
+      final localFileState = await _localFileState(path);
+      final cacheKey = localFileState == null
+          ? null
+          : _cacheKeyFor(
+              localPath: path,
+              storagePath: storagePath,
+              modifiedMs: localFileState.modifiedMs,
+              byteSize: localFileState.byteSize,
+            );
       final cached = cacheKey == null ? null : _uploadCache[cacheKey];
       if (cached != null) {
         keepStoragePaths.add(cached.fullPath);
@@ -56,10 +67,21 @@ class FirebaseImageUploadService {
         continue;
       }
 
+      final reused = localFileState == null
+          ? null
+          : await _tryReuseExistingUpload(
+              ref: ref,
+              cacheKey: cacheKey,
+              localFileState: localFileState,
+            );
+      if (reused != null) {
+        keepStoragePaths.add(reused.fullPath);
+        downloadUrls.add(reused.downloadUrl);
+        continue;
+      }
+
       final optimized = await _optimizer.optimizeForUpload(path);
       try {
-        final ref = _storage.ref().child(storagePath);
-
         await ref.putFile(
           optimized.file,
           SettableMetadata(
@@ -68,6 +90,10 @@ class FirebaseImageUploadService {
             customMetadata: {
               'optimized': 'true',
               'optimizedBytes': optimized.byteSize.toString(),
+              if (localFileState != null) ...{
+                _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
+                _sourceBytesKey: localFileState.byteSize.toString(),
+              },
             },
           ),
         );
@@ -186,11 +212,67 @@ class FirebaseImageUploadService {
     }
   }
 
-  Future<String?> _cacheKeyFor(String localPath, String storagePath) async {
+  Future<_CachedUpload?> _tryReuseExistingUpload({
+    required Reference ref,
+    required _LocalFileState localFileState,
+    String? cacheKey,
+  }) async {
+    try {
+      final metadata = await ref.getMetadata();
+      if (!_matchesLocalFile(metadata, localFileState)) {
+        return null;
+      }
+
+      final downloadUrl = await ref.getDownloadURL();
+      final cached = _CachedUpload(
+        fullPath: ref.fullPath,
+        downloadUrl: downloadUrl,
+      );
+      if (cacheKey != null) {
+        _uploadCache[cacheKey] = cached;
+      }
+      return cached;
+    } catch (e) {
+      if (_isMissingObjectError(e)) {
+        return null;
+      }
+      debugPrint(
+        'FirebaseImageUploadService: reuse check failed for ${ref.fullPath}: $e',
+      );
+      return null;
+    }
+  }
+
+  bool _matchesLocalFile(
+    FullMetadata metadata,
+    _LocalFileState localFileState,
+  ) {
+    final customMetadata = metadata.customMetadata;
+    if (customMetadata == null) return false;
+
+    return customMetadata[_sourceModifiedMsKey] ==
+            localFileState.modifiedMs.toString() &&
+        customMetadata[_sourceBytesKey] == localFileState.byteSize.toString();
+  }
+
+  Future<_LocalFileState?> _localFileState(String localPath) async {
     final file = File(localPath);
     if (!await file.exists()) return null;
+
     final stat = await file.stat();
-    return '$storagePath|$localPath|${stat.modified.millisecondsSinceEpoch}|${stat.size}';
+    return _LocalFileState(
+      modifiedMs: stat.modified.millisecondsSinceEpoch,
+      byteSize: stat.size,
+    );
+  }
+
+  String _cacheKeyFor({
+    required String localPath,
+    required String storagePath,
+    required int modifiedMs,
+    required int byteSize,
+  }) {
+    return '$storagePath|$localPath|$modifiedMs|$byteSize';
   }
 
   Future<void> _safeDelete(File file) async {
@@ -212,4 +294,14 @@ class _CachedUpload {
 
   final String fullPath;
   final String downloadUrl;
+}
+
+class _LocalFileState {
+  const _LocalFileState({
+    required this.modifiedMs,
+    required this.byteSize,
+  });
+
+  final int modifiedMs;
+  final int byteSize;
 }

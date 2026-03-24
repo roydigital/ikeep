@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,12 +9,22 @@ import 'routing/app_router.dart';
 import 'theme/app_theme.dart';
 import 'widgets/google_play_billing_listener.dart';
 
-class IkeepApp extends ConsumerWidget {
+class IkeepApp extends ConsumerStatefulWidget {
   const IkeepApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(authSessionBootstrapProvider);
+  ConsumerState<IkeepApp> createState() => _IkeepAppState();
+}
+
+class _IkeepAppState extends ConsumerState<IkeepApp> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(ref.read(authSessionBootstrapProvider.future));
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final settings = ref.watch(settingsProvider);
 
