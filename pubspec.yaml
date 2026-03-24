@@ -1,7 +1,7 @@
 name: ikeep
 description: "Where Did I Keep It? — A smart item location tracker"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -57,6 +57,7 @@ dependencies:
   permission_handler: ^11.3.1
   flutter_image_compress: ^2.4.0
   url_launcher: ^6.3.1
+  in_app_purchase: ^3.2.0
 
   # UI
   flutter_animate: ^4.5.2

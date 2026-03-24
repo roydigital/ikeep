@@ -5,6 +5,7 @@ import 'providers/auth_providers.dart';
 import 'providers/settings_provider.dart';
 import 'routing/app_router.dart';
 import 'theme/app_theme.dart';
+import 'widgets/google_play_billing_listener.dart';
 
 class IkeepApp extends ConsumerWidget {
   const IkeepApp({super.key});
@@ -24,26 +25,28 @@ class IkeepApp extends ConsumerWidget {
       routerConfig: router,
       builder: (context, child) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      const Color(0xFF040124), 
-                      const Color(0xFF130A38), 
-                      const Color(0xFF0C0A20)
-                    ]
-                  : [
-                      const Color(0xFFF7F5FC), 
-                      const Color(0xFFEBE6F5), 
-                      const Color(0xFFFFFFFF)
-                    ],
-              stops: const [0.0, 0.5, 1.0],
+        return GooglePlayBillingListener(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [
+                        const Color(0xFF040124),
+                        const Color(0xFF130A38),
+                        const Color(0xFF0C0A20)
+                      ]
+                    : [
+                        const Color(0xFFF7F5FC),
+                        const Color(0xFFEBE6F5),
+                        const Color(0xFFFFFFFF)
+                      ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
             ),
+            child: child ?? const SizedBox.shrink(),
           ),
-          child: child,
         );
       },
     );

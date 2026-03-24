@@ -296,8 +296,33 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                   borderRadius: BorderRadius.circular(20),
                                   child: AspectRatio(
                                     aspectRatio: 1,
-                                    child:
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
                                         _img(selected!, BoxFit.cover, isDark),
+                                        Positioned(
+                                          top: 12,
+                                          right: 12,
+                                          child: Material(
+                                            color: Colors.black54,
+                                            shape: const CircleBorder(),
+                                            child: IconButton(
+                                              tooltip: 'Delete photo',
+                                              onPressed: _activeOp != null
+                                                  ? null
+                                                  : () => _deleteImage(
+                                                        item,
+                                                        selected,
+                                                      ),
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1606,6 +1631,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   }
 
   Future<void> _addImage(Item item) async {
+    if (_activeOp != null) return;
     if (!await _canAddAnotherImage(item)) return;
 
     final source = await _chooseImageSource();
@@ -1625,8 +1651,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (!mounted) return;
     setState(() => _activeOpText = 'Saving photo...');
     final updated = item.copyWith(imagePaths: [...item.imagePaths, picked]);
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    final error = await _persistItemImageChange(updated);
     if (!mounted) return;
     _endOp();
     if (error != null) {
@@ -1639,6 +1664,69 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     ref.invalidate(singleItemProvider(widget.uuid));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Photo added'), backgroundColor: AppColors.success),
+    );
+  }
+
+  Future<void> _deleteImage(Item item, String imagePath) async {
+    if (_activeOp != null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete photo?'),
+        content: const Text(
+          'This will remove the photo from this item and permanently delete its cloud copy.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    _startOp('Deleting photo...');
+    final updatedPaths = [...item.imagePaths]..remove(imagePath);
+    final updated = item.copyWith(imagePaths: updatedPaths);
+    final error = await _persistItemImageChange(updated);
+    if (!mounted) return;
+
+    if (error != null) {
+      _endOp();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+      return;
+    }
+
+    if (!imagePath.startsWith('http')) {
+      await ref.read(imageServiceProvider).deleteImage(imagePath);
+    }
+    if (!mounted) return;
+
+    setState(() {
+      if (updatedPaths.isEmpty) {
+        _selectedImage = 0;
+      } else if (_selectedImage >= updatedPaths.length) {
+        _selectedImage = updatedPaths.length - 1;
+      }
+    });
+    _endOp();
+    ref.invalidate(singleItemProvider(widget.uuid));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Photo deleted'),
+        backgroundColor: AppColors.success,
+      ),
     );
   }
 
@@ -1859,6 +1947,14 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
+  Future<String?> _persistItemImageChange(Item updatedItem) async {
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
+    if (!mounted || error != null) return error;
+
+    return null;
+  }
+
   String _location(Item item, {ItemLocationHistory? latestHistory}) {
     if (item.locationFullPath?.trim().isNotEmpty ?? false) {
       return item.locationFullPath!;
@@ -2023,28 +2119,6 @@ class _ItemVisibilitySectionState
     final error =
         await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
     if (!mounted) return error;
-
-    // Sync to household Firestore when item is shared with family
-    if (error == null && updatedItem.visibility == ItemVisibility.household) {
-      final syncResult = await ref
-          .read(householdSyncServiceProvider)
-          .syncLocalItemChange(updatedItem);
-      if (syncResult.hasError) {
-        return syncResult.errorMessage ?? 'Failed to sync to household';
-      }
-    }
-
-    // Remove from household Firestore when switching to private
-    if (error == null && updatedItem.visibility == ItemVisibility.private_) {
-      final previousHouseholdId = _item.householdId;
-      if (previousHouseholdId != null && previousHouseholdId.isNotEmpty) {
-        await ref.read(householdSyncServiceProvider).syncLocalDeletion(
-              itemUuid: updatedItem.uuid,
-              householdId: previousHouseholdId,
-            );
-      }
-    }
-
     return error;
   }
 

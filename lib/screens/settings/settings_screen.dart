@@ -136,6 +136,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       Uri.parse('https://roydigital.in/ikeep/contact-us.html');
   static final Uri _termsPrivacyUri =
       Uri.parse('https://roydigital.in/ikeep/terms-privacy.html');
+  static final Uri _accountDeletionUri =
+      Uri.parse('https://roydigital.in/ikeep/delete-account.html');
 
   bool _initialized = false;
   bool _darkMode = true;
@@ -520,7 +522,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                     : null,
                                 onUpgradeTap: () => PaywallScreen.show(context),
                                 plan: settings.plan,
-                                onManageTap: () => _ManageSubscriptionSheet.show(context),
+                                onManageTap: () =>
+                                    _ManageSubscriptionSheet.show(context),
                               ),
                             ),
                             const SizedBox(height: 36),
@@ -570,8 +573,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             _SupportCard(
                               onHelp: () => _openSupportPage(_helpCenterUri),
                               onContact: () => _openSupportPage(_contactUsUri),
-                              onTerms: () =>
-                                  _openSupportPage(_termsPrivacyUri),
+                              onTerms: () => _openSupportPage(_termsPrivacyUri),
+                              onDeleteAccount: () =>
+                                  _openSupportPage(_accountDeletionUri),
                             ),
                             const SizedBox(height: 52),
                             Center(
@@ -587,7 +591,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             Center(
                               child: _isLoggingOut
                                   ? Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 8),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -596,7 +601,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                             height: 16,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
-                                              color: AppColors.error.withValues(alpha: 0.7),
+                                              color: AppColors.error
+                                                  .withValues(alpha: 0.7),
                                             ),
                                           ),
                                           const SizedBox(width: 10),
@@ -838,8 +844,8 @@ class _AccountCard extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 'Google account connected',
-                                style: TextStyle(
-                                    color: _kTextMuted, fontSize: 14),
+                                style:
+                                    TextStyle(color: _kTextMuted, fontSize: 14),
                               ),
                             ),
                           ],
@@ -897,10 +903,10 @@ class _CloudBackupSummary extends StatelessWidget {
       isPremium: isPremium,
       backedUpCount: backedUpCount,
     );
-    final progressColor = backedUpCount >=
-            cloudBackupWarningThresholdFor(isPremium)
-        ? AppColors.warning
-        : _kAccent;
+    final progressColor =
+        backedUpCount >= cloudBackupWarningThresholdFor(isPremium)
+            ? AppColors.warning
+            : _kAccent;
 
     if (isPremium) {
       return Row(
@@ -961,7 +967,8 @@ class _CloudBackupSummary extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.settings, color: AppColors.success, size: 14),
+                  const Icon(Icons.settings,
+                      color: AppColors.success, size: 14),
                 ],
               ),
             ),
@@ -1036,40 +1043,59 @@ class _GoogleSignInButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 44,
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onPressed,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                CircleAvatar(
-                  radius: 12,
-                  backgroundColor: Colors.white,
-                  child: Text(
-                    'G',
-                    style: TextStyle(
-                      color: Color(0xFF4285F4),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
+      height: 46,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFDADCE0), width: 1.2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+            BoxShadow(
+              color: Color(0x0D000000),
+              blurRadius: 2,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onPressed,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  CircleAvatar(
+                    radius: 12,
+                    backgroundColor: Colors.white,
+                    child: Text(
+                      'G',
+                      style: TextStyle(
+                        color: Color(0xFF4285F4),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  'Google Sign In',
-                  style: TextStyle(
-                    color: Color(0xFF1F1F1F),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                  SizedBox(width: 10),
+                  Text(
+                    'Google Sign In',
+                    style: TextStyle(
+                      color: Color(0xFF1F1F1F),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1472,11 +1498,13 @@ class _SupportCard extends StatelessWidget {
     required this.onHelp,
     required this.onContact,
     required this.onTerms,
+    required this.onDeleteAccount,
   });
 
   final VoidCallback onHelp;
   final VoidCallback onContact;
   final VoidCallback onTerms;
+  final VoidCallback onDeleteAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -1507,6 +1535,31 @@ class _SupportCard extends StatelessWidget {
             title: 'Terms & Privacy',
             trailing: Icons.chevron_right,
             onTap: onTerms,
+          ),
+          Divider(height: 1, color: _kBorder),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onDeleteAccount,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  foregroundColor: _kTextMuted,
+                ),
+                child: const Text(
+                  'Account deletion',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.underline,
+                    decorationThickness: 1.2,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -1594,7 +1647,7 @@ class _IkeepSwitch extends StatelessWidget {
   }
 }
 
-class _ManageSubscriptionSheet extends ConsumerWidget {
+class _ManageSubscriptionSheet extends ConsumerStatefulWidget {
   const _ManageSubscriptionSheet();
 
   static Future<void> show(BuildContext context) {
@@ -1607,95 +1660,77 @@ class _ManageSubscriptionSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ManageSubscriptionSheet> createState() =>
+      _ManageSubscriptionSheetState();
+}
+
+class _ManageSubscriptionSheetState
+    extends ConsumerState<_ManageSubscriptionSheet> {
+  bool _isRestoring = false;
+  bool _isOpeningManagePage = false;
+
+  Future<void> _restorePurchases() async {
+    final billingService = ref.read(googlePlayBillingServiceProvider);
+    if (!billingService.isSupportedPlatform) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Google Play subscription restore works only on Android.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isRestoring = true);
+    try {
+      await billingService.restorePurchases();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Restore requested. If an active subscription exists, it will sync shortly.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to restore purchases right now.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRestoring = false);
+      }
+    }
+  }
+
+  Future<void> _openManagePage() async {
+    setState(() => _isOpeningManagePage = true);
+    final opened = await launchUrl(
+      Uri.parse(googlePlayManageSubscriptionsUrl),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted) return;
+    setState(() => _isOpeningManagePage = false);
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Unable to open Google Play subscriptions.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final billingService = ref.watch(googlePlayBillingServiceProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final textSecondary =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-    final border = isDark ? AppColors.borderDark : AppColors.borderLight;
-
-    Widget planOption(AppPlan plan, String price, {bool isCurrent = false}) {
-      final isSelected = plan == settings.plan;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: InkWell(
-          onTap: isSelected
-              ? null
-              : () async {
-                  await ref.read(settingsProvider.notifier).setPlan(plan);
-                  if (context.mounted) Navigator.pop(context);
-                },
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? AppColors.primary.withValues(alpha: 0.1)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isSelected
-                    ? AppColors.primary
-                    : border.withValues(alpha: 0.5),
-                width: isSelected ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        plan.label,
-                        style: TextStyle(
-                          color: textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        price,
-                        style: TextStyle(
-                          color: textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isSelected)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      'CURRENT',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  )
-                else
-                  Icon(
-                    plan.index > settings.plan.index
-                        ? Icons.upgrade
-                        : Icons.info_outline,
-                    color: AppColors.primary,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
 
     return SafeArea(
       top: false,
@@ -1733,17 +1768,47 @@ class _ManageSubscriptionSheet extends ConsumerWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Upgrade or change your plan at any time.',
+                      'Google Play handles subscription changes, renewals, and cancellations for Ikeep Plus.',
                       style: TextStyle(
                         color: textSecondary,
                         fontSize: 15,
                       ),
                     ),
                     const SizedBox(height: 24),
-                    planOption(AppPlan.monthly, '\$1.99 / month'),
-                    planOption(AppPlan.yearly, '\$14.99 / year'),
-                    planOption(AppPlan.lifetime, '\$29.99 / once'),
-                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Current plan',
+                            style: TextStyle(
+                              color: textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            settings.plan.label,
+                            style: TextStyle(
+                              color: textPrimary,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       premiumCloudBackupFairUsageDisclaimer,
                       style: TextStyle(
@@ -1753,45 +1818,82 @@ class _ManageSubscriptionSheet extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Divider(),
-                    const SizedBox(height: 8),
-                    Center(
-                      child: TextButton(
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Cancel Subscription?'),
-                              content: const Text(
-                                'You will lose access to unlimited cloud backups and other premium features.',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(ctx, false),
-                                  child: const Text('Keep Plan'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  child: const Text('Cancel Plan',
-                                      style: TextStyle(color: AppColors.error)),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm == true) {
-                            await ref
-                                .read(settingsProvider.notifier)
-                                .setPlan(AppPlan.free);
-                            if (context.mounted) Navigator.pop(context);
-                          }
-                        },
-                        child: const Text(
-                          'Cancel Subscription',
-                          style: TextStyle(
-                            color: AppColors.error,
-                            fontWeight: FontWeight.w600,
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed:
+                            _isOpeningManagePage ? null : _openManagePage,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
+                        icon: _isOpeningManagePage
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.open_in_new_rounded),
+                        label: const Text(
+                          'Manage in Google Play',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _isRestoring ? null : _restorePurchases,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          side: BorderSide(
+                            color: AppColors.primary.withValues(alpha: 0.32),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: _isRestoring
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.restore_rounded),
+                        label: const Text(
+                          'Restore Purchases',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    if (!billingService.isSupportedPlatform) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'Google Play subscription management is available only on Android devices.',
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Text(
+                      googlePlaySubscriptionTestingNotice,
+                      style: TextStyle(
+                        color: textSecondary.withValues(alpha: 0.72),
+                        fontSize: 12,
+                        height: 1.35,
                       ),
                     ),
                   ],

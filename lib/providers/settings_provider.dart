@@ -98,6 +98,19 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     _load();
   }
 
+  AppPlan _storedPlanFromPrefs(SharedPreferences prefs) {
+    final storedIndex = prefs.getInt(AppSettingsKeys.plan);
+    if (storedIndex != null &&
+        storedIndex >= 0 &&
+        storedIndex < AppPlan.values.length) {
+      return AppPlan.values[storedIndex];
+    }
+
+    return prefs.getBool(AppSettingsKeys.isPremium) == true
+        ? AppPlan.monthly
+        : AppPlan.free;
+  }
+
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final themeModeIndex =
@@ -118,10 +131,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           prefs.getBool(AppSettingsKeys.lentReminders) ?? true,
       nearbyEnabled: prefs.getBool(AppSettingsKeys.nearbyEnabled) ?? false,
       cachedLocality: prefs.getString(AppSettingsKeys.cachedLocality),
-      plan: AppPlan.values[prefs.getInt(AppSettingsKeys.plan) ??
-          (prefs.getBool(AppSettingsKeys.isPremium) == true
-              ? AppPlan.monthly.index
-              : AppPlan.free.index)],
+      plan: _storedPlanFromPrefs(prefs),
     );
   }
 

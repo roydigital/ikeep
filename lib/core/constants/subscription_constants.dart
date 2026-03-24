@@ -5,6 +5,17 @@ const int premiumCloudBackupWarningThreshold = 900;
 const int freeItemImageLimit = 1;
 const int premiumItemImageLimit = 3;
 
+const String googlePlayMonthlySubscriptionId = 'ikeep_plus_monthly';
+const String googlePlayYearlySubscriptionId = 'ikeep_plus_yearly';
+const String monthlyPlanFallbackPrice = '\$1.99';
+const String yearlyPlanFallbackPrice = '\$14.99';
+const String googlePlayManageSubscriptionsUrl =
+    'https://play.google.com/store/account/subscriptions?package=in.roydigital.ikeep';
+const String googlePlaySubscriptionSetupNotice =
+    'Replace the placeholder Google Play product IDs with your real Play Console subscription product IDs before release.';
+const String googlePlaySubscriptionTestingNotice =
+    'Google Play subscriptions only work on Android builds installed from a Play test track using licensed tester accounts.';
+
 const String premiumCloudBackupFeatureLabel = 'Unlimited Cloud Backups';
 const String premiumCloudBackupFairUsageDisclaimer =
     'Fair usage applies. Online backup supports up to 1000 items.';

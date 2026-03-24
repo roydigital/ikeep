@@ -229,13 +229,9 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
         return failure.message;
       }
 
-      final syncResult =
-          await _ref.read(householdSyncServiceProvider).syncLocalItemChange(updated);
-      _ref.read(syncStatusProvider.notifier).state = syncResult;
-
       _invalidateItemState(updated.uuid);
       state = state.copyWith(isLoading: false, clearError: true);
-      return syncResult.hasError ? syncResult.errorMessage : null;
+      return null;
     } catch (e) {
       final message = 'Failed to update item visibility: $e';
       state = state.copyWith(isLoading: false, lastError: message);
@@ -269,13 +265,9 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
         return failure.message;
       }
 
-      final syncResult =
-          await _ref.read(householdSyncServiceProvider).syncLocalItemChange(updated);
-      _ref.read(syncStatusProvider.notifier).state = syncResult;
-
       _invalidateItemState(updated.uuid);
       state = state.copyWith(isLoading: false, clearError: true);
-      return syncResult.hasError ? syncResult.errorMessage : null;
+      return null;
     } catch (e) {
       final message = 'Failed to update shared item location: $e';
       state = state.copyWith(isLoading: false, lastError: message);

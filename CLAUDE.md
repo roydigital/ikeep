@@ -66,7 +66,7 @@ lib/
 ├── core/
 │   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants, subscription_constants
 │   ├── errors/                   # app_exception.dart, failure.dart
-│   └── utils/                    # uuid_generator, date_formatter, path_utils, fuzzy_search
+│   └── utils/                    # uuid_generator, path_utils, fuzzy_search
 │
 ├── domain/
 │   └── models/
@@ -114,7 +114,6 @@ lib/
 │   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, etc.
 │   ├── household_providers.dart  # Household members, shared items, borrow requests
 │   ├── home_tour_provider.dart   # HomeTourController, ItemListingTourController, RoomsTourController, SettingsTourController — showcaseview tour state
-│   ├── borrow_request_providers.dart # Stub — social borrow requests currently disabled
 │   ├── sync_providers.dart       # SyncService providers
 │   └── ml_label_providers.dart   # ML label providers
 │
@@ -157,10 +156,8 @@ lib/
 └── widgets/
     ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings
     ├── adaptive_image.dart           # Loads both local File and remote Network images with fallback handling
-    ├── app_info_tooltip.dart         # Info icon that shows modal bottom sheet with title + description
-    ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + _AppShowcaseActionButton for showcaseview
-    ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
-    └── item_visibility_toggle.dart   # Toggle widget for private/household visibility (requires active household)
+    ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + built-in TooltipDefaultActionType buttons for showcaseview
+    └── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
 
 web_content/
 └── ikeep/
@@ -247,10 +244,10 @@ Screens / Widgets
 | `householdMemberLookupProvider` | `StateNotifierProvider<HouseholdMemberLookupController, HouseholdMemberLookupState>` | Email-based user search for adding household members |
 | `imageOptimizerServiceProvider` | `Provider<ImageOptimizerService>` | Image optimization for cloud uploads |
 | `firebaseImageUploadServiceProvider` | `Provider<FirebaseImageUploadService>` | Firebase Storage uploads with caching + optimization |
-| `homeTourControllerProvider` | `StateNotifierProvider` | Controls Home screen showcase tour state |
-| `itemListingTourControllerProvider` | `StateNotifierProvider` | Controls Item listing tour state |
-| `roomsTourControllerProvider` | `StateNotifierProvider` | Controls Rooms screen tour state |
-| `settingsTourControllerProvider` | `StateNotifierProvider` | Controls Settings screen tour state |
+| `homeTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Home screen showcase tour state |
+| `itemListingTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Item listing tour state |
+| `roomsTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Rooms screen tour state |
+| `settingsTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Settings screen tour state |
 
 ---
 
@@ -395,10 +392,10 @@ Shows a sign-in prompt if the user is not authenticated.
 - Entry point: `ikeepWorkmanagerDispatcher` (top-level function in `background_scheduler_service.dart`)
 
 ### In-App Product Tours (ShowCaseView)
-- Guided tours for first-time users on Home, Item Listing, Rooms, and Settings screens
-- Tour state tracked per-screen via `*TourController` notifiers in `home_tour_provider.dart`
+- Guided tours for first-time users on Home, Item Listing (Search), Rooms, and Settings screens
+- Tour state tracked per-screen via `*TourController` (`AutoDisposeAsyncNotifier`) in `home_tour_provider.dart`
 - Auto-triggers on first app load if tour hasn't been seen
-- Tooltip configuration via `app_showcase.dart` widget
+- Tooltip actions (Skip/Next) configured in `app_showcase.dart` using built-in `TooltipDefaultActionType` — custom widgets must NOT use `ShowCaseWidget.of(context)` inside tooltips, as they render in an overlay outside the `ShowCaseWidget` ancestor tree
 
 ### Image Upload Pipeline
 - `ImageOptimizerService` — Optimizes images before cloud upload with platform-specific format selection (`optimizeForUpload()` → `OptimizedImageResult`)

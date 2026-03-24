@@ -8,6 +8,7 @@ import 'database_provider.dart';
 import '../services/background_scheduler_service.dart';
 import '../services/firebase_image_upload_service.dart';
 import '../services/firebase_sync_service.dart';
+import '../services/google_play_billing_service.dart';
 import '../services/household_cloud_service.dart';
 import '../services/household_sync_service.dart';
 import '../services/image_optimizer_service.dart';
@@ -107,4 +108,8 @@ final nearbyCloudServiceProvider = Provider<NearbyCloudService>(
     auth: ref.watch(firebaseAuthProvider),
     firestore: ref.watch(firebaseFirestoreProvider),
   ),
+);
+
+final googlePlayBillingServiceProvider = Provider<GooglePlayBillingService>(
+  (ref) => GooglePlayBillingService(),
 );

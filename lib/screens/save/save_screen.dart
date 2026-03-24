@@ -293,6 +293,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
       body: Stack(
         children: [
@@ -480,65 +481,80 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   }
 
   Widget _buildBottomSheet(BuildContext context, bool isDark) {
+    final mediaQuery = MediaQuery.of(context);
     final sheetBg = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final topSafeMargin = mediaQuery.viewPadding.top + 12;
+    final preferredMaxHeight = mediaQuery.size.height * 0.74;
 
     return Positioned(
+      top: topSafeMargin,
       left: 0,
       right: 0,
       bottom: 0,
-      child: Container(
-        decoration: BoxDecoration(
-          color: sheetBg,
-          borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(AppDimensions.bottomSheetRadius),
-          ),
-          border: Border(
-            top: BorderSide(color: AppColors.primary.withValues(alpha: 0.2)),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 28,
-              offset: const Offset(0, -4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxSheetHeight = constraints.maxHeight < preferredMaxHeight
+              ? constraints.maxHeight
+              : preferredMaxHeight;
+
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppDimensions.bottomSheetRadius),
+                ),
+                border: Border(
+                  top: BorderSide(
+                      color: AppColors.primary.withValues(alpha: 0.2)),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 28,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Handle
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 4),
+                      child: Container(
+                        width: 48,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white24 : Colors.black12,
+                          borderRadius:
+                              BorderRadius.circular(AppDimensions.radiusFull),
+                        ),
+                      ),
+                    ),
+                    // Form
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: maxSheetHeight),
+                      child: SingleChildScrollView(
+                        padding: EdgeInsets.only(
+                          left: 24,
+                          right: 24,
+                          top: 8,
+                          bottom: mediaQuery.viewInsets.bottom + 24,
+                        ),
+                        child: _buildForm(isDark),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle
-              Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 4),
-                child: Container(
-                  width: 48,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white24 : Colors.black12,
-                    borderRadius:
-                        BorderRadius.circular(AppDimensions.radiusFull),
-                  ),
-                ),
-              ),
-              // Form
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.74,
-                ),
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.only(
-                    left: 24,
-                    right: 24,
-                    top: 8,
-                    bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-                  ),
-                  child: _buildForm(isDark),
-                ),
-              ),
-            ],
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -974,10 +990,10 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       isPremium: settings.isPremium,
       backedUpCount: backedUpCount,
     );
-    final progressColor = backedUpCount >=
-            cloudBackupWarningThresholdFor(settings.isPremium)
-        ? AppColors.warning
-        : AppColors.primary;
+    final progressColor =
+        backedUpCount >= cloudBackupWarningThresholdFor(settings.isPremium)
+            ? AppColors.warning
+            : AppColors.primary;
     final helperText = _backupToCloud
         ? 'Cloud-backed items can later be shared with family members from the item details screen.'
         : 'Keep this off if the item should stay only on this device. Family sharing stays unavailable while backup is off.';
@@ -1095,8 +1111,9 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                       ? textColor
                       : secondaryColor,
                   fontSize: 12,
-                  fontWeight:
-                      _hasExpiry && _expiryDate != null ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: _hasExpiry && _expiryDate != null
+                      ? FontWeight.w600
+                      : FontWeight.w400,
                 ),
               ),
             ),
@@ -1131,8 +1148,8 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                 return GestureDetector(
                   onTap: () => setState(() => _expiryDate = targetDay),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: isSelected
                           ? AppColors.primary
@@ -1140,9 +1157,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                       borderRadius:
                           BorderRadius.circular(AppDimensions.radiusFull),
                       border: Border.all(
-                        color: isSelected
-                            ? AppColors.primary
-                            : borderColor,
+                        color: isSelected ? AppColors.primary : borderColor,
                       ),
                     ),
                     child: Text(
@@ -1161,11 +1176,10 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                 onTap: () async {
                   final picked = await showDatePicker(
                     context: context,
-                    initialDate:
-                        _expiryDate ?? DateTime.now().add(const Duration(days: 30)),
+                    initialDate: _expiryDate ??
+                        DateTime.now().add(const Duration(days: 30)),
                     firstDate: DateTime.now(),
-                    lastDate:
-                        DateTime.now().add(const Duration(days: 3650)),
+                    lastDate: DateTime.now().add(const Duration(days: 3650)),
                     helpText: 'SELECT EXPIRY DATE',
                   );
                   if (picked != null) {
