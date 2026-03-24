@@ -241,36 +241,52 @@ class HouseholdCloudService {
       final accepted = await _acceptPendingInvite(user);
       if (accepted != null) return accepted;
 
-      // No existing household or invite — create a new one
+      // No existing household or invite — create a new one using a single
+      // batched write (one network round-trip instead of three).
       final householdRef = _firestore.collection(_householdsCol).doc();
       final now = FieldValue.serverTimestamp();
-      await householdRef.set({
+      final displayName = _displayName(user);
+
+      final batch = _firestore.batch();
+
+      batch.set(householdRef, {
         'householdId': householdRef.id,
         'ownerId': user.uid,
         'ownerUid': user.uid,
         'ownerEmail': user.email,
-        'name': '${_displayName(user)}\'s household',
+        'name': '$displayName\'s household',
         'members': <String>[user.uid],
         'createdAt': now,
         'updatedAt': now,
       });
 
-      await userRef.set({
-        'uid': user.uid,
-        'email': user.email,
-        'displayName': _displayName(user),
-        'householdId': householdRef.id,
-        'isOwner': true,
-        'updatedAt': now,
-      }, SetOptions(merge: true));
-
-      await _upsertMember(
-        householdId: householdRef.id,
-        uid: user.uid,
-        email: user.email,
-        name: _displayName(user),
-        isOwner: true,
+      batch.set(
+        userRef,
+        {
+          'uid': user.uid,
+          'email': user.email,
+          'displayName': displayName,
+          'householdId': householdRef.id,
+          'isOwner': true,
+          'updatedAt': now,
+        },
+        SetOptions(merge: true),
       );
+
+      batch.set(
+        householdRef.collection(_membersSubcol).doc(user.uid),
+        {
+          'uid': user.uid,
+          'name': displayName,
+          'email': user.email?.trim().toLowerCase(),
+          'isOwner': true,
+          'joinedAt': now,
+          'updatedAt': now,
+        },
+        SetOptions(merge: true),
+      );
+
+      await batch.commit();
 
       return householdRef.id;
     } on FirebaseException catch (e) {
@@ -318,27 +334,28 @@ class HouseholdCloudService {
     }
 
     try {
-      // Prevent duplicate member
-      final existing = await _firestore
-          .collection(_householdsCol)
-          .doc(householdId)
-          .collection(_membersSubcol)
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
-      if (existing.docs.isNotEmpty) {
+      // Run both duplicate checks in parallel (independent queries).
+      final checks = await Future.wait([
+        _firestore
+            .collection(_householdsCol)
+            .doc(householdId)
+            .collection(_membersSubcol)
+            .where('email', isEqualTo: email)
+            .limit(1)
+            .get(),
+        _firestore
+            .collection(_invitesCol)
+            .where('householdId', isEqualTo: householdId)
+            .where('invitedEmail', isEqualTo: email)
+            .where('status', isEqualTo: 'pending')
+            .limit(1)
+            .get(),
+      ]);
+
+      if (checks[0].docs.isNotEmpty) {
         throw StateError('That person is already in your household');
       }
-
-      // Prevent duplicate pending invite
-      final pendingInvite = await _firestore
-          .collection(_invitesCol)
-          .where('householdId', isEqualTo: householdId)
-          .where('invitedEmail', isEqualTo: email)
-          .where('status', isEqualTo: 'pending')
-          .limit(1)
-          .get();
-      if (pendingInvite.docs.isNotEmpty) {
+      if (checks[1].docs.isNotEmpty) {
         throw StateError('An invite is already pending for this email');
       }
 
@@ -851,29 +868,48 @@ class HouseholdCloudService {
         ? nameFromInvite!
         : _displayName(user);
 
-    await _upsertMember(
-      householdId: householdId,
-      uid: user.uid,
-      email: user.email,
-      name: displayName,
-      isOwner: false,
+    // Batch all three writes into a single network round-trip.
+    final now = FieldValue.serverTimestamp();
+    final batch = _firestore.batch();
+
+    batch.set(
+      _firestore
+          .collection(_householdsCol)
+          .doc(householdId)
+          .collection(_membersSubcol)
+          .doc(user.uid),
+      {
+        'uid': user.uid,
+        'name': displayName,
+        'email': user.email?.trim().toLowerCase(),
+        'isOwner': false,
+        'joinedAt': now,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
     );
 
-    await _firestore.collection(_usersCol).doc(user.uid).set({
-      'uid': user.uid,
-      'email': user.email,
-      'displayName': displayName,
-      'householdId': householdId,
-      'isOwner': false,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    batch.set(
+      _firestore.collection(_usersCol).doc(user.uid),
+      {
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': displayName,
+        'householdId': householdId,
+        'isOwner': false,
+        'updatedAt': now,
+      },
+      SetOptions(merge: true),
+    );
 
-    await inviteDoc.reference.update({
+    batch.update(inviteDoc.reference, {
       'status': 'accepted',
       'acceptedByUid': user.uid,
-      'acceptedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'acceptedAt': now,
+      'updatedAt': now,
     });
+
+    await batch.commit();
 
     return householdId;
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import '../core/constants/subscription_constants.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -144,8 +145,12 @@ class ItemsNotifier extends StateNotifier<bool> {
   }
 
   Future<String?> updateItem(Item item) async {
-    final existingItem = await _ref.read(itemRepositoryProvider).getItem(item.uuid);
-    final preparedItem = await _prepareItem(item);
+    final existingItem =
+        await _ref.read(itemRepositoryProvider).getItem(item.uuid);
+    final preparedItem = await _prepareItemForUpdate(
+      item,
+      existingItem: existingItem,
+    );
     final failure =
         await _ref.read(itemRepositoryProvider).updateItem(preparedItem);
     if (failure != null) return failure.message;
@@ -196,8 +201,12 @@ class ItemsNotifier extends StateNotifier<bool> {
     String? movedByMemberUuid,
     String? movedByName,
   }) async {
-    final existingItem = await _ref.read(itemRepositoryProvider).getItem(item.uuid);
-    final preparedItem = await _prepareItem(item);
+    final existingItem =
+        await _ref.read(itemRepositoryProvider).getItem(item.uuid);
+    final preparedItem = await _prepareItemForUpdate(
+      item,
+      existingItem: existingItem,
+    );
     final failure = await _ref.read(itemRepositoryProvider).updateItem(
           preparedItem,
           movedByMemberUuid: movedByMemberUuid,
@@ -391,6 +400,29 @@ class ItemsNotifier extends StateNotifier<bool> {
               imagePaths: item.imagePaths,
             );
     return item.copyWith(seasonCategory: seasonCategory);
+  }
+
+  Future<Item> _prepareItemForUpdate(
+    Item item, {
+    required Item? existingItem,
+  }) async {
+    if (_needsItemPreparation(existingItem, item)) {
+      return _prepareItem(item);
+    }
+
+    return item.copyWith(
+      seasonCategory: existingItem?.seasonCategory ?? item.seasonCategory,
+    );
+  }
+
+  bool _needsItemPreparation(Item? existingItem, Item nextItem) {
+    if (existingItem == null) {
+      return true;
+    }
+
+    return existingItem.name != nextItem.name ||
+        !listEquals(existingItem.tags, nextItem.tags) ||
+        !listEquals(existingItem.imagePaths, nextItem.imagePaths);
   }
 
   void _invalidateItemLists() {

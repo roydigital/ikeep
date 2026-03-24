@@ -58,8 +58,31 @@ class ImageOptimizerService {
     }
 
     final format = _preferredFormat();
-    final attempts = <_OptimizationAttempt>[
-      _OptimizationAttempt(maxDimension: maxDimension, quality: quality),
+
+    // Try the highest quality first. Only attempt more aggressive compression
+    // if the result exceeds the target byte size. This avoids wasting CPU
+    // cycles on images that are already small enough.
+    final firstPass = await _compress(
+      sourcePath: inputPath,
+      directory: optimizedDir.path,
+      format: format,
+      maxDimension: maxDimension,
+      quality: quality,
+    );
+    if (firstPass != null) {
+      final bytes = await firstPass.length();
+      if (bytes <= targetBytes) {
+        return OptimizedImageResult(
+          file: firstPass,
+          contentType: _contentTypeFor(format),
+          extension: _extensionFor(format),
+          byteSize: bytes,
+        );
+      }
+    }
+
+    // First pass was too large (or failed) — try progressively smaller.
+    final fallbackAttempts = <_OptimizationAttempt>[
       _OptimizationAttempt(
         maxDimension: maxDimension,
         quality: quality >= 74 ? 74 : quality,
@@ -74,10 +97,10 @@ class ImageOptimizerService {
       ),
     ];
 
-    File? bestFile;
-    int? bestBytes;
+    File? bestFile = firstPass;
+    int? bestBytes = firstPass != null ? await firstPass.length() : null;
 
-    for (final attempt in attempts) {
+    for (final attempt in fallbackAttempts) {
       final candidate = await _compress(
         sourcePath: inputPath,
         directory: optimizedDir.path,
@@ -98,11 +121,7 @@ class ImageOptimizerService {
         await _safeDelete(candidate);
       }
 
-      if (bytes <= targetBytes) {
-        bestFile = candidate;
-        bestBytes = bytes;
-        break;
-      }
+      if (bytes <= targetBytes) break;
     }
 
     if (bestFile == null || bestBytes == null) {

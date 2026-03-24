@@ -467,6 +467,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _activeColors = _darkMode ? _darkColors : _lightColors;
 
     final canSave = _hasChanges(settings) && !_isSaving;
+    final isGoogleSignedIn = authUser != null;
+    final showLogoutAction = isGoogleSignedIn || _isLoggingOut;
     final statusColor = !_backupEnabled
         ? _kTextMuted
         : syncStatus.hasError
@@ -479,11 +481,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             : syncStatus.hasError
                 ? 'Error'
                 : 'Connected';
-    final lastSyncedText = authUser != null &&
-            _backupEnabled &&
-            !_canLoadRemoteSyncMetadata
-        ? 'Loading...'
-        : _formatLastSynced(lastSynced);
+    final lastSyncedText =
+        authUser != null && _backupEnabled && !_canLoadRemoteSyncMetadata
+            ? 'Loading...'
+            : _formatLastSynced(lastSynced);
     return ShowCaseWidget(
       blurValue: 1.5,
       enableAutoScroll: true,
@@ -549,9 +550,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 isUsageLoading: backedUpCountAsync.isLoading,
                                 displayName: authUser?.displayName,
                                 photoUrl: authUser?.photoURL,
-                                isGoogleSignedIn: authUser != null,
+                                isGoogleSignedIn: isGoogleSignedIn,
                                 isSigningIn: _isSigningIn,
-                                onGoogleSignInTap: authUser == null
+                                onGoogleSignInTap: !isGoogleSignedIn
                                     ? _handleGoogleSignIn
                                     : null,
                                 onUpgradeTap: () => PaywallScreen.show(context),
@@ -621,48 +622,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 18),
-                            Center(
-                              child: _isLoggingOut
-                                  ? Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 8),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: AppColors.error
-                                                  .withValues(alpha: 0.7),
+                            if (showLogoutAction) ...[
+                              const SizedBox(height: 18),
+                              Center(
+                                child: _isLoggingOut
+                                    ? Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: AppColors.error
+                                                    .withValues(alpha: 0.7),
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            'Logging out...',
-                                            style: TextStyle(
-                                              color: AppColors.error,
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w500,
+                                            const SizedBox(width: 10),
+                                            Text(
+                                              'Logging out...',
+                                              style: TextStyle(
+                                                color: AppColors.error,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
+                                          ],
+                                        ),
+                                      )
+                                    : TextButton(
+                                        onPressed: _handleLogout,
+                                        child: const Text(
+                                          'Log Out',
+                                          style: TextStyle(
+                                            color: AppColors.error,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w500,
                                           ),
-                                        ],
-                                      ),
-                                    )
-                                  : TextButton(
-                                      onPressed: _handleLogout,
-                                      child: const Text(
-                                        'Log Out',
-                                        style: TextStyle(
-                                          color: AppColors.error,
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
-                                    ),
-                            ),
+                              ),
+                            ],
                           ],
                         ),
                       ),

@@ -30,104 +30,135 @@ class FirebaseImageUploadService {
       return const [];
     }
 
-    final downloadUrls = <String>[];
-    final keepStoragePaths = <String>{};
-
+    // Process each image slot in parallel using Future.wait.
+    final futures = <Future<_UploadSlotResult>>[];
     for (var index = 0; index < imagePaths.length; index++) {
-      final path = imagePaths[index];
-      if (path.trim().isEmpty) continue;
-
-      if (PathUtils.isRemotePath(path)) {
-        downloadUrls.add(path);
-        final fullPath = _tryResolveStoragePath(path);
-        if (fullPath != null) keepStoragePaths.add(fullPath);
-        continue;
-      }
-
-      final storagePath = _storagePathFor(
+      futures.add(_uploadSingleImage(
         userId: userId,
         itemUuid: itemUuid,
         index: index,
-        extension: _optimizer.preferredUploadExtension,
-      );
-      final ref = _storage.ref().child(storagePath);
-      final localFileState = await _localFileState(path);
-      final cacheKey = localFileState == null
-          ? null
-          : _cacheKeyFor(
-              localPath: path,
-              storagePath: storagePath,
-              modifiedMs: localFileState.modifiedMs,
-              byteSize: localFileState.byteSize,
-            );
-      final cached = cacheKey == null ? null : _uploadCache[cacheKey];
-      if (cached != null) {
-        keepStoragePaths.add(cached.fullPath);
-        downloadUrls.add(cached.downloadUrl);
-        continue;
+        path: imagePaths[index],
+      ));
+    }
+    final results = await Future.wait(futures);
+
+    final downloadUrls = <String>[];
+    final keepStoragePaths = <String>{};
+    for (final result in results) {
+      if (result.downloadUrl != null) {
+        downloadUrls.add(result.downloadUrl!);
       }
-
-      final reused = localFileState == null
-          ? null
-          : await _tryReuseExistingUpload(
-              ref: ref,
-              cacheKey: cacheKey,
-              localFileState: localFileState,
-            );
-      if (reused != null) {
-        keepStoragePaths.add(reused.fullPath);
-        downloadUrls.add(reused.downloadUrl);
-        continue;
-      }
-
-      final optimized = await _optimizer.optimizeForUpload(path);
-      try {
-        await ref.putFile(
-          optimized.file,
-          SettableMetadata(
-            contentType: optimized.contentType,
-            cacheControl: 'public,max-age=31536000',
-            customMetadata: {
-              'optimized': 'true',
-              'optimizedBytes': optimized.byteSize.toString(),
-              if (localFileState != null) ...{
-                _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
-                _sourceBytesKey: localFileState.byteSize.toString(),
-              },
-            },
-          ),
-        );
-
-        keepStoragePaths.add(ref.fullPath);
-        final downloadUrl = await ref.getDownloadURL();
-        downloadUrls.add(downloadUrl);
-        if (cacheKey != null) {
-          _uploadCache[cacheKey] = _CachedUpload(
-            fullPath: ref.fullPath,
-            downloadUrl: downloadUrl,
-          );
-        }
-      } catch (e) {
-        // Firebase Storage may throw "No object exists at the desired
-        // reference" when the item was never uploaded before or the
-        // storage object was removed externally. Skip this image rather
-        // than failing the entire sync.
-        if (!_isMissingObjectError(e)) rethrow;
-        debugPrint(
-          'FirebaseImageUploadService: skipped image $index – $e',
-        );
-      } finally {
-        await _safeDelete(optimized.file);
+      if (result.storagePath != null) {
+        keepStoragePaths.add(result.storagePath!);
       }
     }
 
-    await _pruneUnexpectedImages(
+    // Prune stale images in the background — no need to block the caller.
+    _pruneUnexpectedImages(
       userId: userId,
       itemUuid: itemUuid,
       keepStoragePaths: keepStoragePaths,
     );
 
     return downloadUrls;
+  }
+
+  /// Handles a single image slot: cache check → reuse check → optimize →
+  /// upload. Fully self-contained so multiple slots run concurrently.
+  Future<_UploadSlotResult> _uploadSingleImage({
+    required String userId,
+    required String itemUuid,
+    required int index,
+    required String path,
+  }) async {
+    if (path.trim().isEmpty) return const _UploadSlotResult();
+
+    // Already a remote URL — nothing to upload.
+    if (PathUtils.isRemotePath(path)) {
+      final fullPath = _tryResolveStoragePath(path);
+      return _UploadSlotResult(downloadUrl: path, storagePath: fullPath);
+    }
+
+    final storagePath = _storagePathFor(
+      userId: userId,
+      itemUuid: itemUuid,
+      index: index,
+      extension: _optimizer.preferredUploadExtension,
+    );
+    final ref = _storage.ref().child(storagePath);
+    final localFileState = await _localFileState(path);
+    final cacheKey = localFileState == null
+        ? null
+        : _cacheKeyFor(
+            localPath: path,
+            storagePath: storagePath,
+            modifiedMs: localFileState.modifiedMs,
+            byteSize: localFileState.byteSize,
+          );
+
+    // 1. In-memory cache hit.
+    final cached = cacheKey == null ? null : _uploadCache[cacheKey];
+    if (cached != null) {
+      return _UploadSlotResult(
+        downloadUrl: cached.downloadUrl,
+        storagePath: cached.fullPath,
+      );
+    }
+
+    // 2. Reuse existing upload on Firebase Storage.
+    final reused = localFileState == null
+        ? null
+        : await _tryReuseExistingUpload(
+            ref: ref,
+            cacheKey: cacheKey,
+            localFileState: localFileState,
+          );
+    if (reused != null) {
+      return _UploadSlotResult(
+        downloadUrl: reused.downloadUrl,
+        storagePath: reused.fullPath,
+      );
+    }
+
+    // 3. Optimize and upload.
+    final optimized = await _optimizer.optimizeForUpload(path);
+    try {
+      await ref.putFile(
+        optimized.file,
+        SettableMetadata(
+          contentType: optimized.contentType,
+          cacheControl: 'public,max-age=31536000',
+          customMetadata: {
+            'optimized': 'true',
+            'optimizedBytes': optimized.byteSize.toString(),
+            if (localFileState != null) ...{
+              _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
+              _sourceBytesKey: localFileState.byteSize.toString(),
+            },
+          },
+        ),
+      );
+
+      final downloadUrl = await ref.getDownloadURL();
+      if (cacheKey != null) {
+        _uploadCache[cacheKey] = _CachedUpload(
+          fullPath: ref.fullPath,
+          downloadUrl: downloadUrl,
+        );
+      }
+      return _UploadSlotResult(
+        downloadUrl: downloadUrl,
+        storagePath: ref.fullPath,
+      );
+    } catch (e) {
+      if (!_isMissingObjectError(e)) rethrow;
+      debugPrint(
+        'FirebaseImageUploadService: skipped image $index – $e',
+      );
+      return const _UploadSlotResult();
+    } finally {
+      await _safeDelete(optimized.file);
+    }
   }
 
   Future<void> deleteItemImages({
@@ -137,13 +168,14 @@ class FirebaseImageUploadService {
     try {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
       final list = await folder.listAll();
-      for (final ref in list.items) {
+      // Delete all images in parallel.
+      await Future.wait(list.items.map((ref) async {
         try {
           await ref.delete();
         } catch (e) {
           if (!_isMissingObjectError(e)) rethrow;
         }
-      }
+      }));
     } catch (e) {
       if (!_isMissingObjectError(e)) rethrow;
     }
@@ -161,15 +193,16 @@ class FirebaseImageUploadService {
     final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
     try {
       final list = await folder.listAll();
-      for (final ref in list.items) {
-        if (!keepStoragePaths.contains(ref.fullPath)) {
-          try {
-            await ref.delete();
-          } catch (e) {
-            if (!_isMissingObjectError(e)) rethrow;
-          }
+      final toDelete =
+          list.items.where((ref) => !keepStoragePaths.contains(ref.fullPath));
+      // Delete stale images in parallel.
+      await Future.wait(toDelete.map((ref) async {
+        try {
+          await ref.delete();
+        } catch (e) {
+          if (!_isMissingObjectError(e)) rethrow;
         }
-      }
+      }));
     } catch (e) {
       if (!_isMissingObjectError(e)) {
         debugPrint('FirebaseImageUploadService prune error: $e');
@@ -284,6 +317,13 @@ class FirebaseImageUploadService {
       // Best-effort temporary file cleanup.
     }
   }
+}
+
+class _UploadSlotResult {
+  const _UploadSlotResult({this.downloadUrl, this.storagePath});
+
+  final String? downloadUrl;
+  final String? storagePath;
 }
 
 class _CachedUpload {

@@ -80,15 +80,19 @@ class FirebaseSyncService implements SyncService {
 
       final now = FieldValue.serverTimestamp();
       final syncedAt = DateTime.now();
-      final uploadedImageUrls = await _imageUploadService.uploadItemImages(
-        userId: user.uid,
-        itemUuid: item.uuid,
-        imagePaths: item.imagePaths,
-      );
 
-      if (ensureUserDocument) {
-        await _ensureUserDocument(user);
-      }
+      // Run image uploads and user-doc check in parallel — they are
+      // independent network calls.
+      final results = await Future.wait([
+        _imageUploadService.uploadItemImages(
+          userId: user.uid,
+          itemUuid: item.uuid,
+          imagePaths: item.imagePaths,
+        ),
+        if (ensureUserDocument) _ensureUserDocument(user),
+      ]);
+      final uploadedImageUrls = results[0] as List<String>;
+
       await _itemsRef.doc(item.uuid).set({
         ...item
             .copyWith(
@@ -191,6 +195,9 @@ class FirebaseSyncService implements SyncService {
     }
   }
 
+  /// Maximum number of items synced to Firestore concurrently.
+  static const _syncBatchSize = 5;
+
   @override
   Future<SyncResult> fullSync() async {
     final user = _user;
@@ -200,13 +207,22 @@ class FirebaseSyncService implements SyncService {
     }
 
     try {
-      await _ensureUserDocument(user);
-      await _locationDao.recalculateUsageCounts();
+      // Kick off all independent fetches in parallel.
+      final results = await Future.wait([
+        _ensureUserDocument(user),       // 0
+        _locationDao.recalculateUsageCounts(), // 1
+        _locationDao.getAllLocations(),   // 2
+        _itemDao.getAllItems(),           // 3
+        _locationsRef.get(),             // 4
+        _itemsRef.get(),                 // 5
+      ]);
 
-      final localLocations = await _locationDao.getAllLocations();
-      final localItems = await _itemDao.getAllItems();
-      final remoteLocationsSnapshot = await _locationsRef.get();
-      final remoteItemsSnapshot = await _itemsRef.get();
+      final localLocations = results[2] as List<LocationModel>;
+      final localItems = results[3] as List<Item>;
+      final remoteLocationsSnapshot =
+          results[4] as QuerySnapshot<Map<String, dynamic>>;
+      final remoteItemsSnapshot =
+          results[5] as QuerySnapshot<Map<String, dynamic>>;
 
       final remoteLocations = {
         for (final doc in remoteLocationsSnapshot.docs) doc.id: doc.data(),
@@ -215,24 +231,30 @@ class FirebaseSyncService implements SyncService {
         for (final doc in remoteItemsSnapshot.docs) doc.id: doc.data(),
       };
 
+      // ── Locations: batch writes to Firestore, parallel local inserts ──
+      final locationBatch = _firestore.batch();
+      final localLocationInserts = <Future<void>>[];
+      var locationBatchCount = 0;
+
       for (final location in localLocations) {
         final remoteData = remoteLocations[location.uuid];
         if (remoteData == null) {
-          await _syncLocationInternal(location, ensureUserDocument: false);
+          _addLocationToBatch(locationBatch, location, user);
+          locationBatchCount++;
           continue;
         }
-
-        if (_isLocationInSync(location, remoteData)) {
-          continue;
-        }
+        if (_isLocationInSync(location, remoteData)) continue;
 
         final remoteUpdatedAt = _parseDateTime(remoteData['updatedAt']);
         final localUpdatedAt = location.createdAt;
         if (remoteUpdatedAt != null &&
             remoteUpdatedAt.isAfter(localUpdatedAt)) {
-          await _locationDao.insertLocation(_locationFromFirestore(remoteData));
+          localLocationInserts.add(
+            _locationDao.insertLocation(_locationFromFirestore(remoteData)),
+          );
         } else {
-          await _syncLocationInternal(location, ensureUserDocument: false);
+          _addLocationToBatch(locationBatch, location, user);
+          locationBatchCount++;
         }
       }
 
@@ -240,24 +262,36 @@ class FirebaseSyncService implements SyncService {
         final existsLocally =
             localLocations.any((loc) => loc.uuid == remoteEntry.key);
         if (!existsLocally) {
-          await _locationDao
-              .insertLocation(_locationFromFirestore(remoteEntry.value));
+          localLocationInserts.add(
+            _locationDao
+                .insertLocation(_locationFromFirestore(remoteEntry.value)),
+          );
         }
       }
+
+      // Commit Firestore batch and local inserts in parallel.
+      await Future.wait([
+        if (locationBatchCount > 0) locationBatch.commit(),
+        ...localLocationInserts,
+      ]);
+
+      // ── Items: process in parallel batches of _syncBatchSize ──
+      // Separate items into categories to avoid unnecessary sequential waits.
+      final itemsToUpload = <Item>[];
+      final itemsToDelete = <String>[];
+      final itemsToImportLocally = <Map<String, dynamic>>[];
 
       for (final item in localItems) {
         final remoteData = remoteItems[item.uuid];
         final localUpdatedAt = item.updatedAt ?? item.savedAt;
 
         if (!item.isBackedUp) {
-          if (remoteData != null) {
-            await deleteRemoteItem(item.uuid);
-          }
+          if (remoteData != null) itemsToDelete.add(item.uuid);
           continue;
         }
 
         if (remoteData == null) {
-          await _syncItemInternal(item, ensureUserDocument: false);
+          itemsToUpload.add(item);
           continue;
         }
 
@@ -272,9 +306,9 @@ class FirebaseSyncService implements SyncService {
         }
         if (remoteUpdatedAt != null &&
             remoteUpdatedAt.isAfter(localUpdatedAt)) {
-          await _itemDao.insertItem(_itemFromFirestore(remoteData));
+          itemsToImportLocally.add(remoteData);
         } else {
-          await _syncItemInternal(item, ensureUserDocument: false);
+          itemsToUpload.add(item);
         }
       }
 
@@ -282,8 +316,34 @@ class FirebaseSyncService implements SyncService {
         final existsLocally =
             localItems.any((item) => item.uuid == remoteEntry.key);
         if (!existsLocally) {
-          await _itemDao.insertItem(_itemFromFirestore(remoteEntry.value));
+          itemsToImportLocally.add(remoteEntry.value);
         }
+      }
+
+      // Import remote-only items locally (pure SQLite, fast).
+      if (itemsToImportLocally.isNotEmpty) {
+        await Future.wait(
+          itemsToImportLocally
+              .map((data) => _itemDao.insertItem(_itemFromFirestore(data))),
+        );
+      }
+
+      // Delete un-backed-up items from remote (parallel).
+      if (itemsToDelete.isNotEmpty) {
+        await Future.wait(
+          itemsToDelete.map((uuid) => deleteRemoteItem(uuid)),
+        );
+      }
+
+      // Upload items in controlled parallel batches to avoid flooding the
+      // network. Each _syncItemInternal already parallelizes its own image
+      // uploads, so _syncBatchSize keeps total concurrency reasonable.
+      for (var i = 0; i < itemsToUpload.length; i += _syncBatchSize) {
+        final batch = itemsToUpload.skip(i).take(_syncBatchSize);
+        await Future.wait(
+          batch.map((item) =>
+              _syncItemInternal(item, ensureUserDocument: false)),
+        );
       }
 
       await _locationDao.recalculateUsageCounts();
@@ -302,6 +362,25 @@ class FirebaseSyncService implements SyncService {
       debugPrint('FirebaseSyncService.fullSync error: $e');
       return SyncResult.error(e.toString());
     }
+  }
+
+  /// Adds a location write to a Firestore [WriteBatch] instead of making an
+  /// individual network call.
+  void _addLocationToBatch(
+    WriteBatch batch,
+    LocationModel location,
+    User user,
+  ) {
+    batch.set(
+      _locationsRef.doc(location.uuid),
+      {
+        ...location.toJson(),
+        'userId': user.uid,
+        'updatedAt': _toIsoString(DateTime.now()),
+        'lastSyncedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   @override

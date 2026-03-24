@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -53,6 +55,9 @@ final householdLocalChangesProvider = StreamProvider<void>((ref) {
 
 /// SQLite remains the source of truth for the UI; this stream simply re-reads
 /// local shared items whenever the sync layer reports a local upsert/delete.
+///
+/// A 500 ms debounce coalesces rapid-fire sync writes (e.g. bulk import of 50
+/// shared items) into a single SQLite query instead of one per write.
 final householdSharedItemsProvider =
     StreamProvider<List<SharedItem>>((ref) async* {
   final householdId = await ref.watch(currentHouseholdIdProvider.future);
@@ -62,15 +67,33 @@ final householdSharedItemsProvider =
   }
 
   final itemRepository = ref.watch(itemRepositoryProvider);
+  final currentUserId = ref.read(authStateProvider).valueOrNull?.uid;
+
+  // Initial read.
   yield _toSharedItems(
     await itemRepository.getSharedItems(householdId: householdId),
-    currentUserId: ref.read(authStateProvider).valueOrNull?.uid,
+    currentUserId: currentUserId,
   );
 
-  await for (final _ in ref.watch(householdLocalChangesProvider.stream)) {
+  // Debounced change listener — coalesces bursts of local-change events.
+  final controller = StreamController<void>();
+  Timer? debounce;
+  final sub = ref.watch(householdSyncServiceProvider).localChanges.listen((_) {
+    debounce?.cancel();
+    debounce = Timer(const Duration(milliseconds: 500), () {
+      if (!controller.isClosed) controller.add(null);
+    });
+  });
+  ref.onDispose(() {
+    debounce?.cancel();
+    sub.cancel();
+    controller.close();
+  });
+
+  await for (final _ in controller.stream) {
     yield _toSharedItems(
       await itemRepository.getSharedItems(householdId: householdId),
-      currentUserId: ref.read(authStateProvider).valueOrNull?.uid,
+      currentUserId: currentUserId,
     );
   }
 });
@@ -339,15 +362,31 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
     _ref.read(syncStatusProvider.notifier).state = syncResult;
   }
 
+  /// Refreshes only the providers that are likely stale after a single-item
+  /// mutation.  The heavy list providers (`allItemsProvider`, etc.) are
+  /// coalesced into a single microtask so that multiple back-to-back calls
+  /// to `_invalidateItemState` only trigger one round of list re-fetches.
+  bool _listInvalidationScheduled = false;
+
   void _invalidateItemState(String itemUuid) {
-    _ref.invalidate(allItemsProvider);
-    _ref.invalidate(lentItemsProvider);
-    _ref.invalidate(lendableItemsProvider);
-    _ref.invalidate(forgottenItemsProvider);
+    // Always refresh the specific item immediately.
     _ref.invalidate(singleItemProvider(itemUuid));
     _ref.invalidate(itemHistoryProvider(itemUuid));
     _ref.invalidate(itemLatestHistoryProvider(itemUuid));
-    _ref.invalidate(householdSharedItemsProvider);
+
+    // Coalesce list-level invalidations — multiple calls within the same
+    // microtask (e.g. batch visibility toggle) result in a single refresh.
+    if (!_listInvalidationScheduled) {
+      _listInvalidationScheduled = true;
+      Future.microtask(() {
+        _listInvalidationScheduled = false;
+        _ref.invalidate(allItemsProvider);
+        _ref.invalidate(lentItemsProvider);
+        _ref.invalidate(lendableItemsProvider);
+        _ref.invalidate(forgottenItemsProvider);
+        _ref.invalidate(householdSharedItemsProvider);
+      });
+    }
   }
 
   bool _currentUserOwnsItem(Item item) {
