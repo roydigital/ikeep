@@ -7,20 +7,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/constants/subscription_constants.dart';
+import '../../core/constants/feature_limits.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/item_visibility.dart';
 import '../../domain/models/location_model.dart';
+import '../../domain/models/zone.dart';
 import '../../providers/item_providers.dart';
-import '../../providers/location_providers.dart';
 import '../../providers/location_usage_providers.dart';
 import '../../providers/ml_label_providers.dart';
+import '../../providers/repository_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
-import '../settings/paywall_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
+import '../../widgets/location_picker_sheet.dart';
 
 class SaveScreen extends ConsumerStatefulWidget {
   const SaveScreen({super.key});
@@ -33,7 +34,9 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   String? _imagePath;
   bool _isCapturing = true;
   final _nameController = TextEditingController();
-  String? _selectedLocationUuid;
+  // Holds the fully-resolved zone (with areaUuid, roomUuid populated).
+  // Set via the picker sheet or by tapping a quick-pick chip.
+  Zone? _selectedZone;
   final List<String> _tags = [];
   bool _isSaving = false;
   bool _showTagInput = false;
@@ -139,7 +142,11 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     final item = Item(
       uuid: generateUuid(),
       name: name,
-      locationUuid: _selectedLocationUuid,
+      // Keep locationUuid for backward compat — zoneUuid is the new canonical ref.
+      locationUuid: _selectedZone?.uuid,
+      areaUuid: _selectedZone?.areaUuid,
+      roomUuid: _selectedZone?.roomUuid,
+      zoneUuid: _selectedZone?.uuid,
       imagePaths: _imagePath != null ? [_imagePath!] : [],
       tags: _tags,
       savedAt: DateTime.now(),
@@ -178,25 +185,18 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       return;
     }
 
-    final settings = ref.read(settingsProvider);
     final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
     if (hasReachedCloudBackupLimit(
-      isPremium: settings.isPremium,
       backedUpCount: backedUpCount,
     )) {
       if (mounted) {
         setState(() => _backupToCloud = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              cloudBackupQuotaExceededError(isPremium: settings.isPremium),
-            ),
+            content: Text(cloudBackupQuotaExceededError()),
             backgroundColor: AppColors.error,
           ),
         );
-      }
-      if (!settings.isPremium) {
-        await _showPaywall();
       }
       return;
     }
@@ -207,82 +207,23 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     }
   }
 
-  Future<void> _showPaywall() {
-    return PaywallScreen.show(context);
+  /// Resolves a zone UUID into a full [Zone] (with areaUuid/roomUuid populated)
+  /// and stores it as the selected zone. Called after the picker returns.
+  Future<void> _resolveAndSetZone(String zoneUuid) async {
+    final zone = await ref
+        .read(locationHierarchyRepositoryProvider)
+        .resolveZone(zoneUuid);
+    if (mounted) setState(() => _selectedZone = zone);
   }
 
   Future<void> _showAddLocationDialog() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final controller = TextEditingController();
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor:
-            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-        ),
-        title: Text(
-          'New Location',
-          style: TextStyle(
-            color:
-                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: TextStyle(
-            color:
-                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
-          ),
-          decoration: InputDecoration(
-            hintText: 'e.g. Kitchen Drawer',
-            hintStyle: TextStyle(
-              color: isDark
-                  ? AppColors.textSecondaryDark
-                  : AppColors.textSecondaryLight,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark
-                    ? AppColors.textSecondaryDark
-                    : AppColors.textSecondaryLight,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text(
-              'Add',
-              style: TextStyle(
-                  color: AppColors.primary, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
+    final result = await showLocationPickerSheet(
+      context,
+      initialSelectedLocationUuid: _selectedZone?.uuid,
+      title: 'Select Location',
     );
-
-    if (result != null && result.isNotEmpty) {
-      final location = LocationModel(
-        uuid: generateUuid(),
-        name: result,
-        createdAt: DateTime.now(),
-      );
-      final error = await ref
-          .read(locationsNotifierProvider.notifier)
-          .saveLocation(location);
-      if (error == null && mounted) {
-        setState(() => _selectedLocationUuid = location.uuid);
-      }
+    if (result != null && mounted) {
+      await _resolveAndSetZone(result);
     }
   }
 
@@ -738,7 +679,9 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
 
     return locationsAsync.when(
       data: (locations) {
-        final sorted = [...locations]
+        final sorted = locations
+            .where((loc) => loc.isAssignableToItem)
+            .toList()
           ..sort((a, b) => b.usageCount.compareTo(a.usageCount));
         final shown = sorted.take(4).toList();
 
@@ -767,11 +710,16 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
 
   Widget _locationChip(
       LocationModel loc, bool isDark, Color borderColor, Color textColor) {
-    final isSelected = _selectedLocationUuid == loc.uuid;
+    final isSelected = _selectedZone?.uuid == loc.uuid;
     return GestureDetector(
-      onTap: () => setState(() {
-        _selectedLocationUuid = isSelected ? null : loc.uuid;
-      }),
+      onTap: () async {
+        if (isSelected) {
+          setState(() => _selectedZone = null);
+        } else {
+          // Resolve the full hierarchy (areaUuid, roomUuid) for this zone.
+          await _resolveAndSetZone(loc.uuid);
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -983,17 +931,14 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
     Color secondaryColor,
     Color borderColor,
   ) {
-    final settings = ref.watch(settingsProvider);
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
     final progress = cloudBackupUsageProgress(
-      isPremium: settings.isPremium,
       backedUpCount: backedUpCount,
     );
-    final progressColor =
-        backedUpCount >= cloudBackupWarningThresholdFor(settings.isPremium)
-            ? AppColors.warning
-            : AppColors.primary;
+    final progressColor = backedUpCount >= cloudBackupWarningThreshold
+        ? AppColors.warning
+        : AppColors.primary;
     final helperText = _backupToCloud
         ? 'Cloud-backed items can later be shared with family members from the item details screen.'
         : 'Keep this off if the item should stay only on this device. Family sharing stays unavailable while backup is off.';
@@ -1027,7 +972,6 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
                     const SizedBox(height: 4),
                     Text(
                       cloudBackupUsageLabel(
-                        isPremium: settings.isPremium,
                         backedUpCount: backedUpCount,
                       ),
                       style: TextStyle(color: secondaryColor, fontSize: 12),
@@ -1042,16 +986,14 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
               ),
             ],
           ),
-          if (!settings.isPremium) ...[
-            const SizedBox(height: 10),
-            LinearProgressIndicator(
-              value: backedUpCountAsync.isLoading ? null : progress,
-              minHeight: 8,
-              backgroundColor: borderColor.withValues(alpha: 0.4),
-              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
-              borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-            ),
-          ],
+          const SizedBox(height: 10),
+          LinearProgressIndicator(
+            value: backedUpCountAsync.isLoading ? null : progress,
+            minHeight: 8,
+            backgroundColor: borderColor.withValues(alpha: 0.4),
+            valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+            borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+          ),
           const SizedBox(height: 10),
           Text(
             helperText,

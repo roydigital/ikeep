@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:showcaseview/showcaseview.dart';
 
 import '../../domain/models/item.dart';
+import '../../domain/models/location_model.dart';
 import '../../domain/models/shared_item.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/home_tour_provider.dart';
@@ -16,6 +17,7 @@ import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/adaptive_image.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
 
 enum _FilterType { all, recent, location, tags }
@@ -81,10 +83,20 @@ class SearchScreen extends ConsumerStatefulWidget {
     super.key,
     this.initialQuery = '',
     this.startInHouseholdMode = false,
+    this.initialLocationUuid,
+    this.isEmbedded = false,
   });
 
   final String initialQuery;
   final bool startInHouseholdMode;
+
+  /// When set, the screen opens pre-filtered to this location UUID.
+  /// Accepts any level: area, room, or zone UUID.
+  final String? initialLocationUuid;
+
+  /// True when this screen is embedded inside [MainScreen]'s [PageView].
+  /// Hides the back arrow and adds bottom padding for the fixed nav bar.
+  final bool isEmbedded;
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -96,7 +108,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final GlobalKey _filterShowcaseKey = GlobalKey();
   final GlobalKey _resultsShowcaseKey = GlobalKey();
   _FilterType _activeFilter = _FilterType.all;
-  String? _selectedLocation;
+
+  // Location filter — two parallel fields:
+  // _selectedLocationPath  → display string shown in the chip label
+  // _selectedLocationUuid  → UUID used for precise FK-based filtering
+  // Both are set together in _onLocationSelected.
+  String? _selectedLocationPath;
+  String? _selectedLocationUuid;
+
+  // Cached from the last allLocationsProvider resolution.
+  // Used for reverse-lookup (display path → UUID) in _onLocationSelected,
+  // and for forward-lookup (UUID → path) when initialLocationUuid is applied.
+  List<LocationModel> _cachedLocationModels = [];
+  bool _initialLocationApplied = false;
+
   String? _selectedTag;
   late bool _isHouseholdMode;
   bool _itemListingTourQueued = false;
@@ -133,10 +158,21 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
-  void _onLocationSelected(String? location) {
+  void _onLocationSelected(String? locationPath) {
     setState(() {
-      _selectedLocation = location;
-      _activeFilter = location == null ? _FilterType.all : _FilterType.location;
+      _selectedLocationPath = locationPath;
+      // Reverse-lookup the UUID from the cached list so _applyFilter can
+      // use precise FK matching instead of fragile string comparison.
+      if (locationPath == null) {
+        _selectedLocationUuid = null;
+      } else {
+        final match = _cachedLocationModels.where((l) {
+          return (l.fullPath ?? l.name).trim() == locationPath.trim();
+        }).firstOrNull;
+        _selectedLocationUuid = match?.uuid;
+      }
+      _activeFilter =
+          locationPath == null ? _FilterType.all : _FilterType.location;
     });
   }
 
@@ -170,11 +206,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       case _FilterType.all:
         return filtered;
       case _FilterType.location:
-        if (_selectedLocation == null) return filtered;
+        if (_selectedLocationPath == null) return filtered;
         return filtered.where((item) {
-          final location =
+          // UUID-first: check zoneUuid / locationUuid against the selected UUID
+          if (_selectedLocationUuid != null) {
+            if (item.zoneUuid == _selectedLocationUuid) return true;
+            if (item.areaUuid == _selectedLocationUuid) return true;
+            if (item.roomUuid == _selectedLocationUuid) return true;
+            if (item.locationUuid == _selectedLocationUuid) return true;
+          }
+          // String fallback for legacy items that have no UUID set yet.
+          final displayPath =
               (item.locationName ?? item.locationFullPath ?? '').trim();
-          return location == _selectedLocation;
+          return displayPath == _selectedLocationPath;
         }).toList();
       case _FilterType.tags:
         if (_selectedTag == null) return filtered;
@@ -192,6 +236,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final hasSeenItemListingTour = ref.watch(itemListingTourControllerProvider);
     final locationOptions = locationOptionsAsync.maybeWhen(
       data: (locations) {
+        // Cache the raw models for UUID reverse-lookup and initial-filter apply.
+        _cachedLocationModels = locations;
+
+        // Apply initialLocationUuid once, after the first data load.
+        if (!_initialLocationApplied && widget.initialLocationUuid != null) {
+          _initialLocationApplied = true;
+          final match = locations.firstWhere(
+            (l) => l.uuid == widget.initialLocationUuid,
+            orElse: () => locations.first,
+          );
+          // Only apply if a real match was found.
+          if (match.uuid == widget.initialLocationUuid) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() {
+                _selectedLocationPath =
+                    (match.fullPath ?? match.name).trim();
+                _selectedLocationUuid = match.uuid;
+                _activeFilter = _FilterType.location;
+              });
+            });
+          }
+        }
+
         final labels = locations
             .map((location) => (location.fullPath ?? location.name).trim())
             .where((label) => label.isNotEmpty)
@@ -232,7 +300,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 isHouseholdMode: false,
                 isSignedIn: false,
                 activeFilter: _activeFilter,
-                selectedLocation: _selectedLocation,
+                selectedLocation: _selectedLocationPath,
                 selectedTag: _selectedTag,
                 locationOptions: locationOptions,
                 tagOptions: tagOptions,
@@ -245,6 +313,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 onLocationSelected: _onLocationSelected,
                 onTagSelected: _onTagSelected,
                 onModeChanged: (_) {},
+                showBackButton: !widget.isEmbedded,
               ),
               Expanded(
                 child: _buildListingTourStep(
@@ -256,6 +325,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     isDark: isDark,
                     applyFilter: _applyFilter,
                     activeFilter: _activeFilter,
+                    bottomPadding: widget.isEmbedded
+                        ? AppNavBar.contentBottomSpacing(context)
+                        : 0,
                   ),
                 ),
               ),
@@ -289,6 +361,7 @@ class _SearchHeader extends StatelessWidget {
     required this.onLocationSelected,
     required this.onTagSelected,
     required this.onModeChanged,
+    this.showBackButton = true,
   });
 
   final TextEditingController controller;
@@ -309,6 +382,7 @@ class _SearchHeader extends StatelessWidget {
   final ValueChanged<String?> onLocationSelected;
   final ValueChanged<String?> onTagSelected;
   final ValueChanged<bool> onModeChanged;
+  final bool showBackButton;
 
   @override
   Widget build(BuildContext context) {
@@ -339,11 +413,12 @@ class _SearchHeader extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: () => context.pop(),
-                    icon: Icon(
-                      Icons.arrow_back,
-                      color: isDark
+                  if (showBackButton)
+                    IconButton(
+                      onPressed: () => context.pop(),
+                      icon: Icon(
+                        Icons.arrow_back,
+                        color: isDark
                           ? AppColors.textPrimaryDark
                           : AppColors.textPrimaryLight,
                     ),
@@ -354,15 +429,6 @@ class _SearchHeader extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: Icon(
-                      Icons.more_vert,
-                      color: isDark
-                          ? AppColors.textPrimaryDark
-                          : AppColors.textPrimaryLight,
                     ),
                   ),
                 ],
@@ -741,11 +807,15 @@ class _ResultsList extends ConsumerStatefulWidget {
     required this.isDark,
     required this.applyFilter,
     required this.activeFilter,
+    this.bottomPadding = 0,
   });
 
   final bool isDark;
   final List<Item> Function(List<Item>) applyFilter;
   final _FilterType activeFilter;
+
+  /// Extra bottom padding when embedded in MainScreen (accounts for fixed nav bar).
+  final double bottomPadding;
 
   @override
   ConsumerState<_ResultsList> createState() => _ResultsListState();
@@ -909,7 +979,12 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
 
       return ListView.separated(
         controller: _scrollController,
-        padding: const EdgeInsets.all(AppDimensions.spacingMd),
+        padding: EdgeInsets.fromLTRB(
+          AppDimensions.spacingMd,
+          AppDimensions.spacingMd,
+          AppDimensions.spacingMd,
+          AppDimensions.spacingMd + widget.bottomPadding,
+        ),
         itemCount: filtered.length + (_isLoadingMore ? 1 : 0),
         separatorBuilder: (_, __) =>
             const SizedBox(height: AppDimensions.spacingMd),
@@ -970,7 +1045,12 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
         }
         return ListView.separated(
           controller: _scrollController,
-          padding: const EdgeInsets.all(AppDimensions.spacingMd),
+          padding: EdgeInsets.fromLTRB(
+            AppDimensions.spacingMd,
+            AppDimensions.spacingMd,
+            AppDimensions.spacingMd,
+            AppDimensions.spacingMd + widget.bottomPadding,
+          ),
           itemCount: filtered.length,
           separatorBuilder: (_, __) =>
               const SizedBox(height: AppDimensions.spacingMd),

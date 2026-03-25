@@ -1,8 +1,10 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../providers/main_tab_provider.dart';
 import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_dimensions.dart';
@@ -14,10 +16,18 @@ enum AppNavTab { items, locations, search, settings }
 /// Visual style is identical to the Rooms & Zones screen (the app's native theme):
 ///  • Dark background  • Primary-accented top border  • ALL-CAPS bold labels
 ///  • 27 px icons  • 10.5 px labels with letter-spacing 1
-class AppNavBar extends StatelessWidget {
-  const AppNavBar({super.key, required this.activeTab});
+///
+/// When [onTabChanged] is provided (e.g. inside [MainScreen]), the callback
+/// handles tab switching directly. Otherwise the bar updates the
+/// [mainTabProvider] and navigates to `/home`.
+class AppNavBar extends ConsumerWidget {
+  const AppNavBar({super.key, required this.activeTab, this.onTabChanged});
 
   final AppNavTab activeTab;
+
+  /// Optional callback for tab changes (used inside MainScreen's PageView).
+  /// When null, the bar sets [mainTabProvider] and calls `context.go('/home')`.
+  final ValueChanged<AppNavTab>? onTabChanged;
 
   static const double _topPadding = 10;
   static const double _bottomPadding = 10;
@@ -61,8 +71,19 @@ class AppNavBar extends StatelessWidget {
     return MediaQuery.paddingOf(context).bottom + _fabBottomOffset;
   }
 
+  void _handleTap(BuildContext context, WidgetRef ref, AppNavTab tab) {
+    if (tab == activeTab) return;
+    if (onTabChanged != null) {
+      onTabChanged!(tab);
+    } else {
+      // From a sub-screen — update provider and go home.
+      ref.read(mainTabProvider.notifier).state = tab.index;
+      context.go(AppRoutes.home);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -93,39 +114,25 @@ class AppNavBar extends StatelessWidget {
                 label: 'ITEMS',
                 icon: Icons.inventory_2,
                 active: activeTab == AppNavTab.items,
-                onTap: () {
-                  if (activeTab != AppNavTab.items) context.go(AppRoutes.home);
-                },
+                onTap: () => _handleTap(context, ref, AppNavTab.items),
               ),
               _NavItem(
                 label: 'LOCATIONS',
                 icon: Icons.location_on,
                 active: activeTab == AppNavTab.locations,
-                onTap: () {
-                  if (activeTab != AppNavTab.locations) {
-                    context.go(AppRoutes.rooms);
-                  }
-                },
+                onTap: () => _handleTap(context, ref, AppNavTab.locations),
               ),
               _NavItem(
                 label: 'SEARCH',
                 icon: Icons.search,
                 active: activeTab == AppNavTab.search,
-                onTap: () {
-                  if (activeTab != AppNavTab.search) {
-                    context.push(AppRoutes.search);
-                  }
-                },
+                onTap: () => _handleTap(context, ref, AppNavTab.search),
               ),
               _NavItem(
                 label: 'SETTINGS',
                 icon: Icons.settings,
                 active: activeTab == AppNavTab.settings,
-                onTap: () {
-                  if (activeTab != AppNavTab.settings) {
-                    context.go(AppRoutes.settings);
-                  }
-                },
+                onTap: () => _handleTap(context, ref, AppNavTab.settings),
               ),
             ],
           ),

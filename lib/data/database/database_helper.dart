@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../core/constants/db_constants.dart';
+import '../../domain/models/location_model.dart';
 
 /// Singleton that opens and owns the SQLite [Database].
 /// All DAO classes receive this helper and call [db] to get the raw handle.
@@ -76,8 +77,12 @@ class DatabaseHelper {
         ${DbConstants.colItemLatitude} REAL,
         ${DbConstants.colItemLongitude} REAL,
         ${DbConstants.colItemExpiryDate} INTEGER,
+        ${DbConstants.colItemWarrantyEndDate} INTEGER,
         ${DbConstants.colItemIsArchived} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemNotes} TEXT,
+        ${DbConstants.colItemInvoicePath} TEXT,
+        ${DbConstants.colItemInvoiceFileName} TEXT,
+        ${DbConstants.colItemInvoiceFileSizeBytes} INTEGER,
         ${DbConstants.colItemCloudId} TEXT,
         ${DbConstants.colItemLastSyncedAt} INTEGER,
         ${DbConstants.colItemIsBackedUp} INTEGER NOT NULL DEFAULT 0,
@@ -90,7 +95,11 @@ class DatabaseHelper {
         ${DbConstants.colItemIsAvailableForLending} INTEGER NOT NULL DEFAULT 0,
         ${DbConstants.colItemVisibility} TEXT NOT NULL DEFAULT 'private',
         ${DbConstants.colItemHouseholdId} TEXT,
-        ${DbConstants.colItemSharedWithMemberUuids} TEXT NOT NULL DEFAULT '[]'
+        ${DbConstants.colItemSharedWithMemberUuids} TEXT NOT NULL DEFAULT '[]',
+        -- Hierarchical location FKs (v13 / Phase 1 refactor)
+        ${DbConstants.colItemAreaUuid} TEXT,
+        ${DbConstants.colItemRoomUuid} TEXT,
+        ${DbConstants.colItemZoneUuid} TEXT
       )
     ''');
 
@@ -100,6 +109,7 @@ class DatabaseHelper {
         ${DbConstants.colLocId} INTEGER PRIMARY KEY AUTOINCREMENT,
         ${DbConstants.colLocUuid} TEXT NOT NULL UNIQUE,
         ${DbConstants.colLocName} TEXT NOT NULL,
+        ${DbConstants.colLocType} TEXT NOT NULL DEFAULT 'area',
         ${DbConstants.colLocFullPath} TEXT,
         ${DbConstants.colLocParentUuid} TEXT,
         ${DbConstants.colLocIconName} TEXT NOT NULL DEFAULT 'folder',
@@ -179,9 +189,17 @@ class DatabaseHelper {
     batch.execute(
         'CREATE INDEX idx_items_season_category ON ${DbConstants.tableItems}(${DbConstants.colItemSeasonCategory})');
     batch.execute(
+        'CREATE INDEX idx_items_warranty_end_date ON ${DbConstants.tableItems}(${DbConstants.colItemWarrantyEndDate})');
+    batch.execute(
         'CREATE INDEX idx_items_visibility_household ON ${DbConstants.tableItems}(${DbConstants.colItemVisibility}, ${DbConstants.colItemHouseholdId})');
     batch.execute(
         'CREATE INDEX idx_items_saved_at ON ${DbConstants.tableItems}(${DbConstants.colItemSavedAt} DESC)');
+    batch.execute(
+        'CREATE INDEX idx_items_area_uuid ON ${DbConstants.tableItems}(${DbConstants.colItemAreaUuid})');
+    batch.execute(
+        'CREATE INDEX idx_items_room_uuid ON ${DbConstants.tableItems}(${DbConstants.colItemRoomUuid})');
+    batch.execute(
+        'CREATE INDEX idx_items_zone_uuid ON ${DbConstants.tableItems}(${DbConstants.colItemZoneUuid})');
     batch.execute(
         'CREATE INDEX idx_history_item ON ${DbConstants.tableHistory}(${DbConstants.colHistItemUuid})');
     batch.execute(
@@ -454,6 +472,132 @@ class DatabaseHelper {
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_items_backed_up ON ${DbConstants.tableItems}(${DbConstants.colItemIsBackedUp})');
     }
+
+    if (oldVersion < 12) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableLocations,
+        DbConstants.colLocType,
+        "TEXT NOT NULL DEFAULT 'area'",
+      );
+
+      await db.execute('''
+        UPDATE ${DbConstants.tableLocations}
+        SET ${DbConstants.colLocType} = '${LocationType.area.value}'
+        WHERE ${DbConstants.colLocParentUuid} IS NULL
+      ''');
+
+      await db.execute('''
+        UPDATE ${DbConstants.tableLocations}
+        SET ${DbConstants.colLocType} = '${LocationType.room.value}'
+        WHERE ${DbConstants.colLocParentUuid} IS NOT NULL
+          AND ${DbConstants.colLocUuid} IN (
+            SELECT DISTINCT ${DbConstants.colLocParentUuid}
+            FROM ${DbConstants.tableLocations}
+            WHERE ${DbConstants.colLocParentUuid} IS NOT NULL
+          )
+      ''');
+
+      await db.execute('''
+        UPDATE ${DbConstants.tableLocations}
+        SET ${DbConstants.colLocType} = '${LocationType.zone.value}'
+        WHERE ${DbConstants.colLocParentUuid} IS NOT NULL
+          AND ${DbConstants.colLocUuid} NOT IN (
+            SELECT DISTINCT ${DbConstants.colLocParentUuid}
+            FROM ${DbConstants.tableLocations}
+            WHERE ${DbConstants.colLocParentUuid} IS NOT NULL
+          )
+      ''');
+    }
+
+    // ── v13: Phase 1 — hierarchical location FKs on items ──────────────────
+    // Adds area_uuid, room_uuid, zone_uuid as explicit FK columns.
+    // These allow per-level filtering without joins. The legacy location_uuid
+    // column is kept intact; Phase 5 migration will populate the new columns
+    // from the existing locations hierarchy and then null out location_uuid.
+    if (oldVersion < 13) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemAreaUuid,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemRoomUuid,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemZoneUuid,
+        'TEXT',
+      );
+
+      // Seed zone_uuid from location_uuid for existing items where the location
+      // is a zone — this covers the common case where users have already been
+      // assigning items via the location picker (which always picks zones).
+      // area_uuid and room_uuid will be backfilled properly in Phase 5 via the
+      // LocationHierarchyMigrationService utility.
+      await db.execute('''
+        UPDATE ${DbConstants.tableItems}
+        SET ${DbConstants.colItemZoneUuid} = ${DbConstants.colItemLocationUuid}
+        WHERE ${DbConstants.colItemLocationUuid} IS NOT NULL
+          AND ${DbConstants.colItemZoneUuid} IS NULL
+          AND ${DbConstants.colItemLocationUuid} IN (
+            SELECT ${DbConstants.colLocUuid}
+            FROM ${DbConstants.tableLocations}
+            WHERE ${DbConstants.colLocType} = '${LocationType.zone.value}'
+          )
+      ''');
+
+      // Indexes for the new columns — allows fast WHERE area_uuid = ?
+      // and WHERE room_uuid = ? queries without full-table scans.
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_items_area_uuid '
+        'ON ${DbConstants.tableItems}(${DbConstants.colItemAreaUuid})',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_items_room_uuid '
+        'ON ${DbConstants.tableItems}(${DbConstants.colItemRoomUuid})',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_items_zone_uuid '
+        'ON ${DbConstants.tableItems}(${DbConstants.colItemZoneUuid})',
+      );
+    }
+
+    if (oldVersion < 14) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemWarrantyEndDate,
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemInvoicePath,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemInvoiceFileName,
+        'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemInvoiceFileSizeBytes,
+        'INTEGER',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_items_warranty_end_date '
+        'ON ${DbConstants.tableItems}(${DbConstants.colItemWarrantyEndDate})',
+      );
+    }
   }
 
   Future<void> _onOpen(Database db) async {
@@ -496,6 +640,7 @@ class DatabaseHelper {
       {
         DbConstants.colLocUuid: _defaultRootLocationUuid,
         DbConstants.colLocName: 'Home',
+        DbConstants.colLocType: LocationType.area.value,
         DbConstants.colLocFullPath: 'Home',
         DbConstants.colLocParentUuid: null,
         DbConstants.colLocIconName: 'folder',
@@ -574,6 +719,7 @@ class DatabaseHelper {
       INSERT INTO ${DbConstants.tableLocations} (
         ${DbConstants.colLocUuid},
         ${DbConstants.colLocName},
+        ${DbConstants.colLocType},
         ${DbConstants.colLocFullPath},
         ${DbConstants.colLocParentUuid},
         ${DbConstants.colLocIconName},
@@ -582,6 +728,7 @@ class DatabaseHelper {
       ) VALUES (
         '$_defaultRootLocationUuid',
         'Home',
+        '${LocationType.area.value}',
         'Home',
         NULL,
         'folder',

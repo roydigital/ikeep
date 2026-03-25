@@ -6,22 +6,27 @@ import 'dart:async';
 
 import 'database_provider.dart';
 import '../services/background_scheduler_service.dart';
+import '../services/firebase_invoice_storage_service.dart';
+import '../services/location_hierarchy_migration_service.dart';
 import '../services/firebase_image_upload_service.dart';
 import '../services/firebase_sync_service.dart';
-import '../services/google_play_billing_service.dart';
 import '../services/household_cloud_service.dart';
 import '../services/household_sync_service.dart';
 import '../services/image_optimizer_service.dart';
 import '../services/image_service.dart';
+import '../services/invoice_service.dart';
 import '../services/location_service.dart';
 import '../services/ml_label_service.dart';
 import '../services/nearby_cloud_service.dart';
 import '../services/notification_service.dart';
 import '../services/sync_service.dart';
-import 'settings_provider.dart';
 
 final imageServiceProvider = Provider<ImageService>(
   (ref) => ImageService(),
+);
+
+final invoiceServiceProvider = Provider<InvoiceService>(
+  (ref) => InvoiceService(),
 );
 
 final mlLabelServiceProvider = Provider<MlLabelService>(
@@ -55,6 +60,13 @@ final firebaseImageUploadServiceProvider = Provider<FirebaseImageUploadService>(
   ),
 );
 
+final firebaseInvoiceStorageServiceProvider =
+    Provider<FirebaseInvoiceStorageService>(
+  (ref) => FirebaseInvoiceStorageService(
+    storage: ref.watch(firebaseStorageProvider),
+  ),
+);
+
 final syncServiceProvider = Provider<SyncService>(
   (ref) => FirebaseSyncService(
     auth: ref.watch(firebaseAuthProvider),
@@ -62,7 +74,7 @@ final syncServiceProvider = Provider<SyncService>(
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
     imageUploadService: ref.watch(firebaseImageUploadServiceProvider),
-    isPremiumUser: () async => ref.read(settingsProvider).isPremium,
+    invoiceStorageService: ref.watch(firebaseInvoiceStorageServiceProvider),
   ),
 );
 
@@ -71,6 +83,7 @@ final householdCloudServiceProvider = Provider<HouseholdCloudService>(
     auth: ref.watch(firebaseAuthProvider),
     firestore: ref.watch(firebaseFirestoreProvider),
     imageUploadService: ref.watch(firebaseImageUploadServiceProvider),
+    invoiceStorageService: ref.watch(firebaseInvoiceStorageServiceProvider),
   ),
 );
 
@@ -110,6 +123,16 @@ final nearbyCloudServiceProvider = Provider<NearbyCloudService>(
   ),
 );
 
-final googlePlayBillingServiceProvider = Provider<GooglePlayBillingService>(
-  (ref) => GooglePlayBillingService(),
+final locationHierarchyMigrationServiceProvider =
+    Provider<LocationHierarchyMigrationService>(
+  (ref) => LocationHierarchyMigrationService(
+    itemDao: ref.watch(itemDaoProvider),
+    locationDao: ref.watch(locationDaoProvider),
+  ),
 );
+
+/// Runs the Phase-5 hierarchy migration once on app startup.
+/// Backfills [area_uuid] / [room_uuid] on items that predate the new schema.
+final locationHierarchyMigrationProvider = FutureProvider<int>((ref) async {
+  return ref.read(locationHierarchyMigrationServiceProvider).migrate();
+});

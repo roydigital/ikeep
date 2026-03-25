@@ -5,6 +5,169 @@ import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/location_providers.dart';
 import '../../theme/app_colors.dart';
+import 'rooms_loading_overlay.dart';
+
+// ─────────────────────────────────────────────────────────────
+// Top-level preset data
+// ─────────────────────────────────────────────────────────────
+
+const _kAreaGroups = [
+  _AreaGroup(
+    title: 'Residential',
+    icon: Icons.home_rounded,
+    areas: [
+      'House',
+      'Apartment',
+      'Condo',
+      'Townhouse',
+      'Villa',
+      'Studio',
+      'Flat',
+      'Penthouse',
+      'Duplex',
+      'Bungalow',
+      'Cabin',
+      'Cottage',
+      'Beach House',
+      'Lake House',
+      'Vacation Home',
+      'Rental Property',
+      'Tiny House',
+      'Mobile Home',
+      'Dormitory',
+      'Student Housing',
+      'Assisted Living',
+      'Senior Home',
+      'Guest House',
+    ],
+  ),
+  _AreaGroup(
+    title: 'Office & Commercial',
+    icon: Icons.business_rounded,
+    areas: [
+      'Office',
+      'Co-working Space',
+      'Shop',
+      'Retail Store',
+      'Restaurant',
+      'Café',
+      'Hotel Room',
+      'Motel Room',
+      'Reception',
+      'Lobby',
+      'Conference Center',
+      'Medical Office',
+      'Dental Office',
+      'Salon',
+      'Gym',
+      'Studio Space',
+      'Classroom',
+      'Laboratory',
+      'Library',
+      'Bank',
+      'Post Office',
+      'Clinic',
+      'Showroom',
+    ],
+  ),
+  _AreaGroup(
+    title: 'Storage & Industrial',
+    icon: Icons.warehouse_rounded,
+    areas: [
+      'Garage',
+      'Storage Unit',
+      'Warehouse',
+      'Workshop',
+      'Factory',
+      'Barn',
+      'Shed',
+      'Tool Shed',
+      'Locker',
+      'Self-Storage',
+      'Godown',
+      'Cold Storage',
+      'Loading Dock',
+      'Supply Room',
+      'Storeroom',
+    ],
+  ),
+  _AreaGroup(
+    title: 'Outdoor & Property',
+    icon: Icons.park_rounded,
+    areas: [
+      'Backyard',
+      'Front Yard',
+      'Garden',
+      'Patio',
+      'Terrace',
+      'Balcony',
+      'Porch',
+      'Deck',
+      'Driveway',
+      'Parking Spot',
+      'Rooftop',
+      'Farm',
+      'Ranch',
+      'Field',
+      'Greenhouse',
+      'Gate Area',
+    ],
+  ),
+  _AreaGroup(
+    title: 'Vehicles & Transport',
+    icon: Icons.directions_car_rounded,
+    areas: [
+      'Car',
+      'SUV',
+      'Van',
+      'Truck',
+      'Motorcycle',
+      'RV',
+      'Camper',
+      'Boat',
+      'Trailer',
+      'Bicycle Storage',
+    ],
+  ),
+];
+
+const _kPresetZones = [
+  'Top Shelf',
+  'Middle Shelf',
+  'Bottom Shelf',
+  'Main Closet',
+  'Walk-in Closet',
+  'Wardrobe',
+  'Under Bed',
+  'Bedside Table',
+  'Dresser Drawer',
+  'Nightstand',
+  'Filing Cabinet',
+  'Desk Drawer',
+  'Bookshelf',
+  'Medicine Cabinet',
+  'Bathroom Cabinet',
+  'Vanity',
+  'Kitchen Cabinet',
+  'Pantry Shelf',
+  'Refrigerator',
+  'Freezer',
+  'Garage Shelf',
+  'Tool Box',
+  'Workbench',
+  'Storage Box',
+  'Storage Bin',
+  'Basket',
+  'Corner Rack',
+  'Wall Hook',
+  'Entryway Shelf',
+  'Attic Area',
+  'Basement Corner',
+];
+
+// ─────────────────────────────────────────────────────────────
+// Screen
+// ─────────────────────────────────────────────────────────────
 
 class AddNewRoomScreen extends ConsumerStatefulWidget {
   const AddNewRoomScreen({super.key});
@@ -15,15 +178,17 @@ class AddNewRoomScreen extends ConsumerStatefulWidget {
 
 class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
   final _roomNameController = TextEditingController();
-
-  static const String _customParentValue = '__custom_parent_location__';
+  final _customZoneController = TextEditingController();
 
   String? _selectedParentUuid;
-  String? _selectedParentDropdownValue;
+  String? _selectedParentName;
   String _selectedIconKey = 'bed';
   bool _isSaving = false;
+  bool _isBusy = false;
+  String _busyLabel = 'Syncing changes...';
 
-  late List<_ZoneOption> _zones;
+  final Set<String> _selectedZoneNames = {};
+  final List<String> _customZones = [];
 
   static const List<_RoomIconOption> _roomIcons = [
     _RoomIconOption(key: 'bed', label: 'BED', icon: Icons.bed_rounded),
@@ -40,119 +205,32 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
         key: 'other', label: 'OTHER', icon: Icons.more_horiz_rounded),
   ];
 
-  static const List<_ParentLocationGroup> _parentLocationGroups = [
-    _ParentLocationGroup(
-      title: 'Home & Residential',
-      locations: [
-        'House',
-        'Apartment',
-        'Villa',
-        'Studio',
-        'Bedroom',
-        'Master Bedroom',
-        'Kids Room',
-        'Guest Room',
-        'Living Room',
-        'Family Room',
-        'Dining Room',
-        'Kitchen',
-        'Pantry',
-        'Bathroom',
-        'Powder Room',
-        'Laundry Room',
-        'Basement',
-        'Attic',
-        'Closet',
-        'Storage Room',
-      ],
-    ),
-    _ParentLocationGroup(
-      title: 'Office & Commercial',
-      locations: [
-        'Office',
-        'Cabin',
-        'Conference Room',
-        'Reception',
-        'Lobby',
-        'Break Room',
-        'Server Room',
-        'Warehouse',
-        'Retail Store',
-        'Shop Floor',
-        'Classroom',
-        'Laboratory',
-      ],
-    ),
-    _ParentLocationGroup(
-      title: 'Garage, Utility & Service',
-      locations: [
-        'Garage',
-        'Parking Spot',
-        'Workshop',
-        'Tool Shed',
-        'Utility Room',
-        'Electrical Room',
-        'Pump Room',
-        'Boiler Room',
-      ],
-    ),
-    _ParentLocationGroup(
-      title: 'Outdoor & Property',
-      locations: [
-        'Lawn',
-        'Garden',
-        'Backyard',
-        'Front Yard',
-        'Patio',
-        'Terrace',
-        'Balcony',
-        'Porch',
-        'Driveway',
-        'Rooftop',
-        'Gate Area',
-      ],
-    ),
-    _ParentLocationGroup(
-      title: 'Travel & Vehicles',
-      locations: [
-        'Car',
-        'SUV',
-        'Van',
-        'Truck',
-        'Motorcycle',
-        'Bicycle Storage',
-        'Camper',
-      ],
-    ),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _zones = _defaultZones();
-  }
-
   @override
   void dispose() {
     _roomNameController.dispose();
+    _customZoneController.dispose();
     super.dispose();
   }
 
-  List<_ZoneOption> _defaultZones() {
-    return [
-      const _ZoneOption(
-        name: 'Top Shelf',
-        icon: Icons.table_rows_rounded,
-        iconName: 'shelves',
-        selected: false,
-      ),
-      const _ZoneOption(
-        name: 'Main Closet',
-        icon: Icons.door_sliding_outlined,
-        iconName: 'door',
-        selected: false,
-      ),
-    ];
+  Future<T> _runWithLoading<T>({
+    required String label,
+    required Future<T> Function() action,
+  }) async {
+    setState(() {
+      _isBusy = true;
+      _busyLabel = label;
+    });
+
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+          _busyLabel = 'Syncing changes...';
+        });
+      }
+    }
   }
 
   void _syncDefaultParent(List<LocationModel> roots) {
@@ -161,7 +239,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
       if (!mounted || _selectedParentUuid != null) return;
       setState(() {
         _selectedParentUuid = roots.first.uuid;
-        _selectedParentDropdownValue = 'existing:${roots.first.uuid}';
+        _selectedParentName = roots.first.name;
       });
     });
   }
@@ -169,149 +247,76 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
   void _resetForm(List<LocationModel> roots) {
     setState(() {
       _roomNameController.clear();
+      _customZoneController.clear();
       _selectedParentUuid = roots.isNotEmpty ? roots.first.uuid : null;
-      _selectedParentDropdownValue =
-          roots.isNotEmpty ? 'existing:${roots.first.uuid}' : null;
+      _selectedParentName = roots.isNotEmpty ? roots.first.name : null;
       _selectedIconKey = 'bed';
-      _zones = _defaultZones();
+      _selectedZoneNames.clear();
+      _customZones.clear();
     });
   }
 
-  Future<String?> _addParentLocation() async {
+  // Opens the searchable area picker bottom sheet.
+  Future<void> _showAreaPicker(List<LocationModel> roots) async {
+    if (_isBusy) return;
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
+
+    final result = await showModalBottomSheet<_AreaPickerResult>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor:
-            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        title: Text(
-          'Add Parent Location',
-          style: TextStyle(
-              color: isDark
-                  ? AppColors.textPrimaryDark
-                  : AppColors.textPrimaryLight,
-              fontWeight: FontWeight.w700),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: TextStyle(
-              color: isDark
-                  ? AppColors.textPrimaryDark
-                  : AppColors.textPrimaryLight),
-          decoration: InputDecoration(
-            hintText: 'e.g., Office',
-            hintStyle: TextStyle(
-                color: isDark
-                    ? AppColors.textSecondaryDark
-                    : AppColors.textSecondaryLight),
-            filled: true,
-            fillColor:
-                isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: TextStyle(
-                    color: isDark
-                        ? AppColors.textSecondaryDark
-                        : AppColors.textSecondaryLight)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text(
-              'Add',
-              style: TextStyle(
-                  color: AppColors.primary, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AreaPickerSheet(isDark: isDark),
+    );
+
+    if (!mounted || result == null) return;
+
+    // If the result has no name (user tapped "Create Custom" without typing),
+    // prompt via a dialog instead.
+    String areaName = result.name.trim();
+    if (result.isNew && areaName.isEmpty) {
+      areaName = await _promptCustomAreaName() ?? '';
+      if (areaName.isEmpty) return;
+    }
+
+    // Check if an area with this name already exists.
+    final existing = roots.firstWhere(
+      (r) => r.name.trim().toLowerCase() == areaName.toLowerCase(),
+      orElse: () => LocationModel(
+        uuid: '',
+        name: '',
+        type: LocationType.area,
+        parentUuid: null,
+        iconName: '',
+        createdAt: DateTime.now(),
       ),
     );
 
-    if (!mounted || result == null || result.isEmpty) return null;
+    if (!result.isNew || existing.uuid.isNotEmpty) {
+      final target = result.isNew
+          ? existing
+          : roots.firstWhere((r) => r.uuid == result.uuid);
+      setState(() {
+        _selectedParentUuid = target.uuid;
+        _selectedParentName = target.name;
+      });
+      return;
+    }
 
+    // Create the new area location.
     final location = LocationModel(
       uuid: generateUuid(),
-      name: result,
+      name: areaName,
+      type: LocationType.area,
       parentUuid: null,
       iconName: 'folder',
       createdAt: DateTime.now(),
     );
-    final error = await ref
-        .read(locationsNotifierProvider.notifier)
-        .saveLocation(location);
-    if (!mounted) return null;
-
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red.shade400),
-      );
-      return null;
-    }
-
-    setState(() {
-      _selectedParentUuid = location.uuid;
-      _selectedParentDropdownValue = 'existing:${location.uuid}';
-    });
-    return location.uuid;
-  }
-
-  Future<void> _onParentLocationChanged(
-    String? selectedValue,
-    List<LocationModel> roots,
-  ) async {
-    if (selectedValue == null) return;
-
-    if (selectedValue == _customParentValue) {
-      await _addParentLocation();
-      return;
-    }
-
-    if (selectedValue.startsWith('existing:')) {
-      final uuid = selectedValue.substring('existing:'.length);
-      setState(() {
-        _selectedParentUuid = uuid;
-        _selectedParentDropdownValue = selectedValue;
-      });
-      return;
-    }
-
-    if (!selectedValue.startsWith('preset:')) return;
-    final presetName = selectedValue.substring('preset:'.length);
-    final existing = roots.where((root) {
-      return root.name.trim().toLowerCase() == presetName.trim().toLowerCase();
-    }).firstOrNull;
-
-    if (existing != null) {
-      setState(() {
-        _selectedParentUuid = existing.uuid;
-        _selectedParentDropdownValue = 'existing:${existing.uuid}';
-      });
-      return;
-    }
-
-    final newLocation = LocationModel(
-      uuid: generateUuid(),
-      name: presetName,
-      parentUuid: null,
-      iconName: 'folder',
-      createdAt: DateTime.now(),
+    final error = await _runWithLoading<String?>(
+      label: 'Creating area...',
+      action: () =>
+          ref.read(locationsNotifierProvider.notifier).saveLocation(location),
     );
-    final error = await ref
-        .read(locationsNotifierProvider.notifier)
-        .saveLocation(newLocation);
     if (!mounted) return;
 
     if (error != null) {
@@ -322,40 +327,42 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     }
 
     setState(() {
-      _selectedParentUuid = newLocation.uuid;
-      _selectedParentDropdownValue = 'existing:${newLocation.uuid}';
+      _selectedParentUuid = location.uuid;
+      _selectedParentName = location.name;
     });
   }
 
-  Future<void> _addCustomZone() async {
+  // Simple dialog for entering a custom area name when no search text was typed.
+  Future<String?> _promptCustomAreaName() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = TextEditingController();
-    final result = await showDialog<String>(
+    return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor:
             isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
         title: Text(
-          'Add Custom Zone',
+          'Create Custom Area',
           style: TextStyle(
-              color: isDark
-                  ? AppColors.textPrimaryDark
-                  : AppColors.textPrimaryLight,
-              fontWeight: FontWeight.w700),
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         content: TextField(
           controller: controller,
           autofocus: true,
           style: TextStyle(
-              color: isDark
-                  ? AppColors.textPrimaryDark
-                  : AppColors.textPrimaryLight),
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+          ),
           decoration: InputDecoration(
-            hintText: 'e.g., Nightstand Drawer',
+            hintText: 'e.g., My Office, Beach House…',
             hintStyle: TextStyle(
-                color: isDark
-                    ? AppColors.textSecondaryDark
-                    : AppColors.textSecondaryLight),
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+            ),
             filled: true,
             fillColor:
                 isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
@@ -372,16 +379,19 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: TextStyle(
-                    color: isDark
-                        ? AppColors.textSecondaryDark
-                        : AppColors.textSecondaryLight)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: const Text(
-              'Add',
+              'Create',
               style: TextStyle(
                   color: AppColors.primary, fontWeight: FontWeight.w700),
             ),
@@ -389,22 +399,33 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
         ],
       ),
     );
+  }
 
-    if (!mounted || result == null || result.isEmpty) return;
-
+  void _addCustomZone() {
+    final name = _customZoneController.text.trim();
+    if (name.isEmpty) return;
     setState(() {
-      _zones.add(
-        _ZoneOption(
-          name: result,
-          icon: Icons.grid_view_rounded,
-          iconName: 'folder',
-          selected: false,
-        ),
-      );
+      if (!_customZones.contains(name) && !_kPresetZones.contains(name)) {
+        _customZones.insert(0, name);
+      }
+      _selectedZoneNames.add(name);
+      _customZoneController.clear();
+    });
+  }
+
+  void _toggleZone(String name) {
+    setState(() {
+      if (_selectedZoneNames.contains(name)) {
+        _selectedZoneNames.remove(name);
+      } else {
+        _selectedZoneNames.add(name);
+      }
     });
   }
 
   Future<void> _createRoom() async {
+    if (_isBusy) return;
+
     final roomName = _roomNameController.text.trim();
     if (roomName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -412,7 +433,6 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
       );
       return;
     }
-
     if (_selectedParentUuid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a parent location')),
@@ -425,16 +445,53 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     final room = LocationModel(
       uuid: generateUuid(),
       name: roomName,
+      type: LocationType.room,
       parentUuid: _selectedParentUuid,
       iconName: _selectedIconKey,
       createdAt: DateTime.now(),
     );
     final locationNotifier = ref.read(locationsNotifierProvider.notifier);
-    final roomError = await locationNotifier.saveLocation(room);
+    String? roomError;
 
+    try {
+      roomError = await _runWithLoading<String?>(
+        label: 'Creating room...',
+        action: () async {
+          final error = await locationNotifier.saveLocation(room);
+          if (error != null) return error;
+
+          for (final zoneName in _selectedZoneNames) {
+            final lc = zoneName.toLowerCase();
+            var iconName = 'folder';
+            if (lc.contains('shelf')) iconName = 'shelves';
+            if (lc.contains('closet') || lc.contains('wardrobe')) {
+              iconName = 'door';
+            }
+
+            final zoneError = await locationNotifier.saveLocation(
+              LocationModel(
+                uuid: generateUuid(),
+                name: zoneName,
+                type: LocationType.zone,
+                parentUuid: room.uuid,
+                iconName: iconName,
+                createdAt: DateTime.now(),
+              ),
+            );
+            if (zoneError != null) return zoneError;
+          }
+
+          return null;
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+
+    if (!mounted) return;
     if (roomError != null) {
-      if (!mounted) return;
-      setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(roomError), backgroundColor: Colors.red.shade400),
@@ -442,29 +499,6 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
       return;
     }
 
-    for (final zone in _zones.where((z) => z.selected)) {
-      final zoneError = await locationNotifier.saveLocation(
-        LocationModel(
-          uuid: generateUuid(),
-          name: zone.name,
-          parentUuid: room.uuid,
-          iconName: zone.iconName,
-          createdAt: DateTime.now(),
-        ),
-      );
-      if (zoneError != null) {
-        if (!mounted) return;
-        setState(() => _isSaving = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(zoneError), backgroundColor: Colors.red.shade400),
-        );
-        return;
-      }
-    }
-
-    if (!mounted) return;
-    setState(() => _isSaving = false);
     Navigator.pop(context, true);
   }
 
@@ -476,325 +510,485 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     final kCardSoft =
         isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight;
     final kBorder = isDark ? AppColors.borderDark : AppColors.borderLight;
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final textMuted =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    return Scaffold(
-      backgroundColor: kBg,
-      body: SafeArea(
-        child: rootsAsync.when(
-          data: (roots) {
-            _syncDefaultParent(roots);
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 8, 22, 150),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: kBg,
+          body: rootsAsync.when(
+            data: (roots) {
+              _syncDefaultParent(roots);
+              return Column(
+                children: [
+                  _PinnedRoomSheetHeader(
+                    backgroundColor: kBg,
+                    borderColor: kBorder,
+                    textPrimary: textPrimary,
+                    onClose: () => Navigator.pop(context),
+                    onReset: () => _resetForm(roots),
+                  ),
+                  Expanded(
+                    child: Stack(
                       children: [
-                        Center(
-                          child: Container(
-                            width: 74,
-                            height: 9,
-                            decoration: BoxDecoration(
-                              color: kBorder,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            IconButton(
-                              onPressed: () => Navigator.pop(context),
-                              icon: Icon(Icons.close_rounded,
-                                  color: textPrimary, size: 34),
-                            ),
-                            Expanded(
-                              child: Text(
-                                'Add New Room',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: textPrimary,
-                                  fontSize: 50 / 2,
-                                  fontWeight: FontWeight.w800,
+                        // ── Scrollable content ──────────────────────────────
+                        Positioned.fill(
+                          child: SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(
+                                22, 18, 22, 160 + bottomInset),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // ── Header ────────────────────────────────
+
+                                // ── Room Name ─────────────────────────────
+                                _SectionLabel(
+                                    label: 'ROOM NAME', textMuted: textMuted),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _roomNameController,
+                                  style: TextStyle(
+                                    color: textPrimary,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'e.g., Master Bedroom',
+                                    hintStyle: TextStyle(
+                                      color: textMuted,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    filled: true,
+                                    fillColor: kCardSoft,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(40),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(40),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(40),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 32, vertical: 26),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () => _resetForm(roots),
-                              child: const Text(
-                                'Reset',
-                                style: TextStyle(
-                                  color: AppColors.primary,
-                                  fontSize: 40 / 2,
-                                  fontWeight: FontWeight.w600,
+                                const SizedBox(height: 30),
+
+                                // ── Parent Location ───────────────────────
+                                _SectionLabel(
+                                    label: 'PARENT LOCATION',
+                                    textMuted: textMuted),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'The broader area this room belongs to',
+                                  style: TextStyle(
+                                      color: textMuted.withValues(alpha: 0.65),
+                                      fontSize: 12),
                                 ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        _SectionLabel(label: 'Room Name', textMuted: textMuted),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _roomNameController,
-                          style: TextStyle(
-                            color: textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'e.g., Master Bedroom',
-                            hintStyle: TextStyle(
-                              color: textMuted,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            filled: true,
-                            fillColor: kCardSoft,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(40),
-                              borderSide: BorderSide.none,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(40),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(40),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 32, vertical: 26),
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        _SectionLabel(
-                            label: 'Parent Location', textMuted: textMuted),
-                        const SizedBox(height: 12),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: kCardSoft,
-                            borderRadius: BorderRadius.circular(26),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 6),
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _selectedParentDropdownValue,
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                                color: AppColors.primary),
-                            dropdownColor: isDark
-                                ? AppColors.surfaceDark
-                                : AppColors.surfaceLight,
-                            decoration: const InputDecoration(
-                              border: InputBorder.none,
-                            ),
-                            style: TextStyle(
-                              color: textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            hint: Text(
-                              'Select parent location',
-                              style: TextStyle(
-                                color: textMuted,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            selectedItemBuilder: (context) {
-                              return _buildParentDropdownItems(
-                                roots: roots,
-                                textPrimary: textPrimary,
-                                textMuted: textMuted,
-                              )
-                                  .map((item) => Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: Text(
-                                          item.label,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: item.isHeader
-                                                ? textMuted
-                                                : textPrimary,
-                                            fontSize: 16,
-                                            fontWeight: item.isHeader
-                                                ? FontWeight.w500
-                                                : FontWeight.w700,
-                                          ),
-                                        ),
-                                      ))
-                                  .toList();
-                            },
-                            items: _buildParentDropdownItems(
-                              roots: roots,
-                              textPrimary: textPrimary,
-                              textMuted: textMuted,
-                            )
-                                .map(
-                                  (item) => DropdownMenuItem<String>(
-                                    value: item.value,
-                                    enabled: !item.isHeader,
-                                    child: Text(
-                                      item.label,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: item.isHeader
-                                            ? textMuted
-                                            : textPrimary,
-                                        fontSize: item.isHeader ? 13 : 15,
-                                        fontWeight: item.isHeader
-                                            ? FontWeight.w700
-                                            : FontWeight.w600,
-                                        letterSpacing: item.isHeader ? 0.6 : 0,
+                                const SizedBox(height: 12),
+                                GestureDetector(
+                                  onTap: () => _showAreaPicker(roots),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 180),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 20, vertical: 16),
+                                    decoration: BoxDecoration(
+                                      color: kCardSoft,
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(
+                                        color: _selectedParentUuid != null
+                                            ? AppColors.primary
+                                                .withValues(alpha: 0.5)
+                                            : Colors.transparent,
+                                        width: 1.5,
                                       ),
                                     ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (value) =>
-                                _onParentLocationChanged(value, roots),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        _SectionLabel(label: 'Room Icon', textMuted: textMuted),
-                        const SizedBox(height: 12),
-                        GridView.builder(
-                          itemCount: _roomIcons.length,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            mainAxisExtent: 100,
-                          ),
-                          itemBuilder: (context, index) {
-                            final icon = _roomIcons[index];
-                            final selected = icon.key == _selectedIconKey;
-                            return InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedIconKey = icon.key),
-                              borderRadius: BorderRadius.circular(22),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: kCardSoft,
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(
-                                    color: selected
-                                        ? AppColors.primary
-                                        : Colors.transparent,
-                                    width: 2,
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primary
+                                                .withValues(alpha: 0.13),
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                          ),
+                                          child: const Icon(
+                                            Icons.location_on_rounded,
+                                            color: AppColors.primary,
+                                            size: 22,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                _selectedParentName ??
+                                                    'Select parent area',
+                                                style: TextStyle(
+                                                  color: _selectedParentName !=
+                                                          null
+                                                      ? textPrimary
+                                                      : textMuted,
+                                                  fontSize: 16,
+                                                  fontWeight:
+                                                      _selectedParentName !=
+                                                              null
+                                                          ? FontWeight.w700
+                                                          : FontWeight.w500,
+                                                ),
+                                              ),
+                                              if (_selectedParentName != null)
+                                                Text(
+                                                  'Tap to change',
+                                                  style: TextStyle(
+                                                    color: textMuted.withValues(
+                                                        alpha: 0.6),
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                        const Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          color: AppColors.primary,
+                                          size: 26,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      icon.icon,
-                                      color: selected
-                                          ? AppColors.primary
-                                          : textMuted,
-                                      size: 28,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6),
-                                      child: Text(
-                                        icon.label,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
+                                const SizedBox(height: 30),
+
+                                // ── Room Icon ─────────────────────────────
+                                _SectionLabel(
+                                    label: 'ROOM ICON', textMuted: textMuted),
+                                const SizedBox(height: 12),
+                                GridView.builder(
+                                  itemCount: _roomIcons.length,
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 4,
+                                    crossAxisSpacing: 12,
+                                    mainAxisSpacing: 12,
+                                    mainAxisExtent: 100,
+                                  ),
+                                  itemBuilder: (context, index) {
+                                    final icon = _roomIcons[index];
+                                    final selected =
+                                        icon.key == _selectedIconKey;
+                                    return InkWell(
+                                      onTap: () => setState(
+                                          () => _selectedIconKey = icon.key),
+                                      borderRadius: BorderRadius.circular(22),
+                                      child: AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 150),
+                                        decoration: BoxDecoration(
                                           color: selected
                                               ? AppColors.primary
-                                              : textMuted,
-                                          fontSize: 15,
+                                                  .withValues(alpha: 0.12)
+                                              : kCardSoft,
+                                          borderRadius:
+                                              BorderRadius.circular(22),
+                                          border: Border.all(
+                                            color: selected
+                                                ? AppColors.primary
+                                                : Colors.transparent,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              icon.icon,
+                                              color: selected
+                                                  ? AppColors.primary
+                                                  : textMuted,
+                                              size: 28,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6),
+                                              child: Text(
+                                                icon.label,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color: selected
+                                                      ? AppColors.primary
+                                                      : textMuted,
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 0.8,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 30),
+
+                                // ── Initial Zones ─────────────────────────
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _SectionLabel(
+                                          label: 'ADD INITIAL ZONES',
+                                          textMuted: textMuted),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: kCardSoft,
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                      ),
+                                      child: const Text(
+                                        'OPTIONAL',
+                                        style: TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 11,
                                           fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.8,
+                                          letterSpacing: 2.2,
                                         ),
                                       ),
                                     ),
                                   ],
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 30),
-                        Row(
-                          children: [
-                            Expanded(
-                                child: _SectionLabel(
-                                    label: 'Add Initial Zones',
-                                    textMuted: textMuted)),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: kCardSoft,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: const Text(
-                                'OPTIONAL',
-                                style: TextStyle(
-                                  color: AppColors.primary,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 2.2,
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Specific spots within this room to track items',
+                                  style: TextStyle(
+                                      color: textMuted.withValues(alpha: 0.65),
+                                      fontSize: 12),
                                 ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        for (var i = 0; i < _zones.length; i++) ...[
-                          _zoneRow(_zones[i], i, isDark, kCardSoft, textPrimary,
-                              textMuted),
-                          const SizedBox(height: 10),
-                        ],
-                        InkWell(
-                          onTap: _addCustomZone,
-                          borderRadius: BorderRadius.circular(30),
-                          child: CustomPaint(
-                            painter: _DashedRRectPainter(
-                              color: kBorder,
-                              strokeWidth: 2,
-                              radius: 30,
-                              dashLength: 9,
-                              gapLength: 6,
-                            ),
-                            child: Container(
-                              width: double.infinity,
-                              height: 86,
-                              decoration: BoxDecoration(
-                                color: (isDark
-                                        ? AppColors.surfaceDark
-                                        : AppColors.surfaceLight)
-                                    .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(30),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.add_circle,
-                                      color: textMuted, size: 34 / 2),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Add Custom Zone',
-                                    style: TextStyle(
-                                      color: textMuted,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
+                                const SizedBox(height: 14),
+
+                                // Custom zone text input
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: kCardSoft,
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(20, 4, 8, 4),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                          Icons.add_location_alt_outlined,
+                                          color: AppColors.primary,
+                                          size: 20),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: _customZoneController,
+                                          style: TextStyle(
+                                            color: textPrimary,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          decoration: InputDecoration(
+                                            hintText: 'Add a custom zone…',
+                                            hintStyle: TextStyle(
+                                                color: textMuted, fontSize: 15),
+                                            border: InputBorder.none,
+                                            isDense: true,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                    vertical: 16),
+                                          ),
+                                          textInputAction: TextInputAction.done,
+                                          onSubmitted: (_) => _addCustomZone(),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      GestureDetector(
+                                        onTap: _addCustomZone,
+                                        child: Container(
+                                          width: 46,
+                                          height: 46,
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primary
+                                                .withValues(alpha: 0.14),
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                          ),
+                                          child: const Icon(Icons.add_rounded,
+                                              color: AppColors.primary,
+                                              size: 24),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+
+                                // Zone chips — custom first, then presets
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    for (final zone in _customZones)
+                                      _ZoneChip(
+                                        name: zone,
+                                        selected:
+                                            _selectedZoneNames.contains(zone),
+                                        isCustom: true,
+                                        isDark: isDark,
+                                        textPrimary: textPrimary,
+                                        textMuted: textMuted,
+                                        onTap: () => _toggleZone(zone),
+                                      ),
+                                    for (final zone in _kPresetZones)
+                                      _ZoneChip(
+                                        name: zone,
+                                        selected:
+                                            _selectedZoneNames.contains(zone),
+                                        isCustom: false,
+                                        isDark: isDark,
+                                        textPrimary: textPrimary,
+                                        textMuted: textMuted,
+                                        onTap: () => _toggleZone(zone),
+                                      ),
+                                  ],
+                                ),
+
+                                // Selection summary
+                                if (_selectedZoneNames.isNotEmpty) ...[
+                                  const SizedBox(height: 16),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                          color: AppColors.primary
+                                              .withValues(alpha: 0.22)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.check_circle_rounded,
+                                            color: AppColors.primary, size: 18),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            '${_selectedZoneNames.length} zone${_selectedZoneNames.length == 1 ? '' : 's'} will be created',
+                                            style: const TextStyle(
+                                              color: AppColors.primary,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        GestureDetector(
+                                          onTap: () => setState(
+                                              () => _selectedZoneNames.clear()),
+                                          child: Text(
+                                            'Clear all',
+                                            style: TextStyle(
+                                              color: textMuted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // ── Floating CTA ─────────────────────────────────
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: EdgeInsets.fromLTRB(
+                                22, 18, 22, 22 + bottomInset),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  kBg.withValues(alpha: 0.96),
+                                  kBg,
+                                ],
+                              ),
+                            ),
+                            child: SizedBox(
+                              height: 82,
+                              child: ElevatedButton(
+                                onPressed: _isSaving ? null : _createRoom,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor:
+                                      AppColors.primaryDark,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(26),
+                                  ),
+                                ),
+                                child: _isSaving
+                                    ? const SizedBox(
+                                        width: 26,
+                                        height: 26,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.6,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
+                                        ),
+                                      )
+                                    : const Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            'Create Room',
+                                            style: TextStyle(
+                                              fontSize: 24,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          SizedBox(width: 10),
+                                          Icon(Icons.arrow_forward_ios_rounded,
+                                              size: 28),
+                                        ],
+                                      ),
                               ),
                             ),
                           ),
@@ -802,182 +996,125 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                       ],
                     ),
                   ),
+                ],
+              );
+            },
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+            error: (error, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Failed to load parent locations.\n$error',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.textSecondaryDark),
                 ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          kBg,
-                          kBg,
-                        ],
+              ),
+            ),
+          ),
+        ),
+        if (_isBusy) RoomsLoadingOverlay(label: _busyLabel),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Zone Chip
+// ─────────────────────────────────────────────────────────────
+
+class _PinnedRoomSheetHeader extends StatelessWidget {
+  const _PinnedRoomSheetHeader({
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.textPrimary,
+    required this.onClose,
+    required this.onReset,
+  });
+
+  final Color backgroundColor;
+  final Color borderColor;
+  final Color textPrimary;
+  final VoidCallback onClose;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        border: Border(
+          bottom: BorderSide(color: borderColor.withValues(alpha: 0.85)),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+        child: Column(
+          children: [
+            Center(
+              child: Container(
+                width: 74,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: borderColor,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                SizedBox(
+                  width: 72,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      onPressed: onClose,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: textPrimary,
+                        size: 34,
                       ),
                     ),
-                    child: SizedBox(
-                      height: 82,
-                      child: ElevatedButton(
-                        onPressed: _isSaving ? null : _createRoom,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: AppColors.primaryDark,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26),
-                          ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    'Add New Room',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: textPrimary,
+                      fontSize: 25,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 72,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: onReset,
+                      child: const Text(
+                        'Reset',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
                         ),
-                        child: _isSaving
-                            ? const SizedBox(
-                                width: 26,
-                                height: 26,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.6,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white),
-                                ),
-                              )
-                            : const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    'Create Room',
-                                    style: TextStyle(
-                                      fontSize: 48 / 2,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  SizedBox(width: 10),
-                                  Icon(Icons.arrow_forward_ios_rounded,
-                                      size: 28),
-                                ],
-                              ),
                       ),
                     ),
                   ),
                 ),
               ],
-            );
-          },
-          loading: () => const Center(
-            child: CircularProgressIndicator(color: AppColors.primary),
-          ),
-          error: (error, _) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                'Failed to load parent locations.\n$error',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textSecondaryDark),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  List<_ParentDropdownEntry> _buildParentDropdownItems({
-    required List<LocationModel> roots,
-    required Color textPrimary,
-    required Color textMuted,
-  }) {
-    final entries = <_ParentDropdownEntry>[
-      const _ParentDropdownEntry(
-        value: _customParentValue,
-        label: '✍ Create Custom Location',
-      ),
-    ];
-
-    if (roots.isNotEmpty) {
-      entries.add(const _ParentDropdownEntry(
-        value: '__header_saved__',
-        label: 'YOUR SAVED LOCATIONS',
-        isHeader: true,
-      ));
-      final sortedRoots = [...roots]
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      for (final root in sortedRoots) {
-        entries.add(_ParentDropdownEntry(
-          value: 'existing:${root.uuid}',
-          label: root.name,
-        ));
-      }
-    }
-
-    final rootNames = roots.map((r) => r.name.trim().toLowerCase()).toSet();
-    for (var i = 0; i < _parentLocationGroups.length; i++) {
-      final group = _parentLocationGroups[i];
-      entries.add(_ParentDropdownEntry(
-        value: '__header_group_$i',
-        label: group.title.toUpperCase(),
-        isHeader: true,
-      ));
-
-      for (final location in group.locations) {
-        if (rootNames.contains(location.trim().toLowerCase())) continue;
-        entries.add(_ParentDropdownEntry(
-          value: 'preset:$location',
-          label: location,
-        ));
-      }
-    }
-
-    return entries;
-  }
-
-  Widget _zoneRow(_ZoneOption zone, int index, bool isDark, Color cardSoft,
-      Color textPrimary, Color textMuted) {
-    return InkWell(
-      onTap: () => setState(
-          () => _zones[index] = zone.copyWith(selected: !zone.selected)),
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 98,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: cardSoft,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Row(
-          children: [
-            Icon(zone.icon, color: textMuted, size: 34 / 2),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                zone.name,
-                style: TextStyle(
-                  color: textPrimary,
-                  fontSize: 44 / 2,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: zone.selected
-                      ? AppColors.primary
-                      : (isDark ? AppColors.borderDark : AppColors.borderLight),
-                  width: 2.4,
-                ),
-              ),
-              child: zone.selected
-                  ? const Center(
-                      child: Icon(Icons.circle,
-                          size: 12, color: AppColors.primary),
-                    )
-                  : null,
             ),
           ],
         ),
@@ -985,6 +1122,756 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     );
   }
 }
+
+class _ZoneChip extends StatelessWidget {
+  const _ZoneChip({
+    required this.name,
+    required this.selected,
+    required this.isCustom,
+    required this.isDark,
+    required this.textPrimary,
+    required this.textMuted,
+    required this.onTap,
+  });
+
+  final String name;
+  final bool selected;
+  final bool isCustom;
+  final bool isDark;
+  final Color textPrimary;
+  final Color textMuted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cardSoft =
+        isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color:
+              selected ? AppColors.primary.withValues(alpha: 0.14) : cardSoft,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? AppColors.primary : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(Icons.check_rounded,
+                  color: AppColors.primary, size: 13),
+              const SizedBox(width: 5),
+            ] else if (isCustom) ...[
+              Icon(Icons.star_rounded, color: AppColors.primary, size: 13),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              name,
+              style: TextStyle(
+                color: selected ? AppColors.primary : textMuted,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Area Picker Bottom Sheet
+// ─────────────────────────────────────────────────────────────
+
+class _AreaPickerResult {
+  const _AreaPickerResult({
+    required this.name,
+    required this.isNew,
+    this.uuid,
+  });
+
+  final String name;
+  final bool isNew;
+  final String? uuid;
+}
+
+class _AreaPickerSheet extends ConsumerStatefulWidget {
+  const _AreaPickerSheet({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  ConsumerState<_AreaPickerSheet> createState() => _AreaPickerSheetState();
+}
+
+class _AreaPickerSheetState extends ConsumerState<_AreaPickerSheet> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  bool _isBusy = false;
+  String _busyLabel = 'Syncing area...';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<T> _runWithLoading<T>({
+    required String label,
+    required Future<T> Function() action,
+  }) async {
+    setState(() {
+      _isBusy = true;
+      _busyLabel = label;
+    });
+
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+          _busyLabel = 'Syncing area...';
+        });
+      }
+    }
+  }
+
+  List<String> get _allPresets => _kAreaGroups.expand((g) => g.areas).toList();
+
+  // Returns true when the area name matches a built-in preset, meaning
+  // it was not typed by the user (edit should be disabled for these).
+  bool _isPresetArea(String name) {
+    final lc = name.toLowerCase();
+    return _kAreaGroups.any((g) => g.areas.any((a) => a.toLowerCase() == lc));
+  }
+
+  // ── Swipe-to-edit (custom areas only) ──────────────────────────────────────
+
+  Future<void> _editArea(LocationModel area) async {
+    if (_isBusy) return;
+
+    final isDark = widget.isDark;
+    final controller = TextEditingController(text: area.name);
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        title: Text(
+          'Rename Area',
+          style: TextStyle(
+            color:
+                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Area name',
+            hintStyle: TextStyle(
+              color: isDark
+                  ? AppColors.textSecondaryDark
+                  : AppColors.textSecondaryLight,
+            ),
+            filled: true,
+            fillColor:
+                isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primary),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text(
+              'Save',
+              style: TextStyle(
+                  color: AppColors.primary, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (newName == null ||
+        newName.isEmpty ||
+        newName == area.name ||
+        !mounted) {
+      return;
+    }
+
+    // Prevent renaming to a name that already exists.
+    final currentAreas =
+        ref.read(rootLocationsProvider).valueOrNull ?? const <LocationModel>[];
+    final isDuplicate = currentAreas.any(
+      (a) =>
+          a.uuid != area.uuid &&
+          a.name.trim().toLowerCase() == newName.toLowerCase(),
+    );
+    if (isDuplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"$newName" already exists.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final error = await _runWithLoading<String?>(
+      label: 'Updating area...',
+      action: () => ref
+          .read(locationsNotifierProvider.notifier)
+          .updateLocation(area.copyWith(name: newName)),
+    );
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  // ── Swipe-to-delete (all saved areas) ──────────────────────────────────────
+
+  Future<void> _deleteArea(LocationModel area) async {
+    if (_isBusy) return;
+
+    final isDark = widget.isDark;
+    final allLocs =
+        ref.read(allLocationsProvider).valueOrNull ?? const <LocationModel>[];
+    final hasChildren = allLocs.any((l) => l.parentUuid == area.uuid);
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor:
+                isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+            title: Text(
+              'Delete "${area.name}"?',
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textPrimaryDark
+                    : AppColors.textPrimaryLight,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            content: Text(
+              hasChildren
+                  ? 'All rooms and zones inside it will also be removed.'
+                  : 'This cannot be undone.',
+              style: TextStyle(
+                color: isDark
+                    ? AppColors.textSecondaryDark
+                    : AppColors.textSecondaryLight,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textSecondaryDark
+                        : AppColors.textSecondaryLight,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(
+                      color: AppColors.error, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed || !mounted) return;
+
+    final error = await _runWithLoading<String?>(
+      label: 'Deleting area...',
+      action: () => ref
+          .read(locationsNotifierProvider.notifier)
+          .deleteLocation(area.uuid),
+    );
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  // ── Swipeable tile for "Your Saved Areas" ───────────────────────────────────
+
+  Widget _buildSavedAreaTile(LocationModel area) {
+    final isDark = widget.isDark;
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final cardColor =
+        isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight;
+    final isPreset = _isPresetArea(area.name);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Dismissible(
+          key: ValueKey('saved-area-${area.uuid}'),
+          // Preset areas: delete only. Custom areas: edit + delete.
+          direction: isPreset
+              ? DismissDirection.endToStart
+              : DismissDirection.horizontal,
+          confirmDismiss: (direction) async {
+            if (direction == DismissDirection.startToEnd) {
+              await _editArea(area);
+            } else {
+              await _deleteArea(area);
+            }
+            return false; // reactive rebuild handles removal after delete
+          },
+          // Left-to-right background: Edit (custom areas only)
+          background: isPreset
+              ? const SizedBox.shrink()
+              : Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.only(left: 20),
+                  color: AppColors.primary,
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_outlined, color: Colors.white, size: 20),
+                      SizedBox(width: 6),
+                      Text(
+                        'EDIT',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+          // Right-to-left background: Delete (always)
+          secondaryBackground: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            color: AppColors.error,
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'DELETE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(width: 6),
+                Icon(Icons.delete_outline_rounded,
+                    color: Colors.white, size: 20),
+              ],
+            ),
+          ),
+          child: Material(
+            color: cardColor,
+            child: InkWell(
+              onTap: () => Navigator.pop(
+                context,
+                _AreaPickerResult(
+                    name: area.name, isNew: false, uuid: area.uuid),
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on_rounded,
+                        color: AppColors.primary, size: 20),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        area.name,
+                        style: TextStyle(
+                          color: textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppColors.primary.withValues(alpha: 0.45),
+                      size: 18,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final bgColor = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final cardColor =
+        isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight;
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textMuted =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final borderColor = isDark ? AppColors.borderDark : AppColors.borderLight;
+
+    final query = _query.toLowerCase().trim();
+
+    // Watch the live root locations so the list auto-updates after edits/deletes.
+    final existingAreas =
+        ref.watch(rootLocationsProvider).valueOrNull ?? const <LocationModel>[];
+    final existingNamesLc =
+        existingAreas.map((a) => a.name.toLowerCase()).toSet();
+
+    // Filtered existing areas
+    final filteredExisting = existingAreas
+        .where((a) => query.isEmpty || a.name.toLowerCase().contains(query))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    // For non-empty queries: flat filtered list (excluding already-saved names)
+    final filteredPresets = query.isEmpty
+        ? null
+        : _allPresets
+            .where((a) =>
+                a.toLowerCase().contains(query) &&
+                !existingNamesLc.contains(a.toLowerCase()))
+            .toList();
+
+    return Stack(
+      children: [
+        Container(
+          height: MediaQuery.of(context).size.height * 0.86,
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: borderColor,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: Text(
+                  'Select Parent Area',
+                  style: TextStyle(
+                      color: textPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: Text(
+                  'The broader location this room lives in',
+                  style: TextStyle(color: textMuted, fontSize: 13),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Search bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: false,
+                  onChanged: (v) => setState(() => _query = v),
+                  style: TextStyle(color: textPrimary, fontSize: 15),
+                  decoration: InputDecoration(
+                    hintText: 'Search areas…',
+                    hintStyle: TextStyle(color: textMuted),
+                    prefixIcon:
+                        Icon(Icons.search_rounded, color: textMuted, size: 20),
+                    suffixIcon: _query.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.close_rounded,
+                                color: textMuted, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: cardColor,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(
+                          color: AppColors.primary, width: 1.5),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(22, 4, 22, 32),
+                  children: [
+                    // ── "Create" option — always pinned at top ──────
+                    _AreaTile(
+                      name: query.isNotEmpty
+                          ? 'Create  "$_query"'
+                          : '✍   Create Custom Area',
+                      icon: Icons.add_circle_outline_rounded,
+                      iconColor: AppColors.primary,
+                      textColor: AppColors.primary,
+                      tileColor: AppColors.primary.withValues(alpha: 0.08),
+                      onTap: () => Navigator.pop(
+                        context,
+                        _AreaPickerResult(
+                          name: query.isNotEmpty ? _query.trim() : '',
+                          isNew: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // ── Existing saved areas ─────────────────────────
+                    if (filteredExisting.isNotEmpty) ...[
+                      _SheetSectionHeader(
+                          label: 'YOUR SAVED AREAS',
+                          icon: Icons.bookmark_rounded,
+                          textMuted: textMuted),
+                      for (final area in filteredExisting)
+                        _buildSavedAreaTile(area),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // ── Preset areas ─────────────────────────────────
+                    if (filteredPresets != null) ...[
+                      // Flat search results
+                      if (filteredPresets.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 32),
+                          child: Center(
+                            child: Text(
+                              'No matching areas.\nTap "Create" above to add one.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: textMuted, fontSize: 14),
+                            ),
+                          ),
+                        )
+                      else ...[
+                        _SheetSectionHeader(
+                            label: 'SUGGESTIONS',
+                            icon: Icons.lightbulb_outline_rounded,
+                            textMuted: textMuted),
+                        ...filteredPresets.map(
+                          (area) => _AreaTile(
+                            name: area,
+                            icon: Icons.home_work_rounded,
+                            iconColor: textMuted,
+                            textColor: textPrimary,
+                            tileColor: cardColor,
+                            onTap: () => Navigator.pop(
+                              context,
+                              _AreaPickerResult(name: area, isNew: true),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ] else ...[
+                      // Grouped preset areas (no search active)
+                      for (final group in _kAreaGroups) ...[
+                        _SheetSectionHeader(
+                            label: group.title.toUpperCase(),
+                            icon: group.icon,
+                            textMuted: textMuted),
+                        ...group.areas
+                            .where((a) =>
+                                !existingNamesLc.contains(a.toLowerCase()))
+                            .map(
+                              (area) => _AreaTile(
+                                name: area,
+                                icon: Icons.home_work_rounded,
+                                iconColor: textMuted,
+                                textColor: textPrimary,
+                                tileColor: cardColor,
+                                onTap: () => Navigator.pop(
+                                  context,
+                                  _AreaPickerResult(name: area, isNew: true),
+                                ),
+                              ),
+                            ),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_isBusy) RoomsLoadingOverlay(label: _busyLabel),
+      ],
+    );
+  }
+}
+
+class _AreaTile extends StatelessWidget {
+  const _AreaTile({
+    required this.name,
+    required this.icon,
+    required this.iconColor,
+    required this.textColor,
+    required this.tileColor,
+    required this.onTap,
+  });
+
+  final String name;
+  final IconData icon;
+  final Color iconColor;
+  final Color textColor;
+  final Color tileColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: tileColor,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 20),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    color: iconColor.withValues(alpha: 0.45), size: 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetSectionHeader extends StatelessWidget {
+  const _SheetSectionHeader({
+    required this.label,
+    required this.textMuted,
+    this.icon,
+  });
+
+  final String label;
+  final Color textMuted;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 2, 0, 8),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: textMuted, size: 13),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Shared small widgets & data classes
+// ─────────────────────────────────────────────────────────────
 
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.label, required this.textMuted});
@@ -998,8 +1885,9 @@ class _SectionLabel extends StatelessWidget {
       label,
       style: TextStyle(
         color: textMuted,
-        fontSize: 22 / 2,
+        fontSize: 11,
         fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
       ),
     );
   }
@@ -1017,98 +1905,14 @@ class _RoomIconOption {
   final IconData icon;
 }
 
-class _ZoneOption {
-  const _ZoneOption({
-    required this.name,
+class _AreaGroup {
+  const _AreaGroup({
+    required this.title,
     required this.icon,
-    required this.iconName,
-    this.selected = false,
+    required this.areas,
   });
-
-  final String name;
-  final IconData icon;
-  final String iconName;
-  final bool selected;
-
-  _ZoneOption copyWith({
-    String? name,
-    IconData? icon,
-    String? iconName,
-    bool? selected,
-  }) {
-    return _ZoneOption(
-      name: name ?? this.name,
-      icon: icon ?? this.icon,
-      iconName: iconName ?? this.iconName,
-      selected: selected ?? this.selected,
-    );
-  }
-}
-
-class _ParentLocationGroup {
-  const _ParentLocationGroup({required this.title, required this.locations});
 
   final String title;
-  final List<String> locations;
-}
-
-class _ParentDropdownEntry {
-  const _ParentDropdownEntry({
-    required this.value,
-    required this.label,
-    this.isHeader = false,
-  });
-
-  final String value;
-  final String label;
-  final bool isHeader;
-}
-
-class _DashedRRectPainter extends CustomPainter {
-  const _DashedRRectPainter({
-    required this.color,
-    required this.strokeWidth,
-    required this.radius,
-    required this.dashLength,
-    required this.gapLength,
-  });
-
-  final Color color;
-  final double strokeWidth;
-  final double radius;
-  final double dashLength;
-  final double gapLength;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(
-      rect.deflate(strokeWidth / 2),
-      Radius.circular(radius),
-    );
-    final path = Path()..addRRect(rrect);
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        final next =
-            (distance + dashLength).clamp(0.0, metric.length).toDouble();
-        canvas.drawPath(metric.extractPath(distance, next), paint);
-        distance += dashLength + gapLength;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) {
-    return oldDelegate.color != color ||
-        oldDelegate.strokeWidth != strokeWidth ||
-        oldDelegate.radius != radius ||
-        oldDelegate.dashLength != dashLength ||
-        oldDelegate.gapLength != gapLength;
-  }
+  final IconData icon;
+  final List<String> areas;
 }

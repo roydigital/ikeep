@@ -10,7 +10,7 @@ class HomeTourKeys {
   static const hasSeenSettingsTour = 'has_seen_settings_tour';
 }
 
-class HomeTourController extends AutoDisposeAsyncNotifier<bool> {
+class HomeTourController extends AsyncNotifier<bool> {
   @override
   Future<bool> build() async {
     final prefs = await SharedPreferences.getInstance();
@@ -25,9 +25,7 @@ class HomeTourController extends AutoDisposeAsyncNotifier<bool> {
 }
 
 final homeTourControllerProvider =
-    AsyncNotifierProvider.autoDispose<HomeTourController, bool>(
-      HomeTourController.new,
-    );
+    AsyncNotifierProvider<HomeTourController, bool>(HomeTourController.new);
 
 class ItemListingTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
@@ -45,8 +43,8 @@ class ItemListingTourController extends AutoDisposeAsyncNotifier<bool> {
 
 final itemListingTourControllerProvider =
     AsyncNotifierProvider.autoDispose<ItemListingTourController, bool>(
-      ItemListingTourController.new,
-    );
+  ItemListingTourController.new,
+);
 
 class RoomsTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
@@ -64,8 +62,8 @@ class RoomsTourController extends AutoDisposeAsyncNotifier<bool> {
 
 final roomsTourControllerProvider =
     AsyncNotifierProvider.autoDispose<RoomsTourController, bool>(
-      RoomsTourController.new,
-    );
+  RoomsTourController.new,
+);
 
 class SettingsTourController extends AutoDisposeAsyncNotifier<bool> {
   @override
@@ -83,5 +81,5 @@ class SettingsTourController extends AutoDisposeAsyncNotifier<bool> {
 
 final settingsTourControllerProvider =
     AsyncNotifierProvider.autoDispose<SettingsTourController, bool>(
-      SettingsTourController.new,
-    );
+  SettingsTourController.new,
+);

@@ -4,7 +4,10 @@
       "Bash(flutter pub:*)",
       "Bash(flutter analyze:*)",
       "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/save/**)",
-      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/search/**)"
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/search/**)",
+      "Bash(dart analyze:*)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/core/constants/**)",
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/**)"
     ]
   }
 }

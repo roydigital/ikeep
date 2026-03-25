@@ -230,7 +230,8 @@ class ItemRepositoryImpl implements ItemRepository {
     final location = locationUuid == null
         ? null
         : await locationDao.getLocationByUuid(locationUuid);
-    final locationName = location?.name ?? locationUuid ?? 'Unknown';
+    final locationName =
+        location?.fullPath ?? location?.name ?? locationUuid ?? 'Unknown';
 
     return ItemLocationHistory(
       uuid: generateUuid(),

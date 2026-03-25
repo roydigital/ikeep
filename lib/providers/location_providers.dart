@@ -40,7 +40,12 @@ class LocationsNotifier extends StateNotifier<bool> {
     final failure =
         await _ref.read(locationRepositoryProvider).saveLocation(location);
     if (failure != null) return failure.message;
-    await _syncLocationToCloud(location);
+    // Re-fetch so the repository-computed fullPath is included in the sync,
+    // not the original object which has fullPath: null.
+    final saved =
+        await _ref.read(locationRepositoryProvider).getLocation(location.uuid)
+            ?? location;
+    await _syncLocationToCloud(saved);
     _ref.invalidate(allLocationsProvider);
     _ref.invalidate(rootLocationsProvider);
     return null;
@@ -50,7 +55,12 @@ class LocationsNotifier extends StateNotifier<bool> {
     final failure =
         await _ref.read(locationRepositoryProvider).updateLocation(location);
     if (failure != null) return failure.message;
-    await _syncLocationToCloud(location);
+    // Re-fetch so the recomputed fullPath (and any descendant path changes)
+    // are reflected in Firestore.
+    final updated =
+        await _ref.read(locationRepositoryProvider).getLocation(location.uuid)
+            ?? location;
+    await _syncLocationToCloud(updated);
     _ref.invalidate(allLocationsProvider);
     _ref.invalidate(singleLocationProvider(location.uuid));
     return null;

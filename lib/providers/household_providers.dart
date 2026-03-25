@@ -108,8 +108,9 @@ final incomingBorrowRequestsProvider =
     FutureProvider<List<FirestoreBorrowRequest>>((ref) async => const []);
 final outgoingBorrowRequestsProvider =
     FutureProvider<List<FirestoreBorrowRequest>>((ref) async => const []);
-final borrowRequestsForItemProvider = FutureProvider.family<
-    List<FirestoreBorrowRequest>, String>((ref, itemUuid) async => const []);
+final borrowRequestsForItemProvider =
+    FutureProvider.family<List<FirestoreBorrowRequest>, String>(
+        (ref, itemUuid) async => const []);
 final pendingIncomingCountProvider = Provider<int>((ref) => 0);
 
 List<SharedItem> _toSharedItems(
@@ -121,8 +122,7 @@ List<SharedItem> _toSharedItems(
         (item) => SharedItem(
           itemUuid: item.uuid,
           ownerUid: item.cloudId ?? '',
-          ownerName:
-              item.cloudId == currentUserId ? 'You' : 'Household member',
+          ownerName: item.cloudId == currentUserId ? 'You' : 'Household member',
           name: item.name,
           locationName: item.locationName ?? item.locationFullPath ?? '',
           tags: item.tags,
@@ -168,8 +168,9 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
   Future<String?> createHousehold({required String name}) async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
-      final failure =
-          await _ref.read(householdRepositoryProvider).createHousehold(name: name);
+      final failure = await _ref
+          .read(householdRepositoryProvider)
+          .createHousehold(name: name);
       if (failure != null) {
         state = state.copyWith(isLoading: false, lastError: failure.message);
         return failure.message;
@@ -241,12 +242,14 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
         householdId: targetVisibility.isHousehold ? householdId : null,
         clearHouseholdId: !targetVisibility.isHousehold,
         isBackedUp: item.isBackedUp,
-        sharedWithMemberUuids:
-            targetVisibility.isHousehold ? item.sharedWithMemberUuids : const [],
+        sharedWithMemberUuids: targetVisibility.isHousehold
+            ? item.sharedWithMemberUuids
+            : const [],
         updatedAt: DateTime.now(),
       );
 
-      final failure = await _ref.read(itemRepositoryProvider).updateItem(updated);
+      final failure =
+          await _ref.read(itemRepositoryProvider).updateItem(updated);
       if (failure != null) {
         state = state.copyWith(isLoading: false, lastError: failure.message);
         return failure.message;
@@ -339,10 +342,14 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
 
     await _ref.read(notificationServiceProvider).cancelLentReminder(item.uuid);
 
+    final previousStatus = _ref.read(syncStatusProvider);
     final syncResult = await _ref.read(syncServiceProvider).syncItem(updated);
-    _ref.read(syncStatusProvider.notifier).state = syncResult;
+    publishSyncResult(_ref, syncResult, fallbackStatus: previousStatus);
 
     _invalidateItemState(item.uuid);
+    if (syncResult.status == SyncStatus.error) {
+      return syncResult.errorMessage ?? 'Unable to sync returned item';
+    }
     return null;
   }
 
@@ -359,7 +366,7 @@ class HouseholdNotifier extends StateNotifier<HouseholdActionState> {
     _ref.invalidate(currentHouseholdIdProvider);
     _ref.invalidate(householdMembersProvider);
     final syncResult = await _ref.read(householdSyncBootstrapProvider.future);
-    _ref.read(syncStatusProvider.notifier).state = syncResult;
+    publishSyncResult(_ref, syncResult, publishErrors: true);
   }
 
   /// Refreshes only the providers that are likely stale after a single-item
@@ -472,8 +479,9 @@ class HouseholdMemberLookupController
     );
 
     try {
-      final user =
-          await _ref.read(householdRepositoryProvider).getUserByEmail(normalizedEmail);
+      final user = await _ref
+          .read(householdRepositoryProvider)
+          .getUserByEmail(normalizedEmail);
       if (user == null) {
         state = state.copyWith(
           isLoading: false,

@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:ikeep/data/repositories/item_repository.dart';
@@ -13,6 +17,7 @@ import 'package:ikeep/providers/repository_providers.dart';
 import 'package:ikeep/providers/service_providers.dart';
 import 'package:ikeep/providers/settings_provider.dart';
 import 'package:ikeep/screens/save/save_screen.dart';
+import 'package:ikeep/services/image_service.dart';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -21,20 +26,24 @@ class MockItemRepository extends Mock implements ItemRepository {}
 
 class FakeItem extends Fake implements Item {}
 
-/// A minimal fake ImageService that always throws on camera/gallery pick,
-/// simulating the user cancelling. This avoids trying to `implements` the
-/// concrete [ImageService] class (which Dart 3 forbids for plain classes).
-class FakeImageService {
-  Future<String> pickFromCamera() async =>
-      throw Exception('No image captured');
+class FakeImageService extends ImageService {
+  FakeImageService(this.pickedImagePath);
 
-  Future<String> pickFromGallery() async =>
-      throw Exception('No image selected');
+  final String pickedImagePath;
 
+  @override
+  Future<String> pickFromCamera() async => pickedImagePath;
+
+  @override
+  Future<String> pickFromGallery() async => pickedImagePath;
+
+  @override
   Future<List<String>> pickMultipleFromGallery() async => [];
 
+  @override
   Future<void> deleteImage(String imagePath) async {}
 
+  @override
   Future<void> deleteImages(List<String> imagePaths) async {}
 }
 
@@ -48,10 +57,24 @@ Widget createTestSaveScreen({
   required MockItemRepository mockItemRepo,
   required FakeImageService fakeImageService,
 }) {
+  final router = GoRouter(
+    initialLocation: '/save',
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const Scaffold(body: SizedBox.shrink()),
+      ),
+      GoRoute(
+        path: '/save',
+        builder: (context, state) => const SaveScreen(),
+      ),
+    ],
+  );
+
   return ProviderScope(
     overrides: [
       // Override image service with our fake.
-      imageServiceProvider.overrideWithValue(fakeImageService as dynamic),
+      imageServiceProvider.overrideWithValue(fakeImageService),
 
       // Override item repository so we can verify calls.
       itemRepositoryProvider.overrideWithValue(mockItemRepo),
@@ -69,17 +92,13 @@ Widget createTestSaveScreen({
         (ref, path) => Future.value([]),
       ),
 
-      // Minimal settings (not premium, backup disabled).
+      // Minimal settings for the non-monetized release build.
       settingsProvider.overrideWith(
         (ref) => SettingsNotifier(),
       ),
     ],
-    child: MaterialApp(
-      home: Navigator(
-        onGenerateRoute: (_) => MaterialPageRoute(
-          builder: (_) => const SaveScreen(),
-        ),
-      ),
+    child: MaterialApp.router(
+      routerConfig: router,
     ),
   );
 }
@@ -87,6 +106,7 @@ Widget createTestSaveScreen({
 void main() {
   late MockItemRepository mockItemRepo;
   late FakeImageService fakeImageService;
+  late Directory tempDir;
 
   setUpAll(() {
     registerFallbackValue(FakeItem());
@@ -94,7 +114,20 @@ void main() {
 
   setUp(() {
     mockItemRepo = MockItemRepository();
-    fakeImageService = FakeImageService();
+    tempDir = Directory.systemTemp.createTempSync('ikeep-save-screen-test-');
+    final imageFile = File('${tempDir.path}${Platform.pathSeparator}photo.png');
+    imageFile.writeAsBytesSync(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aSfoAAAAASUVORK5CYII=',
+      ),
+    );
+    fakeImageService = FakeImageService(imageFile.path);
+  });
+
+  tearDown(() {
+    if (tempDir.existsSync()) {
+      tempDir.deleteSync(recursive: true);
+    }
   });
 
   group('SaveScreen form interaction', () {
@@ -105,10 +138,13 @@ void main() {
           fakeImageService: fakeImageService,
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // The save screen shows TextField widgets for item name (at minimum).
       expect(find.byType(TextField), findsWidgets);
+      expect(find.text('0 / 1000 cloud backups used'), findsOneWidget);
+      expect(find.textContaining('Ikeep Plus'), findsNothing);
     });
 
     testWidgets('does not call repository when name is empty', (tester) async {
@@ -118,15 +154,17 @@ void main() {
           fakeImageService: fakeImageService,
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Look for save button and tap it without entering a name.
       final saveFinder = find.textContaining(
         RegExp(r'save|Save', caseSensitive: false),
       );
       if (saveFinder.evaluate().isNotEmpty) {
-        await tester.tap(saveFinder.first);
-        await tester.pumpAndSettle();
+        await tester.tap(saveFinder.first, warnIfMissed: false);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
       }
 
       // Repository saveItem should NOT have been called.

@@ -192,9 +192,10 @@ class ItemDao {
           OR LOWER(i.${DbConstants.colItemTags}) LIKE ?
           OR LOWER(i.${DbConstants.colItemNotes}) LIKE ?
           OR LOWER(l.name) LIKE ?
+          OR LOWER(l.full_path) LIKE ?
         )
       ORDER BY i.${DbConstants.colItemSavedAt} DESC
-    ''', [like, like, like, like]);
+    ''', [like, like, like, like, like]);
     return rows.map(Item.fromMap).toList();
   }
 

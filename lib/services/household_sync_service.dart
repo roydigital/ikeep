@@ -321,8 +321,12 @@ class HouseholdSyncService {
       latitude: (data['latitude'] as num?)?.toDouble(),
       longitude: (data['longitude'] as num?)?.toDouble(),
       expiryDate: _parseDateTime(data['expiryDate']),
+      warrantyEndDate: _parseDateTime(data['warrantyEndDate']),
       isArchived: data['isArchived'] as bool? ?? false,
       notes: data['notes'] as String?,
+      invoicePath: data['invoicePath'] as String?,
+      invoiceFileName: data['invoiceFileName'] as String?,
+      invoiceFileSizeBytes: (data['invoiceFileSizeBytes'] as num?)?.toInt(),
       cloudId: data['ownerUid'] as String?,
       lastSyncedAt: _parseDateTime(data['updatedAt']),
       isLent: data['isLent'] as bool? ?? false,
@@ -331,8 +335,7 @@ class HouseholdSyncService {
       expectedReturnDate: _parseDateTime(data['expectedReturnDate']),
       seasonCategory: (data['seasonCategory'] as String?) ?? 'all_year',
       lentReminderAfterDays: data['lentReminderAfterDays'] as int?,
-      isAvailableForLending:
-          (data['isAvailableForLending'] as bool?) ?? true,
+      isAvailableForLending: (data['isAvailableForLending'] as bool?) ?? true,
       visibility: ItemVisibility.household,
       householdId: householdId,
       sharedWithMemberUuids: List<String>.from(

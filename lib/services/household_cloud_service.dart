@@ -8,6 +8,7 @@ import '../domain/models/item.dart';
 import '../domain/models/item_location_history.dart';
 import '../domain/models/shared_item.dart';
 import 'firebase_image_upload_service.dart';
+import 'firebase_invoice_storage_service.dart';
 
 /// Manages all Firestore operations for household sharing:
 /// - Household creation, member invites, member fetching
@@ -18,13 +19,16 @@ class HouseholdCloudService {
     required FirebaseAuth auth,
     required FirebaseFirestore firestore,
     required FirebaseImageUploadService imageUploadService,
+    required FirebaseInvoiceStorageService invoiceStorageService,
   })  : _auth = auth,
         _firestore = firestore,
-        _imageUploadService = imageUploadService;
+        _imageUploadService = imageUploadService,
+        _invoiceStorageService = invoiceStorageService;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final FirebaseImageUploadService _imageUploadService;
+  final FirebaseInvoiceStorageService _invoiceStorageService;
 
   static const _usersCol = 'users';
   static const _householdsCol = 'households';
@@ -308,8 +312,7 @@ class HouseholdCloudService {
     final user = _auth.currentUser;
     if (user == null) return null;
     try {
-      final snap =
-          await _firestore.collection(_usersCol).doc(user.uid).get();
+      final snap = await _firestore.collection(_usersCol).doc(user.uid).get();
       return snap.data()?['householdId'] as String?;
     } catch (_) {
       return null;
@@ -431,11 +434,22 @@ class HouseholdCloudService {
   }) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    final uploadedImageUrls = await _imageUploadService.uploadItemImages(
-      userId: user.uid,
-      itemUuid: item.uuid,
-      imagePaths: item.imagePaths,
-    );
+    final uploadResults = await Future.wait<Object?>([
+      _imageUploadService.uploadItemImages(
+        userId: user.uid,
+        itemUuid: item.uuid,
+        imagePaths: item.imagePaths,
+      ),
+      _invoiceStorageService.uploadItemInvoice(
+        userId: user.uid,
+        itemUuid: item.uuid,
+        invoicePath: item.invoicePath,
+        invoiceFileName: item.invoiceFileName,
+        invoiceFileSizeBytes: item.invoiceFileSizeBytes,
+      ),
+    ]);
+    final uploadedImageUrls = uploadResults[0] as List<String>;
+    final uploadedInvoice = uploadResults[1] as StoredInvoiceFile?;
     final itemRef = _firestore
         .collection(_householdsCol)
         .doc(householdId)
@@ -458,7 +472,17 @@ class HouseholdCloudService {
         : _displayName(user);
 
     await itemRef.set({
-      ...item.copyWith(imagePaths: uploadedImageUrls).toJson(),
+      ...item
+          .copyWith(
+            imagePaths: uploadedImageUrls,
+            invoicePath: uploadedInvoice?.path,
+            invoiceFileName: uploadedInvoice?.fileName,
+            invoiceFileSizeBytes: uploadedInvoice?.sizeBytes,
+            clearInvoicePath: uploadedInvoice == null,
+            clearInvoiceFileName: uploadedInvoice == null,
+            clearInvoiceFileSizeBytes: uploadedInvoice == null,
+          )
+          .toJson(),
       'ownerUid': ownerUid,
       'ownerName': ownerName,
       'householdId': householdId,

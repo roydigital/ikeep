@@ -8,6 +8,8 @@ import '../data/repositories/household_repository.dart';
 import '../data/repositories/household_repository_impl.dart';
 import '../data/repositories/item_repository.dart';
 import '../data/repositories/item_repository_impl.dart';
+import '../data/repositories/location_hierarchy_repository.dart';
+import '../data/repositories/location_hierarchy_repository_impl.dart';
 import '../data/repositories/location_repository.dart';
 import '../data/repositories/location_repository_impl.dart';
 import 'database_provider.dart';
@@ -25,6 +27,14 @@ final itemRepositoryProvider = Provider<ItemRepository>(
 final locationRepositoryProvider = Provider<LocationRepository>(
   (ref) => LocationRepositoryImpl(
     locationDao: ref.watch(locationDaoProvider),
+  ),
+);
+
+final locationHierarchyRepositoryProvider =
+    Provider<LocationHierarchyRepository>(
+  (ref) => LocationHierarchyRepositoryImpl(
+    locationDao: ref.watch(locationDaoProvider),
+    locationRepository: ref.watch(locationRepositoryProvider),
   ),
 );
 

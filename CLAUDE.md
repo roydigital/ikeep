@@ -60,18 +60,21 @@ flutter clean                            # Clean build artifacts
 
 ```
 lib/
-├── main.dart                     # Entry: Firebase.initializeApp, NotificationService, ProviderScope
-├── app.dart                      # IkeepApp (ConsumerWidget): router + theme + settings wiring
+├── main.dart                     # Entry: Firebase.initializeApp, BackgroundScheduler, loadStoredAppSettings, ProviderScope
+├── app.dart                      # IkeepApp (ConsumerWidget): router + theme + settings wiring + location hierarchy migration bootstrap
 │
 ├── core/
-│   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants, subscription_constants
+│   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants, feature_limits
 │   ├── errors/                   # app_exception.dart, failure.dart
-│   └── utils/                    # uuid_generator, path_utils, fuzzy_search
+│   └── utils/                    # uuid_generator, path_utils, fuzzy_search, location_hierarchy_utils
 │
 ├── domain/
 │   └── models/
-│       ├── item.dart             # Item (with lending + visibility + isBackedUp fields; computed getters: isShared→false, isNearby→false)
-│       ├── location_model.dart   # LocationModel (hierarchical)
+│       ├── item.dart             # Item (with lending + visibility + isBackedUp + hierarchical location FK fields: areaUuid, roomUuid, zoneUuid)
+│       ├── location_model.dart   # LocationModel (hierarchical, with LocationType enum: area, room, zone)
+│       ├── area.dart             # Area model (top-level location type)
+│       ├── room.dart             # Room model (intermediate location type, child of Area)
+│       ├── zone.dart             # Zone model (leaf location type — canonical item storage reference)
 │       ├── item_location_history.dart # History entry (with member attribution)
 │       ├── item_visibility.dart  # ItemVisibility enum: private_, household
 │       ├── household.dart        # Household (local SQLite model — id, ownerId, name, memberIds)
@@ -87,8 +90,8 @@ lib/
 │
 ├── data/
 │   ├── database/
-│   │   ├── database_helper.dart  # SQLite singleton (v11), creates all 7 tables
-│   │   ├── item_dao.dart         # CRUD for items table
+│   │   ├── database_helper.dart  # SQLite singleton (v13), creates all 7 tables
+│   │   ├── item_dao.dart         # CRUD for items table (with hierarchical location joins)
 │   │   ├── location_dao.dart     # CRUD for locations table
 │   │   ├── history_dao.dart      # CRUD for item_location_history (with member attribution)
 │   │   ├── borrow_request_dao.dart   # CRUD for borrow_requests table
@@ -98,6 +101,7 @@ lib/
 │   └── repositories/
 │       ├── item_repository.dart / item_repository_impl.dart
 │       ├── location_repository.dart / location_repository_impl.dart
+│       ├── location_hierarchy_repository.dart / location_hierarchy_repository_impl.dart  # Typed CRUD for Areas, Rooms, Zones
 │       ├── history_repository.dart / history_repository_impl.dart
 │       ├── borrow_request_repository.dart / borrow_request_repository_impl.dart
 │       └── household_repository.dart / household_repository_impl.dart
@@ -107,11 +111,12 @@ lib/
 │   ├── repository_providers.dart # Riverpod providers for repositories
 │   ├── auth_providers.dart       # authStateProvider, authSessionBootstrapProvider, isSignedInProvider, signInFirebaseWithGoogleAccount helper
 │   ├── item_providers.dart       # allItemsProvider, archivedItemsProvider, lentItemsProvider, lendableItemsProvider, forgottenItemsProvider, ItemsNotifier
-│   ├── location_providers.dart   # Location Riverpod providers
+│   ├── location_providers.dart   # Flat location Riverpod providers (legacy, used during transition)
+│   ├── location_hierarchy_providers.dart # Hierarchical location providers: areasProvider, roomsForAreaProvider, zonesForRoomProvider, LocationSelectionController
 │   ├── location_usage_providers.dart # locationsWithDerivedUsageProvider — derived usage counts for locations
 │   ├── history_providers.dart    # History Riverpod providers
-│   ├── settings_provider.dart    # AppSettings + SettingsNotifier (SharedPreferences-backed)
-│   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, etc.
+│   ├── settings_provider.dart    # AppSettings + SettingsNotifier (SharedPreferences-backed; premium/billing state removed)
+│   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, locationHierarchyMigrationServiceProvider, etc.
 │   ├── household_providers.dart  # Household members, shared items, borrow requests
 │   ├── home_tour_provider.dart   # HomeTourController, ItemListingTourController, RoomsTourController, SettingsTourController — showcaseview tour state
 │   ├── sync_providers.dart       # SyncService providers
@@ -122,13 +127,14 @@ lib/
 │   ├── image_service.dart        # Image pick + compress + local save
 │   ├── image_optimizer_service.dart # OptimizedImageResult + optimizeForUpload() — platform-specific format handling for cloud uploads
 │   ├── sync_service.dart         # Cloud sync orchestration (interface)
-│   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations; requires isPremiumUser callback
+│   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations (unified limits from feature_limits.dart)
 │   ├── firebase_image_upload_service.dart # Firebase Storage uploads with ImageOptimizerService + upload caching (_CachedUpload)
 │   ├── background_scheduler_service.dart  # Workmanager-based: weeklyStaleCheckTask, monthlySeasonalCheckTask; ikeepWorkmanagerDispatcher entry point
 │   ├── household_cloud_service.dart # Firestore ops for household sharing & borrow requests
 │   ├── household_sync_service.dart  # Real-time Firestore listener sync for household items + history; uses PendingSyncDao for offline queue
 │   ├── nearby_cloud_service.dart # Firestore ops for geo-based nearby lending
 │   ├── location_service.dart     # GPS → locality string (cached 24h)
+│   ├── location_hierarchy_migration_service.dart # Phase 5 migration: backfills areaUuid/roomUuid for all items at app startup
 │   ├── appwrite_sync_service.dart# Appwrite cloud sync (stub)
 │   └── ml_label_service.dart     # ML Kit label extraction (stub)
 │
@@ -149,15 +155,18 @@ lib/
 │   ├── rooms/rooms_screen.dart
 │   ├── rooms/add_new_room_screen.dart
 │   ├── onboarding/onboarding_screen.dart
-│   ├── settings/settings_screen.dart
-│   ├── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
-│   └── settings/paywall_screen.dart             # Ikeep Plus upgrade modal (shown via PaywallScreen.show(context)); plans: Monthly $1.99 / Yearly $14.99 / Lifetime $29.99
+│   ├── settings/settings_screen.dart              # Settings (premium/paywall UI removed)
+│   └── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
 │
 └── widgets/
     ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings
     ├── adaptive_image.dart           # Loads both local File and remote Network images with fallback handling
     ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + built-in TooltipDefaultActionType buttons for showcaseview
-    └── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
+    ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
+    └── location_picker_sheet.dart    # Cascading location picker (Area → optional Room → Zone)
+
+docs/
+└── PREMIUM_FEATURE_REBUILD.md        # Contract documenting removal/restoration of premium/billing features
 
 web_content/
 └── ikeep/
@@ -169,7 +178,15 @@ test/
 ├── widget_test.dart
 ├── core/utils/fuzzy_search_test.dart
 ├── domain/models/item_test.dart
-└── screens/save_screen_test.dart
+├── providers/
+│   ├── item_providers_test.dart
+│   └── settings_provider_test.dart
+├── screens/
+│   ├── save_screen_test.dart
+│   └── settings_screen_test.dart
+└── services/
+    ├── firebase_image_upload_service_test.dart
+    └── firebase_sync_service_test.dart
 ```
 
 ---
@@ -193,9 +210,9 @@ Screens / Widgets
 - **Providers** expose `FutureProvider`, `StateNotifierProvider`, etc. Mutations go through `*Notifier` classes which call `ref.invalidate(...)` to refresh derived providers.
 - **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths). Current named routes: `/`, `/onboarding`, `/home`, `/save`, `/item/:uuid`, `/rooms`, `/settings`, `/settings/manage-family`, `/search`.
 
-### SQLite Schema (7 tables, v11)
-- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes `is_backed_up` (per-item cloud backup opt-in), lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`) and `visibility` (private/household)
-- `locations` — hierarchical (self-referencing `parent_uuid`), tree via `full_path`
+### SQLite Schema (7 tables, v13)
+- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes `is_backed_up` (per-item cloud backup opt-in), lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`), `visibility` (private/household), and hierarchical location FKs (`area_uuid`, `room_uuid`, `zone_uuid` — added in v13)
+- `locations` — hierarchical (self-referencing `parent_uuid`), tree via `full_path`; has `location_type` column (area/room/zone)
 - `item_location_history` — log of location changes per item; includes `moved_by_member_uuid` and `moved_by_name` for household attribution
 - `pending_sync_operations` — offline-first cloud sync queue; managed by `PendingSyncDao` (enqueue, getAll, deleteById); `HouseholdSyncService` flushes on reconnect
 - `borrow_requests` — local borrow request queue (status: pending/approved/denied/cancelled); FK to items
@@ -217,7 +234,7 @@ Screens / Widgets
 ### Key Providers to Know
 | Provider | Type | Purpose |
 |----------|------|---------|
-| `settingsProvider` | `StateNotifierProvider<SettingsNotifier, AppSettings>` | Theme mode, onboarding flag, `isPremium`, `isBackupEnabled`, notification toggles |
+| `settingsProvider` | `StateNotifierProvider<SettingsNotifier, AppSettings>` | Theme mode, onboarding flag, `isBackupEnabled`, notification toggles (premium/plan state removed) |
 | `backedUpItemsCountProvider` | `FutureProvider<int>` | Count of items with `isBackedUp = true`; used for quota display in settings |
 | `allItemsProvider` | `FutureProvider<List<Item>>` | All non-archived items |
 | `archivedItemsProvider` | `FutureProvider<List<Item>>` | All archived items |
@@ -248,6 +265,14 @@ Screens / Widgets
 | `itemListingTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Item listing tour state |
 | `roomsTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Rooms screen tour state |
 | `settingsTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Settings screen tour state |
+| `areasProvider` | `FutureProvider<List<LocationModel>>` | All top-level areas sorted by usage desc, name asc |
+| `roomsForAreaProvider` | `FutureProvider.family<List<LocationModel>, String>` | Rooms under a given area |
+| `zonesForRoomProvider` | `FutureProvider.family<List<LocationModel>, String>` | Zones under a given room |
+| `directZonesForAreaProvider` | `FutureProvider.family<List<LocationModel>, String>` | Zones directly under an area (no room parent) |
+| `locationSelectionProvider` | `StateNotifierProvider.autoDispose` | Cascading selection state for Area → Room → Zone picker |
+| `locationHierarchyNotifierProvider` | `StateNotifierProvider` | Typed create/update/delete for Areas, Rooms, Zones |
+| `locationHierarchyRepositoryProvider` | `Provider<LocationHierarchyRepository>` | Repository for hierarchical location CRUD |
+| `locationHierarchyMigrationProvider` | `FutureProvider` | Runs Phase 5 migration at app startup (backfills areaUuid/roomUuid) |
 
 ---
 
@@ -288,9 +313,8 @@ Never hardcode colors — use `app_colors.dart` constants, then reference via `A
 | Search | Built |
 | Item Detail | Built |
 | Rooms / Add Room | Built |
-| Settings | Built (includes Online Backup section with sync status + last-synced time) |
+| Settings | Built (includes Online Backup section; premium/paywall UI removed) |
 | Household Settings | Built (`/settings/manage-family`) — create household, add members via email lookup, view members list |
-| Paywall / Ikeep Plus | Built (`PaywallScreen.show(context)` — modal bottom sheet, no dedicated route) |
 | Network | Future aspect only for now; detailed notes retained below for later implementation |
 | Login / Auth | Built (currently used for account/backup flows; previous Network-related notes remain below for future reference) |
 | History Timeline | **Not built** |
@@ -360,8 +384,16 @@ Shows a sign-in prompt if the user is not authenticated.
 4. Requester can cancel → status: `cancelled`
 5. (Firestore only) Item returned → status: `returned`
 
+### Item Location Fields (Hierarchical — Phase 1)
+- `locationUuid` — **legacy** FK to `locations` table; kept for backward compatibility during migration. Will be removed in Phase 5.
+- `areaUuid` — FK to Area in `locations` table; allows filtering by area without JOINs. Null until populated by Phase 5 migration.
+- `roomUuid` — FK to Room in `locations` table (nullable — zones can be direct children of areas).
+- `zoneUuid` — FK to Zone in `locations` table; **primary "where is this item?" reference**.
+- `areaName`, `roomName`, `zoneName` — denormalized display-only fields populated by SQL JOINs, never persisted.
+- `locationName`, `locationFullPath` — legacy display fields from the old flat location join.
+
 ### Item Lending / Sharing Fields (on Item model)
-- `isBackedUp` — whether this item is opted into cloud backup (default: `false`); set to `true` by `FirebaseSyncService` after first successful sync; free-tier cap: 50 items
+- `isBackedUp` — whether this item is opted into cloud backup (default: `false`); set to `true` by `FirebaseSyncService` after first successful sync; cap: 1000 items
 - `cloudId` — Firestore document ID after first backup (defaults to item's own `uuid`)
 - `lastSyncedAt` — timestamp of last successful cloud sync
 - `isLent`, `lentTo`, `lentOn`, `expectedReturnDate`, `lentReminderAfterDays` — track active lends
@@ -372,13 +404,14 @@ Shows a sign-in prompt if the user is not authenticated.
 - `sharedWithMemberUuids` — list of member UUIDs this item is explicitly shared with (empty = all household members); cleared when item goes private
 - **Computed getters:** `isShared` → always `false`, `isNearby` → always `false` (social sharing disabled)
 
-### Premium / Subscription System
-- **`AppPlan` enum** — `free`, `monthly`, `yearly`, `lifetime`; each has `isPremium` computed getter (`!= free`); stored in `AppSettings.plan`
-- **`isPremium`** — also stored in `AppSettings` / SharedPreferences (`is_premium` key) for backward compatibility; toggled by `SettingsNotifier.setPremium(bool)`
-- **`isBackupEnabled`** — separate flag; user must explicitly enable backup (stored as `backup_enabled`)
-- **Free tier:** `freeCloudBackupLimit = 50` items (defined in `subscription_constants.dart`); warning at `freeCloudBackupWarningThreshold = 45`
-- **`FirebaseSyncService`** — constructor requires `isPremiumUser` callback; `_ensureCloudQuotaForItem()` throws `SyncException('Cloud quota exceeded')` when a new (non-previously-synced) item would exceed the free limit; premium users skip this check
-- **`PaywallScreen`** — modal bottom sheet triggered when user hits the paywall; calls `setPremium(true)` on button tap (no real payment integration yet — stub)
+### Feature Limits (Unified — No Premium Tiers)
+> Premium/billing system was fully removed for closed testing. All monetization code (Google Play Billing, PaywallScreen, AppPlan enum, isPremium state) has been deleted. Legacy SharedPreferences keys (`is_premium`, `app_plan`) are auto-migrated and cleared on first app load. Archived at `refs/archive/premium-pre-detach-20260324-145524` for future restoration.
+
+- **`feature_limits.dart`** — single source of truth for all limits (replaces removed `subscription_constants.dart`)
+- **Cloud backup limit:** `cloudBackupLimit = 1000` items; warning at `cloudBackupWarningThreshold = 900`
+- **Photo limit:** `itemPhotoLimit = 3` per item
+- **`isBackupEnabled`** — user must explicitly enable backup (stored as `backup_enabled` in SharedPreferences)
+- **`FirebaseSyncService`** — uses `feature_limits.dart` directly; `_ensureCloudQuotaForItem()` throws `SyncException('Cloud quota exceeded')` when limit is reached
 - **`backedUpItemsCountProvider`** — tracks how many items are currently backed up; used to render quota UI in settings
 
 ### Notification Channels
@@ -401,6 +434,14 @@ Shows a sign-in prompt if the user is not authenticated.
 - `ImageOptimizerService` — Optimizes images before cloud upload with platform-specific format selection (`optimizeForUpload()` → `OptimizedImageResult`)
 - `FirebaseImageUploadService` — Uploads to Firebase Storage; uses `ImageOptimizerService` + internal `_CachedUpload` cache to avoid re-uploading unchanged images
 
+### Hierarchical Location System (Area → Room → Zone)
+- **LocationType enum** (`location_model.dart`) — `area`, `room`, `zone`; each has `value` (storage string), `label` (display), `canContainChildren` (false for zones), `canBeItemLocation` (true only for zones), and `fromStorage()` factory for migration
+- **Hierarchy:** Area (top-level, e.g., "Kitchen") → Room (optional intermediate, e.g., "Pantry") → Zone (leaf, e.g., "Top Shelf") — Zone is the canonical item location
+- **DB migration (v13):** Added `area_uuid`, `room_uuid`, `zone_uuid` FK columns to `items` table with indexes; seeds `zone_uuid` from legacy `location_uuid` during upgrade
+- **Migration service:** `LocationHierarchyMigrationService` runs at app startup via `locationHierarchyMigrationProvider`; backfills `areaUuid`/`roomUuid` for items that only have `zoneUuid`
+- **Location picker:** `LocationPickerSheet` widget provides cascading Area → optional Room → Zone selection UI
+- **Non-destructive:** Legacy `locationUuid` remains on Item until Phase 5 removes it; all queries support both old and new fields
+
 ### ItemDao Extra Methods
 - `getRandomStaleItem(DateTime cutoff)` — Finds a random item not accessed since cutoff date; used by background scheduler
 - `countBackedUpItems()` — Counts items with `isBackedUp = 1`; used for quota checks
@@ -413,9 +454,10 @@ Shows a sign-in prompt if the user is not authenticated.
 ### Next Up
 1. History screen (timeline: saved/moved/archived events from `item_location_history`)
 2. Collections screen (items grouped by room/location)
-3. Real payment integration for Ikeep Plus (currently a stub — `setPremium(true)` fires immediately on button tap)
+3. Complete hierarchical location migration (Phase 5 — remove legacy `locationUuid` once all items backfilled)
 
 ### Future (V2)
+- Re-introduce premium/billing system (archived code available at `refs/archive/premium-pre-detach-20260324-145524`)
 - Voice search, ML Kit auto-labeling
 - Android home screen widget
 - Offline sync with conflict resolution

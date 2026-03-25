@@ -3,7 +3,10 @@ class DbConstants {
   DbConstants._();
 
   static const String dbName = 'ikeep.db';
-  static const int dbVersion = 11;
+
+  /// v13 — adds area_uuid, room_uuid, zone_uuid columns to items
+  /// (Phase 1 of the hierarchical location refactor).
+  static const int dbVersion = 14;
 
   // households
   static const String tableHouseholds = 'households';
@@ -27,8 +30,12 @@ class DbConstants {
   static const String colItemLatitude = 'latitude';
   static const String colItemLongitude = 'longitude';
   static const String colItemExpiryDate = 'expiry_date'; // Unix ms
+  static const String colItemWarrantyEndDate = 'warranty_end_date'; // Unix ms
   static const String colItemIsArchived = 'is_archived'; // 0 or 1
   static const String colItemNotes = 'notes';
+  static const String colItemInvoicePath = 'invoice_path';
+  static const String colItemInvoiceFileName = 'invoice_file_name';
+  static const String colItemInvoiceFileSizeBytes = 'invoice_file_size_bytes';
   static const String colItemCloudId = 'cloud_id';
   static const String colItemLastSyncedAt = 'last_synced_at'; // Unix ms
   static const String colItemIsBackedUp = 'is_backed_up'; // 0 or 1
@@ -45,11 +52,18 @@ class DbConstants {
   static const String colItemHouseholdId = 'household_id';
   static const String colItemSharedWithMemberUuids = 'shared_with_member_uuids';
 
+  // Hierarchical location FKs — added in v13 (Phase 1 refactor).
+  // All three point to rows in the `locations` table with the matching type.
+  static const String colItemAreaUuid = 'area_uuid';
+  static const String colItemRoomUuid = 'room_uuid';
+  static const String colItemZoneUuid = 'zone_uuid';
+
   // ── locations ────────────────────────────────────────────────────────────────
   static const String tableLocations = 'locations';
   static const String colLocId = 'id';
   static const String colLocUuid = 'uuid';
   static const String colLocName = 'name';
+  static const String colLocType = 'location_type';
   static const String colLocFullPath = 'full_path';
   static const String colLocParentUuid = 'parent_uuid';
   static const String colLocIconName = 'icon_name';

@@ -6,6 +6,9 @@ class AppRoutes {
   static const String splash = '/';
   static const String onboarding = '/onboarding';
   static const String home = '/home';
+  static const String dashboardLentOut = '/dashboard/lent-out';
+  static const String dashboardExpiringSoon = '/dashboard/expiring-soon';
+  static const String dashboardWarrantyEnding = '/dashboard/warranty-ending';
   static const String save = '/save';
   static const String itemDetail = '/item/:uuid';
   static const String rooms = '/rooms';

@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
-import '../core/constants/subscription_constants.dart';
+import '../core/constants/feature_limits.dart';
 import '../core/errors/app_exception.dart';
 import '../data/database/item_dao.dart';
 import '../data/database/location_dao.dart';
@@ -11,7 +11,68 @@ import '../domain/models/item_visibility.dart';
 import '../domain/models/location_model.dart';
 import '../domain/models/sync_status.dart';
 import 'firebase_image_upload_service.dart';
+import 'firebase_invoice_storage_service.dart';
 import 'sync_service.dart';
+
+@visibleForTesting
+List<LocationModel> orderLocationsForLocalUpsert({
+  required Iterable<LocationModel> locations,
+  required Set<String> existingLocationUuids,
+}) {
+  final pendingByUuid = <String, LocationModel>{
+    for (final location in locations) location.uuid: location,
+  };
+  final resolvedUuids = <String>{...existingLocationUuids};
+  final ordered = <LocationModel>[];
+
+  while (pendingByUuid.isNotEmpty) {
+    final ready = pendingByUuid.values.where((location) {
+      final parentUuid = location.parentUuid;
+      return parentUuid == null || resolvedUuids.contains(parentUuid);
+    }).toList()
+      ..sort(_compareLocationRestoreOrder);
+
+    if (ready.isNotEmpty) {
+      for (final location in ready) {
+        ordered.add(location);
+        resolvedUuids.add(location.uuid);
+        pendingByUuid.remove(location.uuid);
+      }
+      continue;
+    }
+
+    // If cloud data contains an orphaned or cyclic parent reference, restore
+    // one location as a root to avoid hard-failing the entire sync.
+    final fallback = pendingByUuid.values.toList()
+      ..sort(_compareLocationRestoreOrder);
+    final restoredAsRoot = fallback.first.copyWith(clearParentUuid: true);
+    ordered.add(restoredAsRoot);
+    resolvedUuids.add(restoredAsRoot.uuid);
+    pendingByUuid.remove(restoredAsRoot.uuid);
+  }
+
+  return ordered;
+}
+
+int _compareLocationRestoreOrder(LocationModel a, LocationModel b) {
+  final depthCompare =
+      _locationRestoreDepth(a).compareTo(_locationRestoreDepth(b));
+  if (depthCompare != 0) return depthCompare;
+
+  final createdAtCompare = a.createdAt.compareTo(b.createdAt);
+  if (createdAtCompare != 0) return createdAtCompare;
+
+  return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+}
+
+int _locationRestoreDepth(LocationModel location) {
+  final fullPath = location.fullPath?.trim();
+  if (fullPath == null || fullPath.isEmpty) {
+    return location.parentUuid == null ? 0 : 1;
+  }
+
+  return ' > '.allMatches(fullPath).length;
+}
 
 class FirebaseSyncService implements SyncService {
   FirebaseSyncService({
@@ -20,20 +81,20 @@ class FirebaseSyncService implements SyncService {
     required ItemDao itemDao,
     required LocationDao locationDao,
     required FirebaseImageUploadService imageUploadService,
-    required Future<bool> Function() isPremiumUser,
+    required FirebaseInvoiceStorageService invoiceStorageService,
   })  : _auth = auth,
         _firestore = firestore,
         _itemDao = itemDao,
         _locationDao = locationDao,
         _imageUploadService = imageUploadService,
-        _isPremiumUser = isPremiumUser;
+        _invoiceStorageService = invoiceStorageService;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final ItemDao _itemDao;
   final LocationDao _locationDao;
   final FirebaseImageUploadService _imageUploadService;
-  final Future<bool> Function() _isPremiumUser;
+  final FirebaseInvoiceStorageService _invoiceStorageService;
 
   DateTime? _lastSyncedAt;
 
@@ -83,20 +144,34 @@ class FirebaseSyncService implements SyncService {
 
       // Run image uploads and user-doc check in parallel — they are
       // independent network calls.
-      final results = await Future.wait([
+      final results = await Future.wait<Object?>([
         _imageUploadService.uploadItemImages(
           userId: user.uid,
           itemUuid: item.uuid,
           imagePaths: item.imagePaths,
         ),
+        _invoiceStorageService.uploadItemInvoice(
+          userId: user.uid,
+          itemUuid: item.uuid,
+          invoicePath: item.invoicePath,
+          invoiceFileName: item.invoiceFileName,
+          invoiceFileSizeBytes: item.invoiceFileSizeBytes,
+        ),
         if (ensureUserDocument) _ensureUserDocument(user),
       ]);
       final uploadedImageUrls = results[0] as List<String>;
+      final uploadedInvoice = results[1] as StoredInvoiceFile?;
 
       await _itemsRef.doc(item.uuid).set({
         ...item
             .copyWith(
               imagePaths: uploadedImageUrls,
+              invoicePath: uploadedInvoice?.path,
+              invoiceFileName: uploadedInvoice?.fileName,
+              invoiceFileSizeBytes: uploadedInvoice?.sizeBytes,
+              clearInvoicePath: uploadedInvoice == null,
+              clearInvoiceFileName: uploadedInvoice == null,
+              clearInvoiceFileSizeBytes: uploadedInvoice == null,
               cloudId: item.cloudId ?? item.uuid,
               lastSyncedAt: syncedAt,
               isBackedUp: true,
@@ -164,10 +239,16 @@ class FirebaseSyncService implements SyncService {
     }
 
     try {
-      await _imageUploadService.deleteItemImages(
-        userId: _user!.uid,
-        itemUuid: uuid,
-      );
+      await Future.wait([
+        _imageUploadService.deleteItemImages(
+          userId: _user!.uid,
+          itemUuid: uuid,
+        ),
+        _invoiceStorageService.deleteItemInvoice(
+          userId: _user!.uid,
+          itemUuid: uuid,
+        ),
+      ]);
       await _itemsRef.doc(uuid).delete();
       _lastSyncedAt = DateTime.now();
       return SyncResult.success();
@@ -209,12 +290,12 @@ class FirebaseSyncService implements SyncService {
     try {
       // Kick off all independent fetches in parallel.
       final results = await Future.wait([
-        _ensureUserDocument(user),       // 0
+        _ensureUserDocument(user), // 0
         _locationDao.recalculateUsageCounts(), // 1
-        _locationDao.getAllLocations(),   // 2
-        _itemDao.getAllItems(),           // 3
-        _locationsRef.get(),             // 4
-        _itemsRef.get(),                 // 5
+        _locationDao.getAllLocations(), // 2
+        _itemDao.getAllItems(), // 3
+        _locationsRef.get(), // 4
+        _itemsRef.get(), // 5
       ]);
 
       final localLocations = results[2] as List<LocationModel>;
@@ -233,7 +314,9 @@ class FirebaseSyncService implements SyncService {
 
       // ── Locations: batch writes to Firestore, parallel local inserts ──
       final locationBatch = _firestore.batch();
-      final localLocationInserts = <Future<void>>[];
+      final localLocationUpserts = <LocationModel>[];
+      final existingLocalLocationUuids =
+          localLocations.map((loc) => loc.uuid).toSet();
       var locationBatchCount = 0;
 
       for (final location in localLocations) {
@@ -249,9 +332,7 @@ class FirebaseSyncService implements SyncService {
         final localUpdatedAt = location.createdAt;
         if (remoteUpdatedAt != null &&
             remoteUpdatedAt.isAfter(localUpdatedAt)) {
-          localLocationInserts.add(
-            _locationDao.insertLocation(_locationFromFirestore(remoteData)),
-          );
+          localLocationUpserts.add(_locationFromFirestore(remoteData));
         } else {
           _addLocationToBatch(locationBatch, location, user);
           locationBatchCount++;
@@ -262,17 +343,17 @@ class FirebaseSyncService implements SyncService {
         final existsLocally =
             localLocations.any((loc) => loc.uuid == remoteEntry.key);
         if (!existsLocally) {
-          localLocationInserts.add(
-            _locationDao
-                .insertLocation(_locationFromFirestore(remoteEntry.value)),
-          );
+          localLocationUpserts.add(_locationFromFirestore(remoteEntry.value));
         }
       }
 
       // Commit Firestore batch and local inserts in parallel.
       await Future.wait([
         if (locationBatchCount > 0) locationBatch.commit(),
-        ...localLocationInserts,
+        _upsertLocationsLocally(
+          localLocationUpserts,
+          existingLocationUuids: existingLocalLocationUuids,
+        ),
       ]);
 
       // ── Items: process in parallel batches of _syncBatchSize ──
@@ -323,8 +404,9 @@ class FirebaseSyncService implements SyncService {
       // Import remote-only items locally (pure SQLite, fast).
       if (itemsToImportLocally.isNotEmpty) {
         await Future.wait(
-          itemsToImportLocally
-              .map((data) => _itemDao.insertItem(_itemFromFirestore(data))),
+          itemsToImportLocally.map((data) async {
+            await _itemDao.insertItem(await _itemFromFirestore(data));
+          }),
         );
       }
 
@@ -341,8 +423,8 @@ class FirebaseSyncService implements SyncService {
       for (var i = 0; i < itemsToUpload.length; i += _syncBatchSize) {
         final batch = itemsToUpload.skip(i).take(_syncBatchSize);
         await Future.wait(
-          batch.map((item) =>
-              _syncItemInternal(item, ensureUserDocument: false)),
+          batch.map(
+              (item) => _syncItemInternal(item, ensureUserDocument: false)),
         );
       }
 
@@ -383,6 +465,28 @@ class FirebaseSyncService implements SyncService {
     );
   }
 
+  Future<void> _upsertLocationsLocally(
+    List<LocationModel> locations, {
+    required Set<String> existingLocationUuids,
+  }) async {
+    if (locations.isEmpty) return;
+
+    final orderedLocations = orderLocationsForLocalUpsert(
+      locations: locations,
+      existingLocationUuids: existingLocationUuids,
+    );
+    final knownUuids = <String>{...existingLocationUuids};
+
+    for (final location in orderedLocations) {
+      if (knownUuids.contains(location.uuid)) {
+        await _locationDao.updateLocation(location);
+      } else {
+        await _locationDao.insertLocation(location);
+      }
+      knownUuids.add(location.uuid);
+    }
+  }
+
   @override
   Future<DateTime?> getLastSyncedAt() async {
     if (_lastSyncedAt != null) return _lastSyncedAt;
@@ -408,20 +512,62 @@ class FirebaseSyncService implements SyncService {
     }, SetOptions(merge: true));
   }
 
-  Item _itemFromFirestore(Map<String, dynamic> data) {
+  Future<Item> _itemFromFirestore(Map<String, dynamic> data) async {
+    final itemUuid = (data['uuid'] as String?) ?? '';
+    final rawImagePaths =
+        List<String>.from((data['imagePaths'] as List?) ?? const []);
+    final remoteUserId = (data['userId'] as String?)?.trim();
+    final storageUserId = remoteUserId != null && remoteUserId.isNotEmpty
+        ? remoteUserId
+        : _user?.uid;
+    final resolvedImagePaths =
+        storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty
+            ? rawImagePaths
+            : await _imageUploadService.resolveCloudImageUrls(
+                userId: storageUserId,
+                itemUuid: itemUuid,
+                imagePaths: rawImagePaths,
+              );
+    final resolvedInvoice =
+        storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty
+            ? ((data['invoicePath'] as String?)?.trim().isNotEmpty ?? false)
+                ? StoredInvoiceFile(
+                    path: (data['invoicePath'] as String).trim(),
+                    fileName: ((data['invoiceFileName'] as String?)
+                                ?.trim()
+                                .isNotEmpty ??
+                            false)
+                        ? (data['invoiceFileName'] as String).trim()
+                        : 'invoice',
+                    sizeBytes: (data['invoiceFileSizeBytes'] as num?)?.toInt(),
+                  )
+                : null
+            : await _invoiceStorageService.resolveCloudInvoice(
+                userId: storageUserId,
+                itemUuid: itemUuid,
+                invoicePath: data['invoicePath'] as String?,
+                invoiceFileName: data['invoiceFileName'] as String?,
+                invoiceFileSizeBytes:
+                    (data['invoiceFileSizeBytes'] as num?)?.toInt(),
+              );
+
     return Item(
-      uuid: (data['uuid'] as String?) ?? '',
+      uuid: itemUuid,
       name: (data['name'] as String?) ?? 'Untitled item',
       locationUuid: data['locationUuid'] as String?,
-      imagePaths: List<String>.from((data['imagePaths'] as List?) ?? const []),
+      imagePaths: resolvedImagePaths,
       tags: List<String>.from((data['tags'] as List?) ?? const []),
       savedAt: _parseDateTime(data['savedAt']) ?? DateTime.now(),
       updatedAt: _parseDateTime(data['updatedAt']),
       latitude: (data['latitude'] as num?)?.toDouble(),
       longitude: (data['longitude'] as num?)?.toDouble(),
       expiryDate: _parseDateTime(data['expiryDate']),
+      warrantyEndDate: _parseDateTime(data['warrantyEndDate']),
       isArchived: data['isArchived'] as bool? ?? false,
       notes: data['notes'] as String?,
+      invoicePath: resolvedInvoice?.path,
+      invoiceFileName: resolvedInvoice?.fileName,
+      invoiceFileSizeBytes: resolvedInvoice?.sizeBytes,
       cloudId: data['cloudId'] as String? ?? data['uuid'] as String?,
       lastSyncedAt: _parseDateTime(data['lastSyncedAt']),
       isBackedUp: data['isBackedUp'] as bool? ?? true,
@@ -444,6 +590,10 @@ class FirebaseSyncService implements SyncService {
     return LocationModel(
       uuid: (data['uuid'] as String?) ?? '',
       name: (data['name'] as String?) ?? 'Untitled location',
+      type: LocationType.fromStorage(
+        data['type'] as String?,
+        parentUuid: data['parentUuid'] as String?,
+      ),
       fullPath: data['fullPath'] as String?,
       parentUuid: data['parentUuid'] as String?,
       iconName: (data['iconName'] as String?) ?? 'folder',
@@ -473,6 +623,11 @@ class FirebaseSyncService implements SyncService {
   ) {
     return local.uuid == ((remoteData['uuid'] as String?) ?? local.uuid) &&
         local.name == (remoteData['name'] as String? ?? '') &&
+        local.type.value ==
+            LocationType.fromStorage(
+              remoteData['type'] as String?,
+              parentUuid: remoteData['parentUuid'] as String?,
+            ).value &&
         local.fullPath == remoteData['fullPath'] as String? &&
         local.parentUuid == remoteData['parentUuid'] as String? &&
         local.iconName == ((remoteData['iconName'] as String?) ?? 'folder');
@@ -494,23 +649,21 @@ class FirebaseSyncService implements SyncService {
   }
 
   Future<void> _ensureCloudQuotaForItem(Item item) async {
-    final isPremium = await _isPremiumUser();
     final isExistingCloudItem =
         (item.cloudId?.trim().isNotEmpty ?? false) || item.lastSyncedAt != null;
     if (isExistingCloudItem) return;
 
-    final cloudBackupLimit = cloudBackupLimitFor(isPremium);
     final backedUpItemCount = await _itemDao.countBackedUpItems();
     if (backedUpItemCount > cloudBackupLimit) {
       throw SyncException(
-        cloudBackupQuotaExceededError(isPremium: isPremium),
+        cloudBackupQuotaExceededError(),
       );
     }
   }
 
   bool _isMissingRemoteResource(dynamic error) {
     final str = error.toString().toLowerCase();
-    if (str.contains('object-not-found') || 
+    if (str.contains('object-not-found') ||
         str.contains('no object exists') ||
         str.contains('not-found')) {
       return true;

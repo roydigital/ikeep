@@ -24,7 +24,9 @@ List<LocationModel> _applyDerivedUsageCounts(
   for (final item in items) {
     if (item.isArchived) continue;
 
-    var currentUuid = item.locationUuid;
+    // Prefer the new canonical zoneUuid; fall back to legacy locationUuid for
+    // items not yet run through the Phase-5 migration.
+    var currentUuid = item.zoneUuid ?? item.locationUuid;
     final visited = <String>{};
 
     while (currentUuid != null && visited.add(currentUuid)) {

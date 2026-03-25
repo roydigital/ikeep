@@ -2,27 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
-import '../../core/constants/subscription_constants.dart';
-import '../../core/utils/uuid_generator.dart';
+import '../../core/constants/feature_limits.dart';
+import '../../core/utils/path_utils.dart';
 import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/household_member.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/item_location_history.dart';
 import '../../domain/models/item_visibility.dart';
-import '../../domain/models/location_model.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/item_providers.dart';
-import '../../providers/location_providers.dart';
+import '../../providers/repository_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../routing/app_routes.dart';
-import '../settings/paywall_screen.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/app_dimensions.dart';
 import '../../widgets/adaptive_image.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/item_activity_timeline.dart';
+import '../../widgets/location_picker_sheet.dart';
 
 class ItemDetailScreen extends ConsumerStatefulWidget {
   const ItemDetailScreen({super.key, required this.uuid});
@@ -50,17 +51,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         _activeOpText = '';
       });
 
-  Future<void> _showCloudQuotaFeedback(bool isPremium) async {
+  bool get _isBusy => _activeOp != null || _expiryLoading;
+
+  Future<void> _showCloudQuotaFeedback() async {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(cloudBackupQuotaExceededError(isPremium: isPremium)),
+        content: Text(cloudBackupQuotaExceededError()),
         backgroundColor: AppColors.error,
       ),
     );
-    if (!isPremium) {
-      await _showPaywall();
-    }
   }
 
   Future<bool> _confirmDisableCloudBackup(Item item) async {
@@ -99,7 +99,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       if (!shouldDisable) return;
     }
 
-    _startOp(enabled ? 'Enabling cloud backup...' : 'Disabling cloud backup...');
+    _startOp(
+        enabled ? 'Enabling cloud backup...' : 'Disabling cloud backup...');
 
     if (!enabled) {
       final wasSharedWithHousehold =
@@ -136,15 +137,13 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       return;
     }
 
-    final settings = ref.read(settingsProvider);
     final backedUpCount = await ref.read(backedUpItemsCountProvider.future);
     if (hasReachedCloudBackupLimit(
-      isPremium: settings.isPremium,
       backedUpCount: backedUpCount,
     )) {
       if (!mounted) return;
       _endOp();
-      await _showCloudQuotaFeedback(settings.isPremium);
+      await _showCloudQuotaFeedback();
       return;
     }
 
@@ -160,7 +159,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
     if (error != null) {
       if (error.contains('Cloud quota exceeded')) {
-        await _showCloudQuotaFeedback(settings.isPremium);
+        await _showCloudQuotaFeedback();
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -178,39 +177,24 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     }
   }
 
-  Future<void> _showPaywall() {
-    return PaywallScreen.show(context);
-  }
-
-  int _itemImageLimitFor(bool isPremium) {
-    return isPremium ? premiumItemImageLimit : freeItemImageLimit;
-  }
-
   Future<bool> _canAddAnotherImage(Item item) async {
-    final settings = ref.read(settingsProvider);
-    final imageLimit = _itemImageLimitFor(settings.isPremium);
+    final imageLimit = itemPhotoLimit;
     if (item.imagePaths.length < imageLimit) {
       return true;
     }
 
-    final message = settings.isPremium
-        ? 'Paid members can add up to $premiumItemImageLimit photos per item.'
-        : 'Free members can add 1 photo per item. Upgrade to add up to $premiumItemImageLimit photos.';
-
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+      SnackBar(
+        content: Text('You can add up to $itemPhotoLimit photos per item.'),
+        backgroundColor: AppColors.error,
+      ),
     );
-
-    if (!settings.isPremium) {
-      await _showPaywall();
-    }
     return false;
   }
 
   @override
   Widget build(BuildContext context) {
     final itemAsync = ref.watch(singleItemProvider(widget.uuid));
-    final settings = ref.watch(settingsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
@@ -231,336 +215,344 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
           final historyAsync = ref.watch(itemHistoryProvider(item.uuid));
           final images = item.imagePaths;
-          final imageLimit = _itemImageLimitFor(settings.isPremium);
+          final imageLimit = itemPhotoLimit;
           final hasReachedImageLimit = images.length >= imageLimit;
           final selected = images.isEmpty
               ? null
               : images[_selectedImage.clamp(0, images.length - 1)];
 
-          return Stack(
-            children: [
-              CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: SafeArea(
-                      bottom: false,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-                        child: Row(
-                          children: [
-                            IconButton(
-                                onPressed: () => context.pop(),
-                                icon: const Icon(Icons.arrow_back, size: 30),
-                                color: textPrimary),
-                            Expanded(
-                              child: Text('Item Details',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      color: textPrimary,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w800)),
+          return SafeArea(
+            bottom: false,
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    _PinnedItemDetailHeader(
+                      isDark: isDark,
+                      textPrimary: textPrimary,
+                      onBack: () => context.pop(),
+                      onEdit: () => _editItemName(item),
+                    ),
+                    Expanded(
+                      child: CustomScrollView(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // ── Image gallery ────────────────────────
+                                    if (images.isNotEmpty) ...[
+                                      GestureDetector(
+                                        onTap: () => _zoom(selected, isDark),
+                                        child: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          child: AspectRatio(
+                                            aspectRatio: 1,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                _img(selected!, BoxFit.cover,
+                                                    isDark),
+                                                Positioned(
+                                                  top: 12,
+                                                  right: 12,
+                                                  child: Material(
+                                                    color: Colors.black54,
+                                                    shape: const CircleBorder(),
+                                                    child: IconButton(
+                                                      tooltip: 'Delete photo',
+                                                      onPressed: _activeOp !=
+                                                              null
+                                                          ? null
+                                                          : () => _deleteImage(
+                                                                item,
+                                                                selected,
+                                                              ),
+                                                      icon: const Icon(
+                                                        Icons.delete_outline,
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      if (images.length > 1) ...[
+                                        const SizedBox(height: 14),
+                                        SizedBox(
+                                          height: 72,
+                                          child: ListView.separated(
+                                            scrollDirection: Axis.horizontal,
+                                            itemCount: images.length + 1,
+                                            separatorBuilder: (_, __) =>
+                                                const SizedBox(width: 10),
+                                            itemBuilder: (_, i) {
+                                              if (i == images.length) {
+                                                return _addImageButton(
+                                                  item,
+                                                  hasReachedLimit:
+                                                      hasReachedImageLimit,
+                                                  imageLimit: imageLimit,
+                                                );
+                                              }
+                                              return _thumb(
+                                                  images[i], i, isDark);
+                                            },
+                                          ),
+                                        ),
+                                      ] else ...[
+                                        const SizedBox(height: 10),
+                                        _addImageButton(
+                                          item,
+                                          hasReachedLimit: hasReachedImageLimit,
+                                          imageLimit: imageLimit,
+                                        ),
+                                      ],
+                                    ] else ...[
+                                      _addImageButton(
+                                        item,
+                                        hasReachedLimit: hasReachedImageLimit,
+                                        imageLimit: imageLimit,
+                                      ),
+                                    ],
+
+                                    const SizedBox(height: 22),
+
+                                    // ── Title + location ──────────────────────
+                                    Text(item.name,
+                                        style: TextStyle(
+                                            color: textPrimary,
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.05)),
+                                    const SizedBox(height: 8),
+                                    Row(children: [
+                                      const Icon(Icons.location_on,
+                                          color: AppColors.primary, size: 18),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: historyAsync.when(
+                                          data: (history) => Text(
+                                            _location(
+                                              item,
+                                              latestHistory: history.isEmpty
+                                                  ? null
+                                                  : history.last,
+                                            ),
+                                            style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w500,
+                                                fontSize: 17),
+                                          ),
+                                          loading: () => Text(
+                                            _location(item),
+                                            style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w500,
+                                                fontSize: 17),
+                                          ),
+                                          error: (_, __) => Text(
+                                            _location(item),
+                                            style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w500,
+                                                fontSize: 17),
+                                          ),
+                                        ),
+                                      ),
+                                    ]),
+
+                                    const SizedBox(height: 14),
+                                    _buildManagementActionRow(
+                                      context,
+                                      item,
+                                      isDark,
+                                    ),
+
+                                    // ── Lending status ──────────────────────
+                                    _buildLendingSection(
+                                      context,
+                                      item,
+                                      isDark,
+                                      textPrimary,
+                                    ),
+
+                                    // ── Expiry status ───────────────────────
+                                    _buildExpirySection(
+                                      context,
+                                      item,
+                                      isDark,
+                                      textPrimary,
+                                    ),
+                                    _buildWarrantySection(
+                                      context,
+                                      item,
+                                      isDark,
+                                      textPrimary,
+                                    ),
+
+                                    const SizedBox(height: 18),
+                                    _buildCloudBackupSection(
+                                        item, isDark, textPrimary),
+
+                                    const SizedBox(height: 18),
+                                    _ItemVisibilitySection(item: item),
+
+                                    if (item.tags.isNotEmpty) ...[
+                                      const SizedBox(height: 18),
+                                      Wrap(
+                                        spacing: 10,
+                                        runSpacing: 10,
+                                        children: item.tags
+                                            .map((t) => Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 14,
+                                                      vertical: 6),
+                                                  decoration: BoxDecoration(
+                                                    color: isDark
+                                                        ? AppColors
+                                                            .surfaceVariantDark
+                                                        : AppColors
+                                                            .surfaceVariantLight,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            999),
+                                                  ),
+                                                  child: Text('#$t',
+                                                      style: const TextStyle(
+                                                          color:
+                                                              AppColors.primary,
+                                                          fontWeight:
+                                                              FontWeight.w600)),
+                                                ))
+                                            .toList(),
+                                      ),
+                                    ],
+
+                                    const SizedBox(height: 24),
+                                    historyAsync.when(
+                                      data: (h) => _meta(
+                                          context,
+                                          isDark,
+                                          item.savedAt,
+                                          h.isEmpty
+                                              ? item.updatedAt
+                                              : h.last.movedAt),
+                                      loading: () => _meta(context, isDark,
+                                          item.savedAt, item.updatedAt),
+                                      error: (_, __) => _meta(context, isDark,
+                                          item.savedAt, item.updatedAt),
+                                    ),
+
+                                    const SizedBox(height: 24),
+
+                                    // ── Action buttons ────────────────────────
+                                    Row(children: [
+                                      Expanded(
+                                          child: _Action(
+                                              label: 'Update\nLocation',
+                                              filled: false,
+                                              icon: Icons.edit_location_alt,
+                                              onTap: () =>
+                                                  _updateLocation(item))),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                          child: _Action(
+                                              label: item.isLent
+                                                  ? 'Mark\nReturned'
+                                                  : 'Found /\nRemove',
+                                              filled: true,
+                                              icon: item.isLent
+                                                  ? Icons.assignment_turned_in
+                                                  : Icons.check_circle,
+                                              onTap: () => item.isLent
+                                                  ? _markReturned(item)
+                                                  : _foundRemove(item))),
+                                    ]),
+
+                                    const SizedBox(height: 44),
+
+                                    // ── History ───────────────────────────────
+                                    ItemActivityTimeline(
+                                      itemUuid: item.uuid,
+                                      showUserAttribution: item.visibility ==
+                                          ItemVisibility.household,
+                                      title: 'Location History',
+                                    ),
+                                    SizedBox(
+                                      height: AppNavBar.contentBottomSpacing(
+                                        context,
+                                        includeFab: true,
+                                      ),
+                                    ),
+                                  ]),
                             ),
-                            PopupMenuButton<String>(
-                              icon: Icon(Icons.more_vert, color: textPrimary),
-                              color: isDark
-                                  ? AppColors.surfaceVariantDark
-                                  : AppColors.surfaceVariantLight,
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _editItemName(item);
-                                }
-                              },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Edit'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: const AppNavBar(activeTab: AppNavTab.items),
+                ),
+                const _DetailFab(),
+                // ── Global loading banner for async ops ──
+                if (_activeOp != null)
+                  Positioned(
+                    left: 20,
+                    right: 20,
+                    bottom: AppNavBar.navBarHeight(context) + 16,
+                    child: Material(
+                      elevation: 8,
+                      borderRadius: BorderRadius.circular(14),
+                      color: isDark
+                          ? AppColors.surfaceVariantDark
+                          : AppColors.surfaceVariantLight,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary.withValues(alpha: 0.8),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _activeOpText,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? AppColors.textPrimaryDark
+                                      : AppColors.textPrimaryLight,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ],
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ),
                   ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // ── Image gallery ────────────────────────
-                            if (images.isNotEmpty) ...[
-                              GestureDetector(
-                                onTap: () => _zoom(selected, isDark),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: AspectRatio(
-                                    aspectRatio: 1,
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        _img(selected!, BoxFit.cover, isDark),
-                                        Positioned(
-                                          top: 12,
-                                          right: 12,
-                                          child: Material(
-                                            color: Colors.black54,
-                                            shape: const CircleBorder(),
-                                            child: IconButton(
-                                              tooltip: 'Delete photo',
-                                              onPressed: _activeOp != null
-                                                  ? null
-                                                  : () => _deleteImage(
-                                                        item,
-                                                        selected,
-                                                      ),
-                                              icon: const Icon(
-                                                Icons.delete_outline,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (images.length > 1) ...[
-                                const SizedBox(height: 14),
-                                SizedBox(
-                                  height: 72,
-                                  child: ListView.separated(
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: images.length + 1,
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(width: 10),
-                                    itemBuilder: (_, i) {
-                                      if (i == images.length) {
-                                        return _addImageButton(
-                                          item,
-                                          hasReachedLimit: hasReachedImageLimit,
-                                          imageLimit: imageLimit,
-                                        );
-                                      }
-                                      return _thumb(images[i], i, isDark);
-                                    },
-                                  ),
-                                ),
-                              ] else ...[
-                                const SizedBox(height: 10),
-                                _addImageButton(
-                                  item,
-                                  hasReachedLimit: hasReachedImageLimit,
-                                  imageLimit: imageLimit,
-                                ),
-                              ],
-                            ] else ...[
-                              _addImageButton(
-                                item,
-                                hasReachedLimit: hasReachedImageLimit,
-                                imageLimit: imageLimit,
-                              ),
-                            ],
-
-                            const SizedBox(height: 22),
-
-                            // ── Title + location ──────────────────────
-                            Text(item.name,
-                                style: TextStyle(
-                                    color: textPrimary,
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1.05)),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              const Icon(Icons.location_on,
-                                  color: AppColors.primary, size: 18),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: historyAsync.when(
-                                  data: (history) => Text(
-                                    _location(
-                                      item,
-                                      latestHistory:
-                                          history.isEmpty ? null : history.last,
-                                    ),
-                                    style: const TextStyle(
-                                        color: AppColors.primary,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 17),
-                                  ),
-                                  loading: () => Text(
-                                    _location(item),
-                                    style: const TextStyle(
-                                        color: AppColors.primary,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 17),
-                                  ),
-                                  error: (_, __) => Text(
-                                    _location(item),
-                                    style: const TextStyle(
-                                        color: AppColors.primary,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 17),
-                                  ),
-                                ),
-                              ),
-                            ]),
-
-                            const SizedBox(height: 14),
-
-                            // ── Lending status ──────────────────────
-                            _buildLendingSection(
-                              context,
-                              item,
-                              isDark,
-                              textPrimary,
-                            ),
-
-                            // ── Expiry status ───────────────────────
-                            _buildExpirySection(
-                              context,
-                              item,
-                              isDark,
-                              textPrimary,
-                            ),
-
-                            const SizedBox(height: 18),
-                            _buildCloudBackupSection(item, isDark, textPrimary),
-
-                            const SizedBox(height: 18),
-                            _ItemVisibilitySection(item: item),
-
-                            if (item.tags.isNotEmpty) ...[
-                              const SizedBox(height: 18),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: item.tags
-                                    .map((t) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 14, vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? AppColors.surfaceVariantDark
-                                                : AppColors.surfaceVariantLight,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                          ),
-                                          child: Text('#$t',
-                                              style: const TextStyle(
-                                                  color: AppColors.primary,
-                                                  fontWeight: FontWeight.w600)),
-                                        ))
-                                    .toList(),
-                              ),
-                            ],
-
-                            const SizedBox(height: 24),
-                            historyAsync.when(
-                              data: (h) => _meta(context, isDark, item.savedAt,
-                                  h.isEmpty ? item.updatedAt : h.last.movedAt),
-                              loading: () => _meta(context, isDark,
-                                  item.savedAt, item.updatedAt),
-                              error: (_, __) => _meta(context, isDark,
-                                  item.savedAt, item.updatedAt),
-                            ),
-
-                            const SizedBox(height: 24),
-
-                            // ── Action buttons ────────────────────────
-                            Row(children: [
-                              Expanded(
-                                  child: _Action(
-                                      label: 'Update\nLocation',
-                                      filled: false,
-                                      icon: Icons.edit_location_alt,
-                                      onTap: () => _updateLocation(item))),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                  child: _Action(
-                                      label: item.isLent
-                                          ? 'Mark\nReturned'
-                                          : 'Found /\nRemove',
-                                      filled: true,
-                                      icon: item.isLent
-                                          ? Icons.assignment_turned_in
-                                          : Icons.check_circle,
-                                      onTap: () => item.isLent
-                                          ? _markReturned(item)
-                                          : _foundRemove(item))),
-                            ]),
-
-                            const SizedBox(height: 44),
-
-                            // ── History ───────────────────────────────
-                            ItemActivityTimeline(
-                              itemUuid: item.uuid,
-                              showUserAttribution:
-                                  item.visibility == ItemVisibility.household,
-                              title: 'Location History',
-                            ),
-                            SizedBox(
-                              height: AppNavBar.contentBottomSpacing(
-                                context,
-                                includeFab: true,
-                              ),
-                            ),
-                          ]),
-                    ),
-                  ),
-                ],
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: const AppNavBar(activeTab: AppNavTab.items),
-              ),
-              const _DetailFab(),
-              // ── Global loading banner for async ops ──
-              if (_activeOp != null)
-                Positioned(
-                  left: 20,
-                  right: 20,
-                  bottom: AppNavBar.navBarHeight(context) + 16,
-                  child: Material(
-                    elevation: 8,
-                    borderRadius: BorderRadius.circular(14),
-                    color: isDark ? AppColors.surfaceVariantDark : AppColors.surfaceVariantLight,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.primary.withValues(alpha: 0.8),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _activeOpText,
-                              style: TextStyle(
-                                color: isDark
-                                    ? AppColors.textPrimaryDark
-                                    : AppColors.textPrimaryLight,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -569,98 +561,201 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
   // ── Lending section ──────────────────────────────────────────────────────
 
+  Widget _buildManagementActionRow(
+    BuildContext context,
+    Item item,
+    bool isDark,
+  ) {
+    final expiryDate = item.expiryDate;
+    final warrantyEndDate = item.warrantyEndDate;
+    final invoiceFileName = item.invoiceFileName?.trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.borderLight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: isDark ? 0.12 : 0.05),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _DetailQuickActionTile(
+              icon: item.isLent
+                  ? Icons.assignment_turned_in_outlined
+                  : Icons.outbox_outlined,
+              title: item.isLent ? 'Lent Out' : 'Lend Item',
+              subtitle: item.isLent
+                  ? (item.expectedReturnDate != null
+                      ? 'Due ${DateFormat('dd MMM').format(item.expectedReturnDate!)}'
+                      : (item.lentTo?.trim().isNotEmpty ?? false)
+                          ? item.lentTo!.trim()
+                          : 'Tap to return')
+                  : 'Borrower + return',
+              accentColor: AppColors.primary,
+              isActive: item.isLent,
+              enabled: !_isBusy,
+              onTap: item.isLent
+                  ? () => _markReturned(item)
+                  : () => _lendItem(item),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DetailQuickActionTile(
+              icon: expiryDate == null
+                  ? Icons.event_outlined
+                  : _expiryIcon(expiryDate),
+              title: 'Expiry',
+              subtitle: _expiryLoading
+                  ? 'Updating...'
+                  : expiryDate == null
+                      ? 'Track shelf life'
+                      : DateFormat('dd MMM').format(expiryDate),
+              accentColor: expiryDate == null
+                  ? AppColors.warning
+                  : _expiryAccentColor(expiryDate),
+              isActive: expiryDate != null,
+              enabled: !_isBusy,
+              onTap: () => _editExpiryDate(item),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DetailQuickActionTile(
+              icon: warrantyEndDate != null
+                  ? Icons.verified_user_outlined
+                  : (invoiceFileName != null && invoiceFileName.isNotEmpty)
+                      ? _invoiceIconForFileName(invoiceFileName)
+                      : Icons.receipt_long_outlined,
+              title: 'Warranty',
+              subtitle: warrantyEndDate != null
+                  ? DateFormat('dd MMM').format(warrantyEndDate)
+                  : (invoiceFileName != null && invoiceFileName.isNotEmpty)
+                      ? 'Invoice attached'
+                      : 'Date + invoice',
+              accentColor: warrantyEndDate != null
+                  ? _warrantyAccentColor(warrantyEndDate)
+                  : AppColors.info,
+              isActive: warrantyEndDate != null ||
+                  (invoiceFileName != null && invoiceFileName.isNotEmpty),
+              enabled: _activeOp == null,
+              onTap: () => _editWarrantyAndInvoice(item),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLendingSection(
     BuildContext context,
     Item item,
     bool isDark,
     Color textPrimary,
   ) {
+    if (!item.isLent) return const SizedBox.shrink();
+
     final textSecondary =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Lent status card
-        if (item.isLent) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.35),
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Lent status card
+          if (item.isLent) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.35),
+                ),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.outbox,
-                        color: AppColors.primary, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Currently Lent Out',
-                      style: TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.outbox,
+                          color: AppColors.primary, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Currently Lent Out',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'To: ${item.lentTo ?? 'Unknown'}',
+                    style: TextStyle(color: textPrimary, fontSize: 14),
+                  ),
+                  if (item.lentOn != null)
+                    Text(
+                      'Since: ${DateFormat('dd MMM yyyy').format(item.lentOn!)}',
+                      style: TextStyle(color: textSecondary, fontSize: 13),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'To: ${item.lentTo ?? 'Unknown'}',
-                  style: TextStyle(color: textPrimary, fontSize: 14),
-                ),
-                if (item.lentOn != null)
-                  Text(
-                    'Since: ${DateFormat('dd MMM yyyy').format(item.lentOn!)}',
-                    style: TextStyle(color: textSecondary, fontSize: 13),
+                  if (item.expectedReturnDate != null)
+                    Text(
+                      'Expected return: ${DateFormat('dd MMM yyyy').format(item.expectedReturnDate!)}',
+                      style: TextStyle(color: textSecondary, fontSize: 13),
+                    ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed:
+                          _activeOp != null ? null : () => _markReturned(item),
+                      icon: const Icon(Icons.assignment_turned_in, size: 18),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary),
+                      label: const Text('Mark as Returned'),
+                    ),
                   ),
-                if (item.expectedReturnDate != null)
-                  Text(
-                    'Expected return: ${DateFormat('dd MMM yyyy').format(item.expectedReturnDate!)}',
-                    style: TextStyle(color: textSecondary, fontSize: 13),
-                  ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _activeOp != null ? null : () => _markReturned(item),
-                    icon: const Icon(Icons.assignment_turned_in, size: 18),
-                    style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary),
-                    label: const Text('Mark as Returned'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ] else ...[
-          // Not lent — show "Lend This Item" button
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _activeOp != null ? null : () => _lendItem(item),
-              icon: const Icon(Icons.outbox, size: 18),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side:
-                    BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                ],
               ),
-              label: const Text('Lend This Item',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
             ),
-          ),
+          ] else ...[
+            // Not lent — show "Lend This Item" button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _activeOp != null ? null : () => _lendItem(item),
+                icon: const Icon(Icons.outbox, size: 18),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: BorderSide(
+                      color: AppColors.primary.withValues(alpha: 0.5)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                label: const Text('Lend This Item',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -676,28 +771,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
     // No expiry set — show "Add expiry" button or loading state
     if (expiryDate == null) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 18),
-        child: _expiryLoading
-            ? _buildExpiryLoadingIndicator(isDark)
-            : SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _editExpiryDate(item),
-                  icon: const Icon(Icons.event, size: 18),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: BorderSide(
-                        color: AppColors.primary.withValues(alpha: 0.5)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  label: const Text('Add Expiry Date',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ),
-      );
+      return const SizedBox.shrink();
     }
 
     // Expiry is set — compute urgency
@@ -759,7 +833,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: 18),
+      padding: const EdgeInsets.only(top: 14),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -849,6 +923,317 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildWarrantySection(
+    BuildContext context,
+    Item item,
+    bool isDark,
+    Color textPrimary,
+  ) {
+    final warrantyEndDate = item.warrantyEndDate;
+    final invoicePath = item.invoicePath?.trim();
+    final hasInvoice = invoicePath != null && invoicePath.isNotEmpty;
+    if (warrantyEndDate == null && !hasInvoice) {
+      return const SizedBox.shrink();
+    }
+
+    final accentColor = warrantyEndDate != null
+        ? _warrantyAccentColor(warrantyEndDate)
+        : AppColors.info;
+    final bgColor = accentColor.withValues(alpha: isDark ? 0.12 : 0.08);
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    final String title;
+    final String subtitle;
+    final IconData icon;
+    if (warrantyEndDate == null) {
+      title = 'Invoice Attached';
+      subtitle =
+          'Keep the invoice safe so the warranty can be claimed quickly.';
+      icon = _invoiceIconForFileName(item.invoiceFileName ?? invoicePath!);
+    } else {
+      final today = dashboardDateOnly(DateTime.now());
+      final daysLeft =
+          dashboardDateOnly(warrantyEndDate).difference(today).inDays;
+      if (daysLeft < 0) {
+        title = 'Warranty Ended';
+        subtitle =
+            '${-daysLeft} ${-daysLeft == 1 ? "day" : "days"} ago • Review your records before disposing or repairing this item.';
+        icon = Icons.gpp_bad_outlined;
+      } else if (daysLeft == 0) {
+        title = 'Warranty Ends Today';
+        subtitle =
+            'If service is needed, act before the coverage window closes.';
+        icon = Icons.gpp_good_outlined;
+      } else if (daysLeft <= 30) {
+        title = 'Warranty ends in $daysLeft ${daysLeft == 1 ? "day" : "days"}';
+        subtitle = DateFormat('dd MMM yyyy').format(warrantyEndDate);
+        icon = Icons.verified_user_outlined;
+      } else {
+        final months = (daysLeft / 30).floor();
+        title =
+            'Covered until ${DateFormat('dd MMM yyyy').format(warrantyEndDate)}';
+        subtitle = months > 0
+            ? '~$months ${months == 1 ? "month" : "months"} of coverage remaining'
+            : '$daysLeft days of coverage remaining';
+        icon = Icons.verified_user_outlined;
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: accentColor.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: accentColor, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      color: accentColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                if (hasInvoice)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Invoice',
+                      style: TextStyle(
+                        color: accentColor,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: textSecondary,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+            if (hasInvoice) ...[
+              const SizedBox(height: 12),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: _activeOp != null
+                      ? null
+                      : () => _openInvoiceAttachment(item),
+                  child: Ink(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AppColors.surfaceVariantDark
+                          : Colors.white.withValues(alpha: 0.75),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: accentColor.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            _invoiceIconForFileName(
+                              item.invoiceFileName ?? invoicePath,
+                            ),
+                            color: accentColor,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.invoiceFileName?.trim().isNotEmpty == true
+                                    ? item.invoiceFileName!.trim()
+                                    : 'Attached invoice',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatFileSize(item.invoiceFileSizeBytes),
+                                style: TextStyle(
+                                  color: textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Open',
+                          style: TextStyle(
+                            color: accentColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.open_in_new_rounded,
+                          color: accentColor,
+                          size: 18,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _activeOp != null
+                    ? null
+                    : () => _editWarrantyAndInvoice(item),
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: accentColor,
+                  side: BorderSide(
+                    color: accentColor.withValues(alpha: 0.5),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                label: Text(
+                  hasInvoice ? 'Manage Warranty & Invoice' : 'Manage Warranty',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _expiryAccentColor(DateTime expiryDate) {
+    final today = dashboardDateOnly(DateTime.now());
+    final daysLeft = dashboardDateOnly(expiryDate).difference(today).inDays;
+    if (daysLeft <= 7) return AppColors.error;
+    if (daysLeft <= 30) return AppColors.warning;
+    return AppColors.success;
+  }
+
+  IconData _expiryIcon(DateTime expiryDate) {
+    final today = dashboardDateOnly(DateTime.now());
+    final daysLeft = dashboardDateOnly(expiryDate).difference(today).inDays;
+    if (daysLeft <= 0) return Icons.warning_amber_rounded;
+    if (daysLeft <= 30) return Icons.schedule;
+    return Icons.event_available;
+  }
+
+  Color _warrantyAccentColor(DateTime warrantyEndDate) {
+    final today = dashboardDateOnly(DateTime.now());
+    final daysLeft =
+        dashboardDateOnly(warrantyEndDate).difference(today).inDays;
+    if (daysLeft < 0) return AppColors.error;
+    if (daysLeft <= 7) return AppColors.warning;
+    if (daysLeft <= dashboardWarrantyEndingSoonWindowDays) {
+      return AppColors.info;
+    }
+    return AppColors.success;
+  }
+
+  IconData _invoiceIconForFileName(String fileName) {
+    final extension = p.extension(fileName).toLowerCase();
+    switch (extension) {
+      case '.pdf':
+        return Icons.picture_as_pdf_outlined;
+      case '.doc':
+      case '.docx':
+        return Icons.description_outlined;
+      case '.xls':
+      case '.xlsx':
+      case '.csv':
+        return Icons.table_chart_outlined;
+      case '.jpg':
+      case '.jpeg':
+      case '.png':
+      case '.webp':
+        return Icons.image_outlined;
+      default:
+        return Icons.receipt_long_outlined;
+    }
+  }
+
+  String _formatFileSize(int? bytes) {
+    if (bytes == null || bytes <= 0) return 'File attached';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(bytes < 10 * 1024 ? 1 : 0)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  bool _isLocalInvoicePath(String? path) {
+    final trimmedPath = path?.trim() ?? '';
+    if (trimmedPath.isEmpty) return false;
+    return !PathUtils.isRemotePath(trimmedPath);
+  }
+
+  Future<void> _deleteDraftInvoiceIfNeeded(
+    String? originalPath,
+    String? candidatePath,
+  ) async {
+    final trimmedPath = candidatePath?.trim();
+    if (trimmedPath == null ||
+        trimmedPath.isEmpty ||
+        trimmedPath == originalPath?.trim() ||
+        !_isLocalInvoicePath(trimmedPath)) {
+      return;
+    }
+
+    await ref.read(invoiceServiceProvider).deleteInvoice(trimmedPath);
   }
 
   Widget _buildExpiryLoadingIndicator(bool isDark) {
@@ -942,8 +1327,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove',
-                style: TextStyle(color: AppColors.error)),
+            child:
+                const Text('Remove', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -979,18 +1364,463 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     }
   }
 
+  Future<void> _openInvoiceAttachment(Item item) async {
+    final invoicePath = item.invoicePath?.trim();
+    if (invoicePath == null || invoicePath.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No invoice attached yet'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final opened = await ref.read(invoiceServiceProvider).openInvoice(
+          invoicePath,
+        );
+    if (!mounted || opened) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Unable to open this invoice. The file may be missing or no viewer app is available.',
+        ),
+        backgroundColor: AppColors.error,
+      ),
+    );
+  }
+
+  Future<void> _editWarrantyAndInvoice(Item item) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final originalInvoicePath = item.invoicePath?.trim();
+    var selectedInvoicePath = originalInvoicePath;
+    var selectedInvoiceFileName = item.invoiceFileName?.trim();
+    var selectedInvoiceSizeBytes = item.invoiceFileSizeBytes;
+    var selectedWarrantyEndDate = item.warrantyEndDate;
+    var isPickingInvoice = false;
+
+    Future<void> pickInvoiceForSheet(StateSetter setSheetState) async {
+      if (isPickingInvoice) return;
+
+      setSheetState(() => isPickingInvoice = true);
+      try {
+        final picked = await ref.read(invoiceServiceProvider).pickInvoice();
+        if (!mounted) return;
+        if (picked == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No invoice selected'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+          return;
+        }
+
+        await _deleteDraftInvoiceIfNeeded(
+          originalInvoicePath,
+          selectedInvoicePath,
+        );
+        if (!mounted) return;
+
+        setSheetState(() {
+          selectedInvoicePath = picked.path;
+          selectedInvoiceFileName = picked.fileName;
+          selectedInvoiceSizeBytes = picked.sizeBytes;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Attached ${picked.fileName}'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not attach this invoice'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      } finally {
+        if (mounted) {
+          setSheetState(() => isPickingInvoice = false);
+        }
+      }
+    }
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              14,
+              20,
+              MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Warranty & Invoice',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 20,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Attach the purchase invoice and keep the warranty end date with this item.',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textSecondaryDark
+                        : AppColors.textSecondaryLight,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.surfaceVariantDark
+                        : AppColors.surfaceVariantLight,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: AppColors.info.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: AppColors.info.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              _invoiceIconForFileName(
+                                selectedInvoiceFileName ??
+                                    selectedInvoicePath ??
+                                    'invoice',
+                              ),
+                              color: AppColors.info,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Invoice',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? AppColors.textPrimaryDark
+                                        : AppColors.textPrimaryLight,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  selectedInvoicePath != null &&
+                                          selectedInvoicePath!.isNotEmpty
+                                      ? (selectedInvoiceFileName?.isNotEmpty ==
+                                              true
+                                          ? selectedInvoiceFileName!
+                                          : 'Attached invoice')
+                                      : 'Attach PDF, image, or any purchase document',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? AppColors.textSecondaryDark
+                                        : AppColors.textSecondaryLight,
+                                    fontSize: 12.5,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (selectedInvoicePath != null &&
+                          selectedInvoicePath!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: isPickingInvoice
+                                    ? null
+                                    : () => pickInvoiceForSheet(setSheetState),
+                                icon: const Icon(Icons.upload_file_outlined),
+                                label: Text(
+                                  isPickingInvoice ? 'Opening…' : 'Replace',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: isPickingInvoice
+                                    ? null
+                                    : () async {
+                                        final draftPath = selectedInvoicePath;
+                                        setSheetState(() {
+                                          selectedInvoicePath = null;
+                                          selectedInvoiceFileName = null;
+                                          selectedInvoiceSizeBytes = null;
+                                        });
+                                        await _deleteDraftInvoiceIfNeeded(
+                                          originalInvoicePath,
+                                          draftPath,
+                                        );
+                                      },
+                                icon: const Icon(Icons.delete_outline),
+                                label: const Text('Remove'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: isPickingInvoice
+                                ? null
+                                : () => pickInvoiceForSheet(setSheetState),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.info,
+                            ),
+                            icon: isPickingInvoice
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.upload_file_outlined),
+                            label: Text(
+                              isPickingInvoice
+                                  ? 'Opening Files…'
+                                  : 'Attach Invoice',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.surfaceVariantDark
+                        : AppColors.surfaceVariantLight,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.16),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Warranty end date',
+                        style: TextStyle(
+                          color: isDark
+                              ? AppColors.textPrimaryDark
+                              : AppColors.textPrimaryLight,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        selectedWarrantyEndDate == null
+                            ? 'No warranty date set yet'
+                            : DateFormat('dd MMM yyyy')
+                                .format(selectedWarrantyEndDate!),
+                        style: TextStyle(
+                          color: selectedWarrantyEndDate == null
+                              ? (isDark
+                                  ? AppColors.textSecondaryDark
+                                  : AppColors.textSecondaryLight)
+                              : AppColors.primary,
+                          fontSize: 13,
+                          fontWeight: selectedWarrantyEndDate == null
+                              ? FontWeight.w500
+                              : FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final picked = await showDatePicker(
+                                  context: sheetContext,
+                                  initialDate: selectedWarrantyEndDate ??
+                                      DateTime.now()
+                                          .add(const Duration(days: 365)),
+                                  firstDate: DateTime.now()
+                                      .subtract(const Duration(days: 3650)),
+                                  lastDate: DateTime.now()
+                                      .add(const Duration(days: 3650)),
+                                  helpText: 'SELECT WARRANTY END DATE',
+                                );
+                                if (picked == null) return;
+                                setSheetState(
+                                  () => selectedWarrantyEndDate = picked,
+                                );
+                              },
+                              icon: const Icon(Icons.event_available_outlined),
+                              label: Text(
+                                selectedWarrantyEndDate == null
+                                    ? 'Set Date'
+                                    : 'Change Date',
+                              ),
+                            ),
+                          ),
+                          if (selectedWarrantyEndDate != null) ...[
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => setSheetState(
+                                  () => selectedWarrantyEndDate = null,
+                                ),
+                                icon: const Icon(Icons.event_busy_outlined),
+                                label: const Text('Clear'),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: isPickingInvoice
+                        ? null
+                        : () => Navigator.of(sheetContext).pop(true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text('Save Details'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true) {
+      await _deleteDraftInvoiceIfNeeded(
+          originalInvoicePath, selectedInvoicePath);
+      return;
+    }
+
+    _startOp('Saving warranty details...');
+    final nextInvoicePath = selectedInvoicePath?.trim();
+    final shouldDeleteOriginalInvoice =
+        _isLocalInvoicePath(originalInvoicePath) &&
+            originalInvoicePath != null &&
+            originalInvoicePath.isNotEmpty &&
+            originalInvoicePath != nextInvoicePath;
+
+    final updatedItem = item.copyWith(
+      warrantyEndDate: selectedWarrantyEndDate,
+      clearWarrantyEndDate: selectedWarrantyEndDate == null,
+      invoicePath: nextInvoicePath,
+      invoiceFileName: selectedInvoiceFileName,
+      invoiceFileSizeBytes: selectedInvoiceSizeBytes,
+      clearInvoicePath: nextInvoicePath == null || nextInvoicePath.isEmpty,
+      clearInvoiceFileName: nextInvoicePath == null || nextInvoicePath.isEmpty,
+      clearInvoiceFileSizeBytes:
+          nextInvoicePath == null || nextInvoicePath.isEmpty,
+      updatedAt: DateTime.now(),
+    );
+
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
+    if (!mounted) return;
+    _endOp();
+
+    if (error != null) {
+      await _deleteDraftInvoiceIfNeeded(originalInvoicePath, nextInvoicePath);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+      );
+      return;
+    }
+
+    if (shouldDeleteOriginalInvoice) {
+      await ref.read(invoiceServiceProvider).deleteInvoice(originalInvoicePath);
+    }
+
+    if (!mounted) return;
+    final message = selectedWarrantyEndDate != null
+        ? 'Warranty updated for ${DateFormat('dd MMM yyyy').format(selectedWarrantyEndDate!)}'
+        : (nextInvoicePath != null && nextInvoicePath.isNotEmpty)
+            ? 'Invoice attached to this item'
+            : 'Warranty details cleared';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.success),
+    );
+  }
+
   Widget _buildCloudBackupSection(Item item, bool isDark, Color textPrimary) {
     final textSecondary =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-    final settings = ref.watch(settingsProvider);
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
     final progress = cloudBackupUsageProgress(
-      isPremium: settings.isPremium,
       backedUpCount: backedUpCount,
     );
-    final progressColor = backedUpCount >=
-            cloudBackupWarningThresholdFor(settings.isPremium)
+    final progressColor = backedUpCount >= cloudBackupWarningThreshold
         ? AppColors.warning
         : AppColors.primary;
     final helperText = item.isBackedUp
@@ -1066,16 +1896,14 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                 ),
             ],
           ),
-          if (!settings.isPremium) ...[
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: backedUpCountAsync.isLoading ? null : progress,
-              minHeight: 8,
-              backgroundColor: textSecondary.withValues(alpha: 0.18),
-              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ],
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: backedUpCountAsync.isLoading ? null : progress,
+            minHeight: 8,
+            backgroundColor: textSecondary.withValues(alpha: 0.18),
+            valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+            borderRadius: BorderRadius.circular(999),
+          ),
           const SizedBox(height: 12),
           Text(
             helperText,
@@ -1185,7 +2013,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Item name updated'), backgroundColor: AppColors.success),
+      const SnackBar(
+          content: Text('Item name updated'),
+          backgroundColor: AppColors.success),
     );
   }
 
@@ -1320,7 +2150,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     } else {
       ref.invalidate(singleItemProvider(widget.uuid));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lent to $lentTo'), backgroundColor: AppColors.success),
+        SnackBar(
+            content: Text('Lent to $lentTo'),
+            backgroundColor: AppColors.success),
       );
     }
   }
@@ -1412,219 +2244,58 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         false;
     if (!ok) return;
     _startOp('Archiving item...');
-    final error =
+    final result =
         await ref.read(itemsNotifierProvider.notifier).archiveItem(item.uuid);
     if (!mounted) return;
     _endOp();
-    if (error != null) {
+    if (result.hasFailure) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text(result.failureMessage!),
+          backgroundColor: AppColors.error,
+        ),
       );
       return;
+    }
+
+    if (result.cloudWarning != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Item archived locally. Cloud backup needs attention: ${result.cloudWarning}',
+          ),
+          backgroundColor: AppColors.warning,
+        ),
+      );
     }
     context.pop();
   }
 
   Future<void> _updateLocation(Item item) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final locations = await ref.read(allLocationsProvider.future);
-    if (!mounted) return;
-    String? selected = item.locationUuid;
-    final newLocationController = TextEditingController();
+    // Prefer the new zoneUuid as the canonical reference; fall back to the
+    // legacy locationUuid for items not yet migrated through Phase 5.
+    final currentZoneUuid = item.zoneUuid ?? item.locationUuid;
 
-    Future<void> saveNewLocation(BuildContext modalCtx) async {
-      final name = newLocationController.text.trim();
-      if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please enter a location name'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        return;
-      }
-
-      final newLocation = LocationModel(
-        uuid: generateUuid(),
-        name: name,
-        createdAt: DateTime.now(),
-      );
-
-      final error = await ref
-          .read(locationsNotifierProvider.notifier)
-          .saveLocation(newLocation);
-      if (!mounted) return;
-
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error), backgroundColor: AppColors.error),
-        );
-        return;
-      }
-
-      if (modalCtx.mounted) {
-        Navigator.of(modalCtx).pop(newLocation.uuid);
-      }
-    }
-
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setInner) => SafeArea(
-          top: false,
-          child: AnimatedPadding(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
-              child: SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Container(
-                      width: 48,
-                      height: 5,
-                      decoration: BoxDecoration(
-                          color: isDark ? Colors.white24 : Colors.black12,
-                          borderRadius: BorderRadius.circular(99))),
-                  const SizedBox(height: 18),
-                  Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('Update Location',
-                          style: TextStyle(
-                              color: isDark
-                                  ? AppColors.textPrimaryDark
-                                  : AppColors.textPrimaryLight,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 20))),
-                  const SizedBox(height: 12),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(ctx).size.height * 0.42,
-                    ),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: locations.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (_, i) {
-                        final l = locations[i];
-                        final active = l.uuid == selected;
-                        return InkWell(
-                          onTap: () => setInner(() => selected = l.uuid),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: active
-                                  ? AppColors.primary.withValues(alpha: 0.2)
-                                  : (isDark
-                                      ? AppColors.surfaceVariantDark
-                                      : AppColors.surfaceVariantLight),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                  color: active
-                                      ? AppColors.primary
-                                      : Colors.transparent),
-                            ),
-                            child: Row(children: [
-                              Icon(Icons.place_outlined,
-                                  color: active
-                                      ? AppColors.primary
-                                      : (isDark
-                                          ? AppColors.textSecondaryDark
-                                          : AppColors.textSecondaryLight)),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                  child: Text(
-                                      (l.fullPath?.trim().isNotEmpty ?? false)
-                                          ? l.fullPath!
-                                          : l.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          color: isDark
-                                              ? AppColors.textPrimaryDark
-                                              : AppColors.textPrimaryLight))),
-                              if (active)
-                                const Icon(Icons.check_circle,
-                                    color: AppColors.primary),
-                            ]),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: newLocationController,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => saveNewLocation(ctx),
-                    style: TextStyle(
-                      color: isDark
-                          ? AppColors.textPrimaryDark
-                          : AppColors.textPrimaryLight,
-                    ),
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.add_location_alt,
-                          color: AppColors.primary),
-                      hintText: 'Add new location (e.g. Kitchen Drawer)',
-                      hintStyle: TextStyle(
-                        color: isDark
-                            ? AppColors.textSecondaryDark
-                            : AppColors.textSecondaryLight,
-                      ),
-                      filled: true,
-                      fillColor: isDark
-                          ? AppColors.surfaceVariantDark
-                          : AppColors.surfaceVariantLight,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppColors.primary.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppColors.primary.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      focusedBorder: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(14)),
-                        borderSide: BorderSide(color: AppColors.primary),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: selected == null
-                          ? null
-                          : () => Navigator.of(ctx).pop(selected),
-                      style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          minimumSize: const Size.fromHeight(50)),
-                      child: const Text('Save Location'),
-                    ),
-                  ),
-                ]),
-              ),
-            ),
-          ),
-        ),
-      ),
+    final result = await showLocationPickerSheet(
+      context,
+      initialSelectedLocationUuid: currentZoneUuid,
+      title: 'Update Location',
     );
+    if (result == null || result == currentZoneUuid) return;
 
-    if (result == null || result == item.locationUuid) return;
-    final error = await ref
-        .read(itemsNotifierProvider.notifier)
-        .updateItem(item.copyWith(locationUuid: result));
+    // Resolve the picked zone to get its full hierarchy (areaUuid, roomUuid).
+    final zone =
+        await ref.read(locationHierarchyRepositoryProvider).resolveZone(result);
+    if (!mounted) return;
+
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).updateItem(item.copyWith(
+              // Keep locationUuid in sync for backward compat during migration.
+              locationUuid: result,
+              areaUuid: zone?.areaUuid,
+              roomUuid: zone?.roomUuid,
+              zoneUuid: result,
+            ));
     if (!mounted || error != null) return;
     ref.invalidate(singleItemProvider(widget.uuid));
     ref.invalidate(itemHistoryProvider(widget.uuid));
@@ -1663,7 +2334,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     setState(() => _selectedImage = updated.imagePaths.length - 1);
     ref.invalidate(singleItemProvider(widget.uuid));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Photo added'), backgroundColor: AppColors.success),
+      const SnackBar(
+          content: Text('Photo added'), backgroundColor: AppColors.success),
     );
   }
 
@@ -2065,9 +2737,7 @@ class _ItemVisibilitySectionState
     // (personal backup), but stores the actual ownerUid when synced from
     // the household Firestore collection. Only treat it as an owner UID
     // when it differs from the item UUID (i.e. it came from another member).
-    if (cloudId != null &&
-        cloudId.isNotEmpty &&
-        cloudId != _item.uuid) {
+    if (cloudId != null && cloudId.isNotEmpty && cloudId != _item.uuid) {
       return cloudId;
     }
     return _currentUserUid;
@@ -2566,6 +3236,163 @@ class _BorrowRequestTile extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DetailQuickActionTile extends StatelessWidget {
+  const _DetailQuickActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.isActive,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color accentColor;
+  final bool isActive;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final subtitleColor =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: enabled ? onTap : null,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppDimensions.spacingSm,
+            vertical: AppDimensions.spacingSm,
+          ),
+          decoration: BoxDecoration(
+            color: isActive
+                ? accentColor.withValues(alpha: isDark ? 0.16 : 0.1)
+                : (isDark
+                    ? AppColors.surfaceVariantDark
+                    : AppColors.surfaceVariantLight),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isActive
+                  ? accentColor.withValues(alpha: 0.28)
+                  : (isDark ? AppColors.borderDark : AppColors.borderLight),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: isDark ? 0.18 : 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: accentColor, size: 18),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: titleColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: subtitleColor,
+                  fontSize: 11.5,
+                  height: 1.25,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PinnedItemDetailHeader extends StatelessWidget {
+  const _PinnedItemDetailHeader({
+    required this.isDark,
+    required this.textPrimary,
+    required this.onBack,
+    required this.onEdit,
+  });
+
+  final bool isDark;
+  final Color textPrimary;
+  final VoidCallback onBack;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor =
+        isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        border: Border(
+          bottom: BorderSide(
+            color: AppColors.primary.withValues(alpha: 0.12),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 52,
+              child: IconButton(
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back, size: 30),
+                color: textPrimary,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                'Item Details',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 52,
+              child: IconButton(
+                onPressed: onEdit,
+                icon: Icon(Icons.edit_outlined, color: textPrimary),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

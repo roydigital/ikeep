@@ -4,6 +4,7 @@ class StorageConstants {
 
   // Local directories (relative to app documents directory)
   static const String itemImagesDir = 'item_images';
+  static const String itemInvoicesDir = 'item_invoices';
   static const String thumbnailsDir = 'thumbnails';
   static const String optimizedUploadsDir = 'optimized_uploads';
 

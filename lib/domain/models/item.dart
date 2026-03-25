@@ -7,15 +7,29 @@ class Item {
     required this.uuid,
     required this.name,
     required this.savedAt,
+    // ── Legacy location field (kept for backward compat during migration) ──
+    // Replaced by the three typed FK fields below. Will be removed in Phase 5
+    // once all items have been migrated to use areaUuid/roomUuid/zoneUuid.
     this.locationUuid,
+    // ── New hierarchical location FKs (Phase 1) ───────────────────────────
+    // These point to rows in the `locations` table with the matching type.
+    // zoneUuid is the primary "where is this item?" reference.
+    // roomUuid and areaUuid allow efficient filtering without table joins.
+    this.areaUuid,
+    this.roomUuid,
+    this.zoneUuid,
     this.imagePaths = const [],
     this.tags = const [],
     this.updatedAt,
     this.latitude,
     this.longitude,
     this.expiryDate,
+    this.warrantyEndDate,
     this.isArchived = false,
     this.notes,
+    this.invoicePath,
+    this.invoiceFileName,
+    this.invoiceFileSizeBytes,
     this.cloudId,
     this.lastSyncedAt,
     this.isBackedUp = false,
@@ -29,14 +43,36 @@ class Item {
     this.visibility = ItemVisibility.private_,
     this.householdId,
     this.sharedWithMemberUuids = const [],
-    // Denormalized for display — populated by joins
+    // Denormalized for display — populated by joins, never persisted
     this.locationName,
     this.locationFullPath,
+    this.areaName,
+    this.roomName,
+    this.zoneName,
   });
 
   final String uuid;
   final String name;
+
+  // ── Legacy location field ──────────────────────────────────────────────────
+  /// @deprecated Use [zoneUuid] + [roomUuid] + [areaUuid] instead.
+  /// Retained for backward compatibility during the Phase-5 data migration.
   final String? locationUuid;
+
+  // ── Hierarchical location FKs (Phase 1 refactor) ──────────────────────────
+  /// FK → [Area.uuid] in the `locations` table. Allows filtering by area
+  /// without any JOIN. Null until populated by Phase-5 migration.
+  final String? areaUuid;
+
+  /// FK → [Room.uuid] in the `locations` table. Null for zones directly
+  /// under an area. Null until populated by Phase-5 migration.
+  final String? roomUuid;
+
+  /// FK → [Zone.uuid] in the `locations` table. This is the canonical
+  /// "where is this item stored?" reference. Replaces [locationUuid].
+  /// Null until populated by Phase-5 migration.
+  final String? zoneUuid;
+
   final List<String> imagePaths;
   final List<String> tags;
   final DateTime savedAt;
@@ -44,8 +80,12 @@ class Item {
   final double? latitude;
   final double? longitude;
   final DateTime? expiryDate;
+  final DateTime? warrantyEndDate;
   final bool isArchived;
   final String? notes;
+  final String? invoicePath;
+  final String? invoiceFileName;
+  final int? invoiceFileSizeBytes;
   final String? cloudId;
   final DateTime? lastSyncedAt;
   final bool isBackedUp;
@@ -66,9 +106,21 @@ class Item {
   /// Nearby sharing is currently disabled in the app.
   bool get isNearby => false;
 
-  // Joined display fields (not persisted in items table)
+  // ── Joined display fields (not persisted in items table) ─────────────────
+  /// Legacy joined name from the old flat `locations` table.
   final String? locationName;
+
+  /// Legacy joined path from the old flat `locations` table.
   final String? locationFullPath;
+
+  /// Joined display name of the item's area. Populated by DAO queries.
+  final String? areaName;
+
+  /// Joined display name of the item's room. Null for direct-to-area zones.
+  final String? roomName;
+
+  /// Joined display name of the item's zone. Populated by DAO queries.
+  final String? zoneName;
 
   Item copyWith({
     String? uuid,
@@ -81,8 +133,12 @@ class Item {
     double? latitude,
     double? longitude,
     DateTime? expiryDate,
+    DateTime? warrantyEndDate,
     bool? isArchived,
     String? notes,
+    String? invoicePath,
+    String? invoiceFileName,
+    int? invoiceFileSizeBytes,
     String? cloudId,
     DateTime? lastSyncedAt,
     bool? isBackedUp,
@@ -98,10 +154,23 @@ class Item {
     List<String>? sharedWithMemberUuids,
     String? locationName,
     String? locationFullPath,
+    String? areaUuid,
+    String? roomUuid,
+    String? zoneUuid,
+    String? areaName,
+    String? roomName,
+    String? zoneName,
     bool clearLocationUuid = false,
+    bool clearAreaUuid = false,
+    bool clearRoomUuid = false,
+    bool clearZoneUuid = false,
     bool clearHouseholdId = false,
     bool clearExpiryDate = false,
+    bool clearWarrantyEndDate = false,
     bool clearNotes = false,
+    bool clearInvoicePath = false,
+    bool clearInvoiceFileName = false,
+    bool clearInvoiceFileSizeBytes = false,
     bool clearCloudId = false,
     bool clearLastSyncedAt = false,
     bool clearLentTo = false,
@@ -114,6 +183,9 @@ class Item {
       name: name ?? this.name,
       locationUuid:
           clearLocationUuid ? null : (locationUuid ?? this.locationUuid),
+      areaUuid: clearAreaUuid ? null : (areaUuid ?? this.areaUuid),
+      roomUuid: clearRoomUuid ? null : (roomUuid ?? this.roomUuid),
+      zoneUuid: clearZoneUuid ? null : (zoneUuid ?? this.zoneUuid),
       imagePaths: imagePaths ?? this.imagePaths,
       tags: tags ?? this.tags,
       savedAt: savedAt ?? this.savedAt,
@@ -121,8 +193,18 @@ class Item {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       expiryDate: clearExpiryDate ? null : (expiryDate ?? this.expiryDate),
+      warrantyEndDate: clearWarrantyEndDate
+          ? null
+          : (warrantyEndDate ?? this.warrantyEndDate),
       isArchived: isArchived ?? this.isArchived,
       notes: clearNotes ? null : (notes ?? this.notes),
+      invoicePath: clearInvoicePath ? null : (invoicePath ?? this.invoicePath),
+      invoiceFileName: clearInvoiceFileName
+          ? null
+          : (invoiceFileName ?? this.invoiceFileName),
+      invoiceFileSizeBytes: clearInvoiceFileSizeBytes
+          ? null
+          : (invoiceFileSizeBytes ?? this.invoiceFileSizeBytes),
       cloudId: clearCloudId ? null : (cloudId ?? this.cloudId),
       lastSyncedAt:
           clearLastSyncedAt ? null : (lastSyncedAt ?? this.lastSyncedAt),
@@ -145,6 +227,9 @@ class Item {
           sharedWithMemberUuids ?? this.sharedWithMemberUuids,
       locationName: locationName ?? this.locationName,
       locationFullPath: locationFullPath ?? this.locationFullPath,
+      areaName: areaName ?? this.areaName,
+      roomName: roomName ?? this.roomName,
+      zoneName: zoneName ?? this.zoneName,
     );
   }
 
@@ -153,7 +238,12 @@ class Item {
     return {
       'uuid': uuid,
       'name': name,
+      // Legacy location column — kept during Phase-5 migration window.
       'location_uuid': locationUuid,
+      // New hierarchical FK columns added in DB v13.
+      'area_uuid': areaUuid,
+      'room_uuid': roomUuid,
+      'zone_uuid': zoneUuid,
       'image_paths': jsonEncode(imagePaths),
       'tags': jsonEncode(tags),
       'saved_at': savedAt.millisecondsSinceEpoch,
@@ -161,8 +251,12 @@ class Item {
       'latitude': latitude,
       'longitude': longitude,
       'expiry_date': expiryDate?.millisecondsSinceEpoch,
+      'warranty_end_date': warrantyEndDate?.millisecondsSinceEpoch,
       'is_archived': isArchived ? 1 : 0,
       'notes': notes,
+      'invoice_path': invoicePath,
+      'invoice_file_name': invoiceFileName,
+      'invoice_file_size_bytes': invoiceFileSizeBytes,
       'cloud_id': cloudId,
       'last_synced_at': lastSyncedAt?.millisecondsSinceEpoch,
       'is_backed_up': isBackedUp ? 1 : 0,
@@ -199,8 +293,16 @@ class Item {
       expiryDate: map['expiry_date'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['expiry_date'] as int)
           : null,
+      warrantyEndDate: map['warranty_end_date'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              map['warranty_end_date'] as int,
+            )
+          : null,
       isArchived: (map['is_archived'] as int? ?? 0) == 1,
       notes: map['notes'] as String?,
+      invoicePath: map['invoice_path'] as String?,
+      invoiceFileName: map['invoice_file_name'] as String?,
+      invoiceFileSizeBytes: map['invoice_file_size_bytes'] as int?,
       cloudId: map['cloud_id'] as String?,
       lastSyncedAt: map['last_synced_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['last_synced_at'] as int)
@@ -230,9 +332,16 @@ class Item {
               '[]',
         ) as List,
       ),
-      // Joined fields from queries
+      // New hierarchical FK columns (null on pre-migration rows — that's fine).
+      areaUuid: map['area_uuid'] as String?,
+      roomUuid: map['room_uuid'] as String?,
+      zoneUuid: map['zone_uuid'] as String?,
+      // Joined display fields from DAO queries — never stored in the items row.
       locationName: map['location_name'] as String?,
       locationFullPath: map['location_full_path'] as String?,
+      areaName: map['area_name'] as String?,
+      roomName: map['room_name'] as String?,
+      zoneName: map['zone_name'] as String?,
     );
   }
 
@@ -249,8 +358,12 @@ class Item {
       'latitude': latitude,
       'longitude': longitude,
       'expiryDate': expiryDate?.toIso8601String(),
+      'warrantyEndDate': warrantyEndDate?.toIso8601String(),
       'isArchived': isArchived,
       'notes': notes,
+      'invoicePath': invoicePath,
+      'invoiceFileName': invoiceFileName,
+      'invoiceFileSizeBytes': invoiceFileSizeBytes,
       'cloudId': cloudId,
       'lastSyncedAt': lastSyncedAt?.toIso8601String(),
       'isBackedUp': isBackedUp,
@@ -283,8 +396,12 @@ class Item {
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       expiryDate: _dateTimeFromJson(json['expiryDate']),
+      warrantyEndDate: _dateTimeFromJson(json['warrantyEndDate']),
       isArchived: json['isArchived'] as bool? ?? false,
       notes: json['notes'] as String?,
+      invoicePath: json['invoicePath'] as String?,
+      invoiceFileName: json['invoiceFileName'] as String?,
+      invoiceFileSizeBytes: (json['invoiceFileSizeBytes'] as num?)?.toInt(),
       cloudId: json['cloudId'] as String?,
       lastSyncedAt: _dateTimeFromJson(json['lastSyncedAt']),
       isBackedUp: json['isBackedUp'] as bool? ?? false,

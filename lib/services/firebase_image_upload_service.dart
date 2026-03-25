@@ -63,6 +63,36 @@ class FirebaseImageUploadService {
     return downloadUrls;
   }
 
+  /// Resolves image paths restored from cloud into displayable download URLs.
+  ///
+  /// Older backups may have an empty `imagePaths` array in Firestore even when
+  /// the actual image files still exist in Firebase Storage. Some legacy data
+  /// may also store `gs://` or raw storage paths, which `Image.network` cannot
+  /// render directly. This helper normalizes those cases and falls back to the
+  /// item's storage folder when needed.
+  Future<List<String>> resolveCloudImageUrls({
+    required String userId,
+    required String itemUuid,
+    Iterable<String> imagePaths = const <String>[],
+  }) async {
+    final resolvedUrls = <String>[];
+    final seen = <String>{};
+
+    for (final imagePath in imagePaths) {
+      final resolvedUrl = await _resolveCloudImageUrl(imagePath);
+      if (resolvedUrl == null || resolvedUrl.trim().isEmpty) continue;
+      if (seen.add(resolvedUrl)) {
+        resolvedUrls.add(resolvedUrl);
+      }
+    }
+
+    if (resolvedUrls.isNotEmpty) {
+      return resolvedUrls;
+    }
+
+    return _listStoredItemImageUrls(userId: userId, itemUuid: itemUuid);
+  }
+
   /// Handles a single image slot: cache check → reuse check → optimize →
   /// upload. Fully self-contained so multiple slots run concurrently.
   Future<_UploadSlotResult> _uploadSingleImage({
@@ -87,17 +117,32 @@ class FirebaseImageUploadService {
     );
     final ref = _storage.ref().child(storagePath);
     final localFileState = await _localFileState(path);
-    final cacheKey = localFileState == null
-        ? null
-        : _cacheKeyFor(
-            localPath: path,
-            storagePath: storagePath,
-            modifiedMs: localFileState.modifiedMs,
-            byteSize: localFileState.byteSize,
-          );
+    if (localFileState == null) {
+      final reusedRemote = await _tryReuseStoredSlotImage(
+        userId: userId,
+        itemUuid: itemUuid,
+        index: index,
+        preferredRef: ref,
+      );
+      if (reusedRemote != null) {
+        return reusedRemote;
+      }
+
+      debugPrint(
+        'FirebaseImageUploadService: missing local image for slot $index, skipping $path',
+      );
+      return const _UploadSlotResult();
+    }
+
+    final cacheKey = _cacheKeyFor(
+      localPath: path,
+      storagePath: storagePath,
+      modifiedMs: localFileState.modifiedMs,
+      byteSize: localFileState.byteSize,
+    );
 
     // 1. In-memory cache hit.
-    final cached = cacheKey == null ? null : _uploadCache[cacheKey];
+    final cached = _uploadCache[cacheKey];
     if (cached != null) {
       return _UploadSlotResult(
         downloadUrl: cached.downloadUrl,
@@ -106,13 +151,11 @@ class FirebaseImageUploadService {
     }
 
     // 2. Reuse existing upload on Firebase Storage.
-    final reused = localFileState == null
-        ? null
-        : await _tryReuseExistingUpload(
-            ref: ref,
-            cacheKey: cacheKey,
-            localFileState: localFileState,
-          );
+    final reused = await _tryReuseExistingUpload(
+      ref: ref,
+      cacheKey: cacheKey,
+      localFileState: localFileState,
+    );
     if (reused != null) {
       return _UploadSlotResult(
         downloadUrl: reused.downloadUrl,
@@ -131,21 +174,17 @@ class FirebaseImageUploadService {
           customMetadata: {
             'optimized': 'true',
             'optimizedBytes': optimized.byteSize.toString(),
-            if (localFileState != null) ...{
-              _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
-              _sourceBytesKey: localFileState.byteSize.toString(),
-            },
+            _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
+            _sourceBytesKey: localFileState.byteSize.toString(),
           },
         ),
       );
 
       final downloadUrl = await ref.getDownloadURL();
-      if (cacheKey != null) {
-        _uploadCache[cacheKey] = _CachedUpload(
-          fullPath: ref.fullPath,
-          downloadUrl: downloadUrl,
-        );
-      }
+      _uploadCache[cacheKey] = _CachedUpload(
+        fullPath: ref.fullPath,
+        downloadUrl: downloadUrl,
+      );
       return _UploadSlotResult(
         downloadUrl: downloadUrl,
         storagePath: ref.fullPath,
@@ -212,7 +251,7 @@ class FirebaseImageUploadService {
 
   bool _isMissingObjectError(dynamic error) {
     final str = error.toString().toLowerCase();
-    if (str.contains('object-not-found') || 
+    if (str.contains('object-not-found') ||
         str.contains('no object exists') ||
         str.contains('not-found')) {
       return true;
@@ -274,6 +313,147 @@ class FirebaseImageUploadService {
       );
       return null;
     }
+  }
+
+  Future<_UploadSlotResult?> _tryReuseStoredSlotImage({
+    required String userId,
+    required String itemUuid,
+    required int index,
+    required Reference preferredRef,
+  }) async {
+    try {
+      final downloadUrl = await preferredRef.getDownloadURL();
+      return _UploadSlotResult(
+        downloadUrl: downloadUrl,
+        storagePath: preferredRef.fullPath,
+      );
+    } catch (e) {
+      if (!_isMissingObjectError(e)) {
+        debugPrint(
+          'FirebaseImageUploadService: failed remote reuse for ${preferredRef.fullPath}: $e',
+        );
+        return null;
+      }
+    }
+
+    try {
+      final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
+      final list = await folder.listAll();
+      final filePrefix = 'image_$index.';
+
+      for (final candidate in list.items) {
+        final fileName = candidate.fullPath.split('/').last;
+        if (!fileName.startsWith(filePrefix)) continue;
+
+        try {
+          final downloadUrl = await candidate.getDownloadURL();
+          return _UploadSlotResult(
+            downloadUrl: downloadUrl,
+            storagePath: candidate.fullPath,
+          );
+        } catch (e) {
+          if (!_isMissingObjectError(e)) {
+            debugPrint(
+              'FirebaseImageUploadService: failed legacy remote reuse for ${candidate.fullPath}: $e',
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (!_isMissingObjectError(e)) {
+        debugPrint('FirebaseImageUploadService slot lookup error: $e');
+      }
+    }
+
+    return null;
+  }
+
+  Future<String?> _resolveCloudImageUrl(String path) async {
+    final trimmedPath = path.trim();
+    if (trimmedPath.isEmpty) return null;
+
+    final normalizedPath = trimmedPath.toLowerCase();
+    if (normalizedPath.startsWith('http://') ||
+        normalizedPath.startsWith('https://')) {
+      return trimmedPath;
+    }
+
+    if (normalizedPath.startsWith('gs://')) {
+      try {
+        return await _storage.refFromURL(trimmedPath).getDownloadURL();
+      } catch (e) {
+        if (!_isMissingObjectError(e)) {
+          debugPrint(
+            'FirebaseImageUploadService: failed to resolve gs url $trimmedPath: $e',
+          );
+        }
+        return null;
+      }
+    }
+
+    if (trimmedPath.contains('/')) {
+      try {
+        return await _storage.ref().child(trimmedPath).getDownloadURL();
+      } catch (e) {
+        if (!_isMissingObjectError(e)) {
+          debugPrint(
+            'FirebaseImageUploadService: failed to resolve storage path $trimmedPath: $e',
+          );
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Future<List<String>> _listStoredItemImageUrls({
+    required String userId,
+    required String itemUuid,
+  }) async {
+    try {
+      final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
+      final list = await folder.listAll();
+      final refs = [...list.items]..sort(_compareStorageRefsBySlot);
+
+      final urls = <String>[];
+      for (final ref in refs) {
+        try {
+          urls.add(await ref.getDownloadURL());
+        } catch (e) {
+          if (!_isMissingObjectError(e)) {
+            debugPrint(
+              'FirebaseImageUploadService: failed to restore ${ref.fullPath}: $e',
+            );
+          }
+        }
+      }
+      return urls;
+    } catch (e) {
+      if (!_isMissingObjectError(e)) {
+        debugPrint(
+          'FirebaseImageUploadService: failed to list cloud images for $itemUuid: $e',
+        );
+      }
+      return const [];
+    }
+  }
+
+  int _compareStorageRefsBySlot(Reference a, Reference b) {
+    final aSlot = _slotIndexForPath(a.fullPath);
+    final bSlot = _slotIndexForPath(b.fullPath);
+    if (aSlot != bSlot) {
+      return aSlot.compareTo(bSlot);
+    }
+    return a.fullPath.compareTo(b.fullPath);
+  }
+
+  int _slotIndexForPath(String fullPath) {
+    final fileName = fullPath.split('/').last;
+    final match = RegExp(r'image_(\d+)').firstMatch(fileName);
+    if (match == null) {
+      return 1 << 30;
+    }
+    return int.tryParse(match.group(1) ?? '') ?? (1 << 30);
   }
 
   bool _matchesLocalFile(

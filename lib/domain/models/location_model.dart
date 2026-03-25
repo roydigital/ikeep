@@ -1,8 +1,46 @@
+enum LocationType {
+  area,
+  room,
+  zone;
+
+  String get value => switch (this) {
+        LocationType.area => 'area',
+        LocationType.room => 'room',
+        LocationType.zone => 'zone',
+      };
+
+  String get label => switch (this) {
+        LocationType.area => 'Area',
+        LocationType.room => 'Room',
+        LocationType.zone => 'Zone',
+      };
+
+  bool get canContainChildren => this != LocationType.zone;
+  bool get canBeItemLocation => this == LocationType.zone;
+
+  static LocationType fromStorage(
+    String? raw, {
+    String? parentUuid,
+  }) {
+    switch ((raw ?? '').trim().toLowerCase()) {
+      case 'area':
+        return LocationType.area;
+      case 'room':
+        return LocationType.room;
+      case 'zone':
+        return LocationType.zone;
+      default:
+        return parentUuid == null ? LocationType.area : LocationType.zone;
+    }
+  }
+}
+
 class LocationModel {
   const LocationModel({
     required this.uuid,
     required this.name,
     required this.createdAt,
+    required this.type,
     this.fullPath,
     this.parentUuid,
     this.iconName = 'folder',
@@ -11,6 +49,7 @@ class LocationModel {
 
   final String uuid;
   final String name;
+  final LocationType type;
 
   /// Breadcrumb path e.g. "Home > Bedroom > Top Shelf"
   final String? fullPath;
@@ -24,6 +63,10 @@ class LocationModel {
   final DateTime createdAt;
 
   bool get isRoot => parentUuid == null;
+  bool get isArea => type == LocationType.area;
+  bool get isRoom => type == LocationType.room;
+  bool get isZone => type == LocationType.zone;
+  bool get isAssignableToItem => type.canBeItemLocation;
 
   /// The display label — same as [name] but aliased for clarity in UI.
   String get displayName => name;
@@ -31,6 +74,7 @@ class LocationModel {
   LocationModel copyWith({
     String? uuid,
     String? name,
+    LocationType? type,
     String? fullPath,
     String? parentUuid,
     String? iconName,
@@ -41,6 +85,7 @@ class LocationModel {
     return LocationModel(
       uuid: uuid ?? this.uuid,
       name: name ?? this.name,
+      type: type ?? this.type,
       fullPath: fullPath ?? this.fullPath,
       parentUuid: clearParentUuid ? null : (parentUuid ?? this.parentUuid),
       iconName: iconName ?? this.iconName,
@@ -53,6 +98,7 @@ class LocationModel {
     return {
       'uuid': uuid,
       'name': name,
+      'location_type': type.value,
       'full_path': fullPath,
       'parent_uuid': parentUuid,
       'icon_name': iconName,
@@ -65,6 +111,10 @@ class LocationModel {
     return LocationModel(
       uuid: map['uuid'] as String,
       name: map['name'] as String,
+      type: LocationType.fromStorage(
+        map['location_type'] as String?,
+        parentUuid: map['parent_uuid'] as String?,
+      ),
       fullPath: map['full_path'] as String?,
       parentUuid: map['parent_uuid'] as String?,
       iconName: map['icon_name'] as String? ?? 'folder',
@@ -77,6 +127,7 @@ class LocationModel {
     return {
       'uuid': uuid,
       'name': name,
+      'type': type.value,
       'fullPath': fullPath,
       'parentUuid': parentUuid,
       'iconName': iconName,
@@ -93,5 +144,6 @@ class LocationModel {
   int get hashCode => uuid.hashCode;
 
   @override
-  String toString() => 'LocationModel(uuid: $uuid, name: $name, path: $fullPath)';
+  String toString() =>
+      'LocationModel(uuid: $uuid, name: $name, type: ${type.value}, path: $fullPath)';
 }

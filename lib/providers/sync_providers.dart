@@ -10,3 +10,22 @@ final syncStatusProvider = StateProvider<SyncResult>(
 final lastSyncedAtProvider = FutureProvider.autoDispose<DateTime?>((ref) async {
   return ref.watch(syncServiceProvider).getLastSyncedAt();
 });
+
+void publishSyncResult(
+  Ref ref,
+  SyncResult result, {
+  bool publishErrors = false,
+  SyncResult? fallbackStatus,
+}) {
+  if (result.status == SyncStatus.error && !publishErrors) {
+    if (fallbackStatus != null) {
+      ref.read(syncStatusProvider.notifier).state = fallbackStatus;
+    }
+    return;
+  }
+
+  ref.read(syncStatusProvider.notifier).state = result;
+  if (result.status == SyncStatus.success) {
+    ref.invalidate(lastSyncedAtProvider);
+  }
+}

@@ -10,7 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/constants/subscription_constants.dart';
+import '../../core/constants/feature_limits.dart';
+import '../../domain/models/item.dart';
 import '../../domain/models/sync_status.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/home_tour_provider.dart';
@@ -20,7 +21,6 @@ import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/sync_providers.dart';
 import '../../routing/app_routes.dart';
-import 'paywall_screen.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
@@ -154,7 +154,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Timer? _remoteSyncMetadataTimer;
   final GlobalKey _accountShowcaseKey = GlobalKey();
   final GlobalKey _preferencesShowcaseKey = GlobalKey();
-  final GlobalKey _premiumShowcaseKey = GlobalKey();
+  final GlobalKey _cloudFeaturesShowcaseKey = GlobalKey();
   bool _settingsTourQueued = false;
 
   @override
@@ -317,9 +317,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _runSync() async {
-    if (!_backupEnabled) {
-      _showInfo('Enable cloud backup on an item to start syncing');
+    final auth = ref.read(firebaseAuthProvider);
+    if (auth.currentUser == null) {
+      _showInfo('Sign in with Google to sync your cloud backup');
       return;
+    }
+
+    if (!_backupEnabled) {
+      await ref.read(settingsProvider.notifier).setBackupEnabled(true);
+      if (mounted) {
+        setState(() => _backupEnabled = true);
+      }
     }
 
     _enableRemoteSyncMetadataNow();
@@ -327,6 +335,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final result = await ref.read(syncServiceProvider).fullSync();
     ref.read(syncStatusProvider.notifier).state = result;
     ref.invalidate(lastSyncedAtProvider);
+    ref.invalidate(allItemsProvider);
+    ref.invalidate(backedUpItemsProvider);
+    ref.invalidate(backedUpItemsCountProvider);
+    ref.invalidate(allLocationsProvider);
+    ref.invalidate(rootLocationsProvider);
     if (!mounted) return;
     final message = result.isSuccess
         ? 'Sync completed'
@@ -447,6 +460,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    _initFromSettings(settings);
+    _activeColors = _darkMode ? _darkColors : _lightColors;
     final authUser = ref.watch(authStateProvider).valueOrNull;
     final authUid = authUser?.uid;
     if (authUid != _lastObservedAuthUid) {
@@ -457,34 +472,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     final hasSeenSettingsTour = ref.watch(settingsTourControllerProvider);
     final syncStatus = ref.watch(syncStatusProvider);
-    final shouldLoadLastSynced =
-        _backupEnabled && authUser != null && _canLoadRemoteSyncMetadata;
+    final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
+    final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
+    final backedUpItemsAsync = ref.watch(backedUpItemsProvider);
+    final backedUpItems = backedUpItemsAsync.valueOrNull ?? const <Item>[];
+    final hasBackedUpItems = backedUpCount > 0;
+    final backupEnabled = _backupEnabled || hasBackedUpItems;
+    final shouldLoadLastSynced = authUser != null && _canLoadRemoteSyncMetadata;
     final lastSynced = shouldLoadLastSynced
         ? ref.watch(lastSyncedAtProvider).valueOrNull
         : syncStatus.lastSyncedAt;
-    final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
-    _initFromSettings(settings);
-    _activeColors = _darkMode ? _darkColors : _lightColors;
 
     final canSave = _hasChanges(settings) && !_isSaving;
     final isGoogleSignedIn = authUser != null;
     final showLogoutAction = isGoogleSignedIn || _isLoggingOut;
-    final statusColor = !_backupEnabled
+    final hasCloudConnection =
+        authUser != null && (backupEnabled || lastSynced != null);
+    final statusColor = authUser == null
         ? _kTextMuted
         : syncStatus.hasError
             ? AppColors.error
-            : _kSuccess;
-    final statusText = !_backupEnabled
-        ? 'Not Connected'
+            : hasCloudConnection
+                ? _kSuccess
+                : _kAccent;
+    final statusText = authUser == null
+        ? 'Sign In'
         : syncStatus.isSyncing
             ? 'Syncing...'
             : syncStatus.hasError
                 ? 'Error'
-                : 'Connected';
-    final lastSyncedText =
-        authUser != null && _backupEnabled && !_canLoadRemoteSyncMetadata
-            ? 'Loading...'
-            : _formatLastSynced(lastSynced);
+                : hasCloudConnection
+                    ? 'Connected'
+                    : 'Ready to Sync';
+    final lastSyncedText = authUser != null && !_canLoadRemoteSyncMetadata
+        ? 'Loading...'
+        : _formatLastSynced(lastSynced);
     return ShowCaseWidget(
       blurValue: 1.5,
       enableAutoScroll: true,
@@ -498,7 +520,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ShowCaseWidget.of(tourContext).startShowCase([
               _accountShowcaseKey,
               _preferencesShowcaseKey,
-              _premiumShowcaseKey,
+              _cloudFeaturesShowcaseKey,
             ]);
             ref.read(settingsTourControllerProvider.notifier).markSeen();
           });
@@ -543,10 +565,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               description:
                                   'Connect your account, confirm your membership status, and see whether backup is active.',
                               child: _AccountCard(
-                                backupEnabled: _backupEnabled,
-                                isPremium: settings.isPremium,
-                                backedUpCount:
-                                    backedUpCountAsync.valueOrNull ?? 0,
+                                backupEnabled: backupEnabled,
+                                backedUpCount: backedUpCount,
+                                backedUpItemNames: backedUpItems
+                                    .map((item) => item.name)
+                                    .toList(),
                                 isUsageLoading: backedUpCountAsync.isLoading,
                                 displayName: authUser?.displayName,
                                 photoUrl: authUser?.photoURL,
@@ -555,10 +578,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 onGoogleSignInTap: !isGoogleSignedIn
                                     ? _handleGoogleSignIn
                                     : null,
-                                onUpgradeTap: () => PaywallScreen.show(context),
-                                plan: settings.plan,
-                                onManageTap: () =>
-                                    _ManageSubscriptionSheet.show(context),
                               ),
                             ),
                             const SizedBox(height: 36),
@@ -584,18 +603,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               ),
                             ),
                             const SizedBox(height: 36),
-                            _SectionLabel('PREMIUM FEATURES'),
+                            _SectionLabel('CLOUD & FAMILY'),
                             const SizedBox(height: 14),
                             _buildSettingsTourStep(
-                              showcaseKey: _premiumShowcaseKey,
+                              showcaseKey: _cloudFeaturesShowcaseKey,
                               title: 'Backup And Family Features',
                               description:
                                   'Monitor sync status, trigger a backup, and manage family-sharing features from this card.',
-                              child: _PremiumFeaturesCard(
+                              child: _CloudAndFamilyCard(
                                 statusText: statusText,
                                 statusColor: statusColor,
                                 isSyncing: syncStatus.isSyncing,
-                                progress: _backupEnabled ? 0.85 : 0.25,
+                                progress: backupEnabled ? 0.85 : 0.4,
                                 lastSyncedText: lastSyncedText,
                                 onSyncTap: _runSync,
                                 onManageFamily: () =>
@@ -672,12 +691,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ],
                 ),
-              ),
-              const Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: AppNavBar(activeTab: AppNavTab.settings),
               ),
             ],
           ),
@@ -813,30 +826,24 @@ class _SectionLabel extends StatelessWidget {
 class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.backupEnabled,
-    required this.isPremium,
     required this.backedUpCount,
+    required this.backedUpItemNames,
     required this.isUsageLoading,
     required this.displayName,
     required this.photoUrl,
     required this.isGoogleSignedIn,
     this.onGoogleSignInTap,
-    required this.onUpgradeTap,
-    required this.onManageTap,
-    required this.plan,
     this.isSigningIn = false,
   });
 
   final bool backupEnabled;
-  final bool isPremium;
   final int backedUpCount;
+  final List<String> backedUpItemNames;
   final bool isUsageLoading;
   final String? displayName;
   final String? photoUrl;
   final bool isGoogleSignedIn;
   final Future<void> Function()? onGoogleSignInTap;
-  final VoidCallback onUpgradeTap;
-  final VoidCallback onManageTap;
-  final AppPlan plan;
   final bool isSigningIn;
 
   @override
@@ -944,12 +951,9 @@ class _AccountCard extends StatelessWidget {
             ),
             child: _CloudBackupSummary(
               backupEnabled: backupEnabled,
-              isPremium: isPremium,
-              plan: plan,
               backedUpCount: backedUpCount,
+              backedUpItemNames: backedUpItemNames,
               isUsageLoading: isUsageLoading,
-              onUpgradeTap: onUpgradeTap,
-              onManageTap: onManageTap,
             ),
           ),
         ],
@@ -961,101 +965,25 @@ class _AccountCard extends StatelessWidget {
 class _CloudBackupSummary extends StatelessWidget {
   const _CloudBackupSummary({
     required this.backupEnabled,
-    required this.isPremium,
-    required this.plan,
     required this.backedUpCount,
+    required this.backedUpItemNames,
     required this.isUsageLoading,
-    required this.onUpgradeTap,
-    required this.onManageTap,
   });
 
   final bool backupEnabled;
-  final bool isPremium;
-  final AppPlan plan;
   final int backedUpCount;
+  final List<String> backedUpItemNames;
   final bool isUsageLoading;
-  final VoidCallback onUpgradeTap;
-  final VoidCallback onManageTap;
 
   @override
   Widget build(BuildContext context) {
     final usageProgress = cloudBackupUsageProgress(
-      isPremium: isPremium,
       backedUpCount: backedUpCount,
     );
-    final progressColor =
-        backedUpCount >= cloudBackupWarningThresholdFor(isPremium)
-            ? AppColors.warning
-            : _kAccent;
-
-    if (isPremium) {
-      return Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: _kAccent.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Center(
-              child: Icon(
-                Icons.cloud_done,
-                color: _kAccent,
-                size: 24,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Unlimited Cloud Backup',
-                  style: TextStyle(
-                    color: _kTextPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  premiumCloudBackupFairUsageDisclaimer,
-                  style: TextStyle(color: _kTextMuted, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: onManageTap,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.success.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    plan.label,
-                    style: const TextStyle(
-                      color: AppColors.success,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.settings,
-                      color: AppColors.success, size: 14),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
+    final progressColor = backedUpCount >= cloudBackupWarningThreshold
+        ? AppColors.warning
+        : _kAccent;
+    final previewNames = backedUpItemNames.take(3).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1071,7 +999,6 @@ class _CloudBackupSummary extends StatelessWidget {
             Expanded(
               child: Text(
                 cloudBackupUsageLabel(
-                  isPremium: false,
                   backedUpCount: backedUpCount,
                 ),
                 style: TextStyle(
@@ -1092,25 +1019,69 @@ class _CloudBackupSummary extends StatelessWidget {
           borderRadius: BorderRadius.circular(999),
         ),
         const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: onUpgradeTap,
-            style: FilledButton.styleFrom(
-              backgroundColor: _kAccent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            child: const Text(
-              'Upgrade to Ikeep Plus',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
+        Text(
+          backupEnabled
+              ? backedUpCount > 0
+                  ? 'These items are already marked for cloud backup. Tap Online Backup below to sync or restore them now.'
+                  : 'Cloud backup is ready. Tap Online Backup below whenever you want to sync or restore your saved cloud data.'
+              : 'Turn on cloud backup for an item, or use Online Backup below to restore items already saved to your account.',
+          style: TextStyle(
+            color: _kTextMuted,
+            fontSize: 12,
+            height: 1.35,
           ),
         ),
+        if (previewNames.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Backed up items',
+            style: TextStyle(
+              color: _kTextPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final name in previewNames) _CloudItemChip(label: name),
+              if (backedUpItemNames.length > previewNames.length)
+                _CloudItemChip(
+                  label:
+                      '+${backedUpItemNames.length - previewNames.length} more',
+                ),
+            ],
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _CloudItemChip extends StatelessWidget {
+  const _CloudItemChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: _kTextPrimary,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -1467,8 +1438,8 @@ class _NearbyLendingCard extends ConsumerWidget {
   }
 }
 
-class _PremiumFeaturesCard extends StatelessWidget {
-  const _PremiumFeaturesCard({
+class _CloudAndFamilyCard extends StatelessWidget {
+  const _CloudAndFamilyCard({
     required this.statusText,
     required this.statusColor,
     required this.isSyncing,
@@ -1720,266 +1691,6 @@ class _IkeepSwitch extends StatelessWidget {
               shape: BoxShape.circle,
               color: value ? Colors.white : _kSwitchOffThumb,
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ManageSubscriptionSheet extends ConsumerStatefulWidget {
-  const _ManageSubscriptionSheet();
-
-  static Future<void> show(BuildContext context) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _ManageSubscriptionSheet(),
-    );
-  }
-
-  @override
-  ConsumerState<_ManageSubscriptionSheet> createState() =>
-      _ManageSubscriptionSheetState();
-}
-
-class _ManageSubscriptionSheetState
-    extends ConsumerState<_ManageSubscriptionSheet> {
-  bool _isRestoring = false;
-  bool _isOpeningManagePage = false;
-
-  Future<void> _restorePurchases() async {
-    final billingService = ref.read(googlePlayBillingServiceProvider);
-    if (!billingService.isSupportedPlatform) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Google Play subscription restore works only on Android.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isRestoring = true);
-    try {
-      await billingService.restorePurchases();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Restore requested. If an active subscription exists, it will sync shortly.',
-          ),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to restore purchases right now.')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isRestoring = false);
-      }
-    }
-  }
-
-  Future<void> _openManagePage() async {
-    setState(() => _isOpeningManagePage = true);
-    final opened = await launchUrl(
-      Uri.parse(googlePlayManageSubscriptionsUrl),
-      mode: LaunchMode.externalApplication,
-    );
-    if (!mounted) return;
-    setState(() => _isOpeningManagePage = false);
-    if (!opened) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Unable to open Google Play subscriptions.')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = ref.watch(settingsProvider);
-    final billingService = ref.watch(googlePlayBillingServiceProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
-    final textPrimary =
-        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
-    final textSecondary =
-        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Container(
-          decoration: BoxDecoration(
-            color: surface,
-            borderRadius: BorderRadius.circular(32),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 12),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: textSecondary.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Manage Subscription',
-                      style: TextStyle(
-                        color: textPrimary,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Google Play handles subscription changes, renewals, and cancellations for Ikeep Plus.',
-                      style: TextStyle(
-                        color: textSecondary,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: AppColors.primary.withValues(alpha: 0.18),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Current plan',
-                            style: TextStyle(
-                              color: textSecondary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            settings.plan.label,
-                            style: TextStyle(
-                              color: textPrimary,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      premiumCloudBackupFairUsageDisclaimer,
-                      style: TextStyle(
-                        color: textSecondary.withValues(alpha: 0.72),
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed:
-                            _isOpeningManagePage ? null : _openManagePage,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: _isOpeningManagePage
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.open_in_new_rounded),
-                        label: const Text(
-                          'Manage in Google Play',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _isRestoring ? null : _restorePurchases,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: BorderSide(
-                            color: AppColors.primary.withValues(alpha: 0.32),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        icon: _isRestoring
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.restore_rounded),
-                        label: const Text(
-                          'Restore Purchases',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                    if (!billingService.isSupportedPlatform) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'Google Play subscription management is available only on Android devices.',
-                        style: TextStyle(
-                          color: textSecondary,
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Text(
-                      googlePlaySubscriptionTestingNotice,
-                      style: TextStyle(
-                        color: textSecondary.withValues(alpha: 0.72),
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),

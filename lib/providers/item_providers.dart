@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart' show listEquals;
-import '../core/constants/subscription_constants.dart';
+import '../core/constants/feature_limits.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/fuzzy_search.dart';
@@ -19,10 +19,109 @@ import 'sync_providers.dart';
 
 final itemSearchQueryProvider = StateProvider<String>((ref) => '');
 
+const int dashboardExpiringSoonWindowDays = 14;
+const int dashboardWarrantyEndingSoonWindowDays = 30;
+
+DateTime dashboardDateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+bool isItemExpiringSoon(
+  Item item, {
+  DateTime? referenceDate,
+  int withinDays = dashboardExpiringSoonWindowDays,
+}) {
+  final expiryDate = item.expiryDate;
+  if (item.isArchived || expiryDate == null) return false;
+
+  final today = dashboardDateOnly(referenceDate ?? DateTime.now());
+  final expiryDay = dashboardDateOnly(expiryDate);
+  final daysUntilExpiry = expiryDay.difference(today).inDays;
+  return daysUntilExpiry >= 0 && daysUntilExpiry <= withinDays;
+}
+
+bool isItemWarrantyEndingSoon(
+  Item item, {
+  DateTime? referenceDate,
+  int withinDays = dashboardWarrantyEndingSoonWindowDays,
+}) {
+  final warrantyEndDate = item.warrantyEndDate;
+  if (item.isArchived || warrantyEndDate == null) return false;
+
+  final today = dashboardDateOnly(referenceDate ?? DateTime.now());
+  final warrantyDay = dashboardDateOnly(warrantyEndDate);
+  final daysUntilEnd = warrantyDay.difference(today).inDays;
+  return daysUntilEnd >= 0 && daysUntilEnd <= withinDays;
+}
+
+DateTime lentDashboardSortDate(Item item) {
+  final sourceDate = item.expectedReturnDate ?? item.lentOn ?? item.savedAt;
+  return dashboardDateOnly(sourceDate);
+}
+
+int compareLentItemsForDashboard(Item a, Item b) {
+  final aHasReturnDate = a.expectedReturnDate != null;
+  final bHasReturnDate = b.expectedReturnDate != null;
+  if (aHasReturnDate != bHasReturnDate) {
+    return aHasReturnDate ? -1 : 1;
+  }
+
+  final dateCompare = lentDashboardSortDate(a).compareTo(
+    lentDashboardSortDate(b),
+  );
+  if (dateCompare != 0) return dateCompare;
+
+  return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+}
+
+int compareExpiringItemsForDashboard(Item a, Item b) {
+  final aExpiryDate = a.expiryDate;
+  final bExpiryDate = b.expiryDate;
+  if (aExpiryDate == null && bExpiryDate == null) {
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+  if (aExpiryDate == null) return 1;
+  if (bExpiryDate == null) return -1;
+
+  final dateCompare = dashboardDateOnly(aExpiryDate).compareTo(
+    dashboardDateOnly(bExpiryDate),
+  );
+  if (dateCompare != 0) return dateCompare;
+
+  return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+}
+
+int compareWarrantyItemsForDashboard(Item a, Item b) {
+  final aWarrantyDate = a.warrantyEndDate;
+  final bWarrantyDate = b.warrantyEndDate;
+  if (aWarrantyDate == null && bWarrantyDate == null) {
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+  if (aWarrantyDate == null) return 1;
+  if (bWarrantyDate == null) return -1;
+
+  final dateCompare = dashboardDateOnly(aWarrantyDate).compareTo(
+    dashboardDateOnly(bWarrantyDate),
+  );
+  if (dateCompare != 0) return dateCompare;
+
+  return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+}
+
 // ── Data providers ────────────────────────────────────────────────────────────
 
 final allItemsProvider = FutureProvider<List<Item>>((ref) async {
   return ref.watch(itemRepositoryProvider).getAllItems();
+});
+
+final backedUpItemsProvider = FutureProvider<List<Item>>((ref) async {
+  final items = await ref.watch(allItemsProvider.future);
+  final backedUpItems = items.where((item) => item.isBackedUp).toList()
+    ..sort((a, b) {
+      final aDate = a.updatedAt ?? a.savedAt;
+      final bDate = b.updatedAt ?? b.savedAt;
+      return bDate.compareTo(aDate);
+    });
+  return backedUpItems;
 });
 
 final itemTagsProvider = FutureProvider<List<String>>((ref) async {
@@ -34,14 +133,26 @@ final archivedItemsProvider = FutureProvider<List<Item>>((ref) async {
 });
 
 final lentItemsProvider = FutureProvider<List<Item>>((ref) async {
-  final items = await ref.watch(itemRepositoryProvider).getAllItems();
+  final items = await ref.watch(allItemsProvider.future);
   final lent = items.where((item) => item.isLent && !item.isArchived).toList();
-  lent.sort((a, b) {
-    final aDate = a.expectedReturnDate ?? a.lentOn ?? a.savedAt;
-    final bDate = b.expectedReturnDate ?? b.lentOn ?? b.savedAt;
-    return aDate.compareTo(bDate);
-  });
+  lent.sort(compareLentItemsForDashboard);
   return lent;
+});
+
+final expiringSoonItemsProvider = FutureProvider<List<Item>>((ref) async {
+  final items = await ref.watch(allItemsProvider.future);
+  final expiringSoon = items.where((item) => isItemExpiringSoon(item)).toList()
+    ..sort(compareExpiringItemsForDashboard);
+  return expiringSoon;
+});
+
+final warrantyEndingSoonItemsProvider = FutureProvider<List<Item>>((ref) async {
+  final items = await ref.watch(allItemsProvider.future);
+  final warrantyEndingSoon = items
+      .where((item) => isItemWarrantyEndingSoon(item))
+      .toList()
+    ..sort(compareWarrantyItemsForDashboard);
+  return warrantyEndingSoon;
 });
 
 final lendableItemsProvider = FutureProvider<List<Item>>((ref) async {
@@ -232,13 +343,21 @@ class ItemsNotifier extends StateNotifier<bool> {
     return syncError;
   }
 
-  Future<String?> archiveItem(String uuid) async {
+  Future<ArchiveItemResult> archiveItem(String uuid) async {
     final failure = await _ref.read(itemRepositoryProvider).archiveItem(uuid);
-    if (failure != null) return failure.message;
+    if (failure != null) {
+      return ArchiveItemResult.failure(failure.message);
+    }
 
     final archivedItem = await _ref.read(itemRepositoryProvider).getItem(uuid);
+    String? cloudWarning;
     if (archivedItem != null) {
-      await _syncItemToCloud(archivedItem);
+      final previousStatus = _ref.read(syncStatusProvider);
+      cloudWarning = await _syncItemToCloud(
+        archivedItem,
+        fallbackStatus: previousStatus,
+        publishErrorsToStatus: false,
+      );
     }
 
     await _ref.read(notificationServiceProvider).cancelExpiryReminder(uuid);
@@ -246,36 +365,61 @@ class ItemsNotifier extends StateNotifier<bool> {
 
     _ref.invalidate(allItemsProvider);
     _ref.invalidate(lentItemsProvider);
+    _ref.invalidate(expiringSoonItemsProvider);
+    _ref.invalidate(warrantyEndingSoonItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
     _ref.invalidate(itemTagsProvider);
     _ref.invalidate(singleItemProvider(uuid));
-    return null;
+    return ArchiveItemResult.success(cloudWarning: cloudWarning);
   }
 
   Future<String?> deleteItem(String uuid) async {
+    final existingItem = await _ref.read(itemRepositoryProvider).getItem(uuid);
     final failure = await _ref.read(itemRepositoryProvider).deleteItem(uuid);
     if (failure != null) return failure.message;
 
     await _syncDeleteItem(uuid);
+
+    final invoicePath = existingItem?.invoicePath?.trim();
+    if (invoicePath != null &&
+        invoicePath.isNotEmpty &&
+        !invoicePath.startsWith('http://') &&
+        !invoicePath.startsWith('https://') &&
+        !invoicePath.startsWith('gs://')) {
+      await _ref.read(invoiceServiceProvider).deleteInvoice(invoicePath);
+    }
 
     await _ref.read(notificationServiceProvider).cancelExpiryReminder(uuid);
     await _ref.read(notificationServiceProvider).cancelLentReminder(uuid);
 
     _ref.invalidate(allItemsProvider);
     _ref.invalidate(lentItemsProvider);
+    _ref.invalidate(expiringSoonItemsProvider);
+    _ref.invalidate(warrantyEndingSoonItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
     _ref.invalidate(itemTagsProvider);
     return null;
   }
 
-  Future<String?> _syncItemToCloud(Item item) async {
+  Future<String?> _syncItemToCloud(
+    Item item, {
+    SyncResult? fallbackStatus,
+    bool publishErrorsToStatus = true,
+  }) async {
     if (!item.isBackedUp) {
       final hadRemoteBackup = (item.cloudId?.trim().isNotEmpty ?? false) ||
           item.lastSyncedAt != null;
       if (hadRemoteBackup) {
-        await _syncDeleteItem(item.uuid);
+        final deleteResult = await _syncDeleteItem(
+          item.uuid,
+          fallbackStatus: fallbackStatus,
+          publishErrorsToStatus: publishErrorsToStatus,
+        );
+        if (deleteResult.status == SyncStatus.error) {
+          return deleteResult.errorMessage ?? 'Sync failed';
+        }
         await _ref.read(itemRepositoryProvider).updateItem(
               item.copyWith(
                 clearCloudId: true,
@@ -287,8 +431,12 @@ class ItemsNotifier extends StateNotifier<bool> {
     }
 
     final result = await _ref.read(syncServiceProvider).syncItem(item);
-    _ref.read(syncStatusProvider.notifier).state = result;
-    _ref.invalidate(lastSyncedAtProvider);
+    publishSyncResult(
+      _ref,
+      result,
+      publishErrors: publishErrorsToStatus,
+      fallbackStatus: fallbackStatus,
+    );
 
     if (result.status != SyncStatus.error) {
       return null;
@@ -309,12 +457,19 @@ class ItemsNotifier extends StateNotifier<bool> {
     return result.errorMessage ?? 'Sync failed';
   }
 
-  Future<void> _syncDeleteItem(String uuid) async {
+  Future<SyncResult> _syncDeleteItem(
+    String uuid, {
+    SyncResult? fallbackStatus,
+    bool publishErrorsToStatus = true,
+  }) async {
     final result = await _ref.read(syncServiceProvider).deleteRemoteItem(uuid);
-    if (result.status != SyncStatus.error) {
-      _ref.read(syncStatusProvider.notifier).state = result;
-      _ref.invalidate(lastSyncedAtProvider);
-    }
+    publishSyncResult(
+      _ref,
+      result,
+      publishErrors: publishErrorsToStatus,
+      fallbackStatus: fallbackStatus,
+    );
+    return result;
   }
 
   Future<String?> _preflightCloudSync({
@@ -329,9 +484,8 @@ class ItemsNotifier extends StateNotifier<bool> {
       return null;
     }
 
-    final settings = _ref.read(settingsProvider);
     final backedUpCount = await _ref.read(backedUpItemsCountProvider.future);
-    if (backedUpCount <= cloudBackupLimitFor(settings.isPremium)) {
+    if (backedUpCount <= cloudBackupLimit) {
       return null;
     }
 
@@ -344,7 +498,7 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(item.uuid));
-    return cloudBackupQuotaExceededError(isPremium: settings.isPremium);
+    return cloudBackupQuotaExceededError();
   }
 
   void _scheduleCloudSync({
@@ -357,12 +511,13 @@ class ItemsNotifier extends StateNotifier<bool> {
       return;
     }
 
+    final previousStatus = _ref.read(syncStatusProvider);
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     unawaited(() async {
       if (needsDelete) {
-        await _syncDeleteItem(item.uuid);
+        await _syncDeleteItem(item.uuid, fallbackStatus: previousStatus);
       } else {
-        await _syncItemToCloud(item);
+        await _syncItemToCloud(item, fallbackStatus: previousStatus);
       }
       _invalidateItemLists();
       _ref.invalidate(singleItemProvider(item.uuid));
@@ -428,6 +583,8 @@ class ItemsNotifier extends StateNotifier<bool> {
   void _invalidateItemLists() {
     _ref.invalidate(allItemsProvider);
     _ref.invalidate(lentItemsProvider);
+    _ref.invalidate(expiringSoonItemsProvider);
+    _ref.invalidate(warrantyEndingSoonItemsProvider);
     _ref.invalidate(lendableItemsProvider);
     _ref.invalidate(forgottenItemsProvider);
     _ref.invalidate(itemTagsProvider);
@@ -448,6 +605,19 @@ class ItemsNotifier extends StateNotifier<bool> {
     return (item.cloudId?.trim().isNotEmpty ?? false) ||
         item.lastSyncedAt != null;
   }
+}
+
+class ArchiveItemResult {
+  const ArchiveItemResult.success({this.cloudWarning}) : failureMessage = null;
+
+  const ArchiveItemResult.failure(String message)
+      : failureMessage = message,
+        cloudWarning = null;
+
+  final String? failureMessage;
+  final String? cloudWarning;
+
+  bool get hasFailure => failureMessage != null;
 }
 
 final itemsNotifierProvider =
