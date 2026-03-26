@@ -87,6 +87,7 @@ class _MainContent extends ConsumerWidget {
                 title: 'Find Anything',
                 description:
                     'Find anything instantly. Search by name, tags, or location.',
+                tooltipPosition: TooltipPosition.bottom,
                 child: _buildSearchBar(context, ref),
               ),
             ),
@@ -100,6 +101,7 @@ class _MainContent extends ConsumerWidget {
                 title: 'Action Needed',
                 description:
                     'Keep track of items you\'ve lent out or things expiring soon right here.',
+                tooltipPosition: TooltipPosition.bottom,
                 child: const _ActionNeededCard(),
               ),
             ),
@@ -304,11 +306,13 @@ class _MainContent extends ConsumerWidget {
     required String title,
     required String description,
     required Widget child,
+    TooltipPosition? tooltipPosition,
   }) {
     return Showcase(
       key: showcaseKey,
       title: title,
       description: description,
+      tooltipPosition: tooltipPosition,
       tooltipBackgroundColor: AppColors.surfaceDark,
       textColor: AppColors.textPrimaryDark,
       titleTextStyle: const TextStyle(

@@ -10,6 +10,7 @@ import '../../domain/models/shared_item.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/household_providers.dart';
+import '../../providers/main_tab_provider.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/repository_providers.dart';
@@ -52,11 +53,13 @@ Widget _buildListingTourStep({
   required String title,
   required String description,
   required Widget child,
+  TooltipPosition? tooltipPosition,
 }) {
   return Showcase(
     key: showcaseKey,
     title: title,
     description: description,
+    tooltipPosition: tooltipPosition,
     tooltipBackgroundColor: AppColors.surfaceDark,
     textColor: AppColors.textPrimaryDark,
     titleTextStyle: const TextStyle(
@@ -234,6 +237,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final locationOptionsAsync = ref.watch(allLocationsProvider);
     final tagOptionsAsync = ref.watch(itemTagsProvider);
     final hasSeenItemListingTour = ref.watch(itemListingTourControllerProvider);
+    // Only start the tour when the Search tab (index 2) is actually visible.
+    final activeTab = ref.watch(mainTabProvider);
     final locationOptions = locationOptionsAsync.maybeWhen(
       data: (locations) {
         // Cache the raw models for UUID reverse-lookup and initial-filter apply.
@@ -282,7 +287,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       globalTooltipActionConfig: appShowcaseTooltipActionConfig,
       globalTooltipActions: appShowcaseTooltipActions(),
       builder: (tourContext) {
-        if (hasSeenItemListingTour.valueOrNull == false &&
+        if (activeTab == AppNavTab.search.index &&
+            hasSeenItemListingTour.valueOrNull == false &&
             !_itemListingTourQueued) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || _itemListingTourQueued) return;
@@ -315,20 +321,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 onModeChanged: (_) {},
                 showBackButton: !widget.isEmbedded,
               ),
+              // The showcase anchor is a tiny invisible strip at the top of
+              // the list area so the tooltip renders within the safe area
+              // (wrapping the full Expanded would push the tooltip to the
+              // physical screen bottom, hiding buttons under the nav bar).
+              _buildListingTourStep(
+                showcaseKey: _resultsShowcaseKey,
+                title: 'Browse Everything',
+                description:
+                    'Your items appear here. Open any card to view details, edit information, or jump back to where it is stored.',
+                tooltipPosition: TooltipPosition.bottom,
+                child: Container(
+                  height: 56,
+                  width: double.infinity,
+                  color: Colors.transparent,
+                ),
+              ),
               Expanded(
-                child: _buildListingTourStep(
-                  showcaseKey: _resultsShowcaseKey,
-                  title: 'Browse Everything',
-                  description:
-                      'Your items appear here. Open any card to view details, edit information, or jump back to where it is stored.',
-                  child: _ResultsList(
-                    isDark: isDark,
-                    applyFilter: _applyFilter,
-                    activeFilter: _activeFilter,
-                    bottomPadding: widget.isEmbedded
-                        ? AppNavBar.contentBottomSpacing(context)
-                        : 0,
-                  ),
+                child: _ResultsList(
+                  isDark: isDark,
+                  applyFilter: _applyFilter,
+                  activeFilter: _activeFilter,
+                  bottomPadding: widget.isEmbedded
+                      ? AppNavBar.contentBottomSpacing(context)
+                      : 0,
                 ),
               ),
             ],
@@ -447,6 +463,7 @@ class _SearchHeader extends StatelessWidget {
                 title: 'Search Your Items',
                 description:
                     'Type a name, tag, or location to narrow the list instantly.',
+                tooltipPosition: TooltipPosition.bottom,
                 child: _SearchInput(
                   controller: controller,
                   isDark: isDark,
@@ -462,6 +479,7 @@ class _SearchHeader extends StatelessWidget {
               title: 'Refine the List',
               description:
                   'Use these quick filters to jump to recent items or narrow the list by location and tags.',
+              tooltipPosition: TooltipPosition.bottom,
               child: SizedBox(
                 height: 38,
                 child: ListView(

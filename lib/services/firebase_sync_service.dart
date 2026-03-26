@@ -159,13 +159,34 @@ class FirebaseSyncService implements SyncService {
         ),
         if (ensureUserDocument) _ensureUserDocument(user),
       ]);
-      final uploadedImageUrls = results[0] as List<String>;
+
+      final imageResult = results[0] as ImageUploadResult;
       final uploadedInvoice = results[1] as StoredInvoiceFile?;
 
+      // Determine partial-failure state: if the item had images/invoice but
+      // none uploaded successfully, flag it so the UI can surface the issue.
+      final hadImages = item.imagePaths.isNotEmpty;
+      final hadInvoice = item.invoicePath?.trim().isNotEmpty ?? false;
+      final imagesOk = !hadImages || imageResult.hasImages;
+      final invoiceOk = !hadInvoice || uploadedInvoice != null;
+      final fullyUploaded = imagesOk && invoiceOk;
+
+      if (!fullyUploaded) {
+        debugPrint(
+          'FirebaseSyncService: partial upload for ${item.uuid} — '
+          'imagesOk=$imagesOk invoiceOk=$invoiceOk',
+        );
+      }
+
+      // Store in Firestore:
+      //   imagePaths          → HTTPS download URLs (fast display)
+      //   imageStoragePaths   → durable Storage object paths (for refresh on reinstall)
+      //   invoicePath         → HTTPS download URL
+      //   invoiceStoragePath  → durable Storage object path
       await _itemsRef.doc(item.uuid).set({
         ...item
             .copyWith(
-              imagePaths: uploadedImageUrls,
+              imagePaths: imageResult.downloadUrls,
               invoicePath: uploadedInvoice?.path,
               invoiceFileName: uploadedInvoice?.fileName,
               invoiceFileSizeBytes: uploadedInvoice?.sizeBytes,
@@ -181,7 +202,13 @@ class FirebaseSyncService implements SyncService {
         'updatedAt': _toIsoString(item.updatedAt ?? DateTime.now()),
         'createdAt': _toIsoString(item.savedAt),
         'lastSyncedAt': now,
+        // Durable Storage paths — new fields, absent in legacy backups.
+        // Used during restore to get fresh download URLs without depending on
+        // the stored HTTPS token (which may expire or be invalidated).
+        'imageStoragePaths': imageResult.storagePaths,
+        'invoiceStoragePath': uploadedInvoice?.storagePath,
       }, SetOptions(merge: true));
+
       await _itemDao.updateItem(
         item.copyWith(
           cloudId: item.cloudId ?? item.uuid,
@@ -402,10 +429,30 @@ class FirebaseSyncService implements SyncService {
       }
 
       // Import remote-only items locally (pure SQLite, fast).
+      // _itemFromFirestore resolves HTTPS URLs using the durable Storage paths
+      // stored in the Firestore document (new 'imageStoragePaths' field), so
+      // restored items always receive fresh, working download URLs.
       if (itemsToImportLocally.isNotEmpty) {
         await Future.wait(
           itemsToImportLocally.map((data) async {
-            await _itemDao.insertItem(await _itemFromFirestore(data));
+            try {
+              final restoredItem = await _itemFromFirestore(data);
+              // Check whether an older version of this item is already in the
+              // local DB (from a previous partial restore) and upsert safely.
+              final existing =
+                  await _itemDao.getItemByUuid(restoredItem.uuid);
+              if (existing != null) {
+                await _itemDao.updateItem(restoredItem);
+              } else {
+                await _itemDao.insertItem(restoredItem);
+              }
+            } catch (e) {
+              debugPrint(
+                'FirebaseSyncService: failed to import item '
+                '${data['uuid']}: $e',
+              );
+              // Continue importing other items even if one fails.
+            }
           }),
         );
       }
@@ -418,7 +465,7 @@ class FirebaseSyncService implements SyncService {
       }
 
       // Upload items in controlled parallel batches to avoid flooding the
-      // network. Each _syncItemInternal already parallelizes its own image
+      // network. Each _syncItemInternal already parallelises its own image
       // uploads, so _syncBatchSize keeps total concurrency reasonable.
       for (var i = 0; i < itemsToUpload.length; i += _syncBatchSize) {
         final batch = itemsToUpload.skip(i).take(_syncBatchSize);
@@ -443,6 +490,23 @@ class FirebaseSyncService implements SyncService {
     } catch (e) {
       debugPrint('FirebaseSyncService.fullSync error: $e');
       return SyncResult.error(e.toString());
+    }
+  }
+
+  /// Checks whether the signed-in user has any backed-up items in Firestore.
+  ///
+  /// Used on fresh installs to decide whether to offer or auto-trigger restore.
+  /// Returns false if the user is not signed in.
+  Future<bool> hasRemoteBackup() async {
+    final user = _user;
+    if (user == null) return false;
+
+    try {
+      final snapshot = await _itemsRef.limit(1).get();
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      debugPrint('FirebaseSyncService.hasRemoteBackup error: $e');
+      return false;
     }
   }
 
@@ -512,44 +576,67 @@ class FirebaseSyncService implements SyncService {
     }, SetOptions(merge: true));
   }
 
+  /// Reconstructs an [Item] from its Firestore document, resolving all
+  /// attachment references to fresh, working URLs.
+  ///
+  /// Resolution strategy for images:
+  ///   1. Use 'imageStoragePaths' (durable Storage object paths) if present
+  ///      → always yields a fresh download URL even after reinstall.
+  ///   2. Fall back to 'imagePaths' (stored HTTPS download URLs).
+  ///   3. Final fallback: list the item's Storage folder.
+  ///
+  /// Same strategy for the invoice attachment.
   Future<Item> _itemFromFirestore(Map<String, dynamic> data) async {
     final itemUuid = (data['uuid'] as String?) ?? '';
     final rawImagePaths =
         List<String>.from((data['imagePaths'] as List?) ?? const []);
+    final imageStoragePaths =
+        List<String>.from((data['imageStoragePaths'] as List?) ?? const []);
+    final invoiceStoragePath = (data['invoiceStoragePath'] as String?)?.trim();
+
+    // Resolve storage user ID — prefer the value stored in the document;
+    // fall back to the currently-authenticated user's UID.
     final remoteUserId = (data['userId'] as String?)?.trim();
     final storageUserId = remoteUserId != null && remoteUserId.isNotEmpty
         ? remoteUserId
         : _user?.uid;
-    final resolvedImagePaths =
-        storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty
-            ? rawImagePaths
-            : await _imageUploadService.resolveCloudImageUrls(
-                userId: storageUserId,
-                itemUuid: itemUuid,
-                imagePaths: rawImagePaths,
-              );
-    final resolvedInvoice =
-        storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty
-            ? ((data['invoicePath'] as String?)?.trim().isNotEmpty ?? false)
-                ? StoredInvoiceFile(
-                    path: (data['invoicePath'] as String).trim(),
-                    fileName: ((data['invoiceFileName'] as String?)
-                                ?.trim()
-                                .isNotEmpty ??
-                            false)
-                        ? (data['invoiceFileName'] as String).trim()
-                        : 'invoice',
-                    sizeBytes: (data['invoiceFileSizeBytes'] as num?)?.toInt(),
-                  )
-                : null
-            : await _invoiceStorageService.resolveCloudInvoice(
-                userId: storageUserId,
-                itemUuid: itemUuid,
-                invoicePath: data['invoicePath'] as String?,
-                invoiceFileName: data['invoiceFileName'] as String?,
-                invoiceFileSizeBytes:
-                    (data['invoiceFileSizeBytes'] as num?)?.toInt(),
-              );
+
+    List<String> resolvedImagePaths;
+    StoredInvoiceFile? resolvedInvoice;
+
+    if (storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty) {
+      // Cannot resolve Storage paths without a valid user/item reference.
+      // Use raw values as-is and let the UI deal with any failures.
+      resolvedImagePaths = rawImagePaths;
+      final rawInvoicePath = (data['invoicePath'] as String?)?.trim();
+      resolvedInvoice = rawInvoicePath?.isNotEmpty == true
+          ? StoredInvoiceFile(
+              path: rawInvoicePath!,
+              fileName:
+                  (data['invoiceFileName'] as String?)?.trim() ?? 'invoice',
+              sizeBytes: (data['invoiceFileSizeBytes'] as num?)?.toInt(),
+            )
+          : null;
+    } else {
+      // Resolve image URLs — prefer durable storage paths for fresh URLs.
+      resolvedImagePaths = await _imageUploadService.resolveItemImageUrls(
+        userId: storageUserId,
+        itemUuid: itemUuid,
+        downloadUrls: rawImagePaths,
+        storagePaths: imageStoragePaths,
+      );
+
+      // Resolve invoice — prefer durable storage path for a fresh URL.
+      resolvedInvoice = await _invoiceStorageService.resolveCloudInvoice(
+        userId: storageUserId,
+        itemUuid: itemUuid,
+        invoicePath: data['invoicePath'] as String?,
+        invoiceFileName: data['invoiceFileName'] as String?,
+        invoiceFileSizeBytes:
+            (data['invoiceFileSizeBytes'] as num?)?.toInt(),
+        storagePath: invoiceStoragePath,
+      );
+    }
 
     return Item(
       uuid: itemUuid,

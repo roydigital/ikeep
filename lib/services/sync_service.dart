@@ -14,4 +14,9 @@ abstract class SyncService {
   Future<SyncResult> fullSync();
 
   Future<DateTime?> getLastSyncedAt();
+
+  /// Returns true if the signed-in user has at least one backed-up item in
+  /// the remote store. Used on fresh installs to decide whether to auto-restore.
+  /// Returns false if the user is not signed in or the check fails.
+  Future<bool> hasRemoteBackup();
 }

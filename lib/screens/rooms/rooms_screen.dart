@@ -11,6 +11,7 @@ import '../../domain/models/location_model.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
+import '../../providers/main_tab_provider.dart';
 import '../../providers/location_usage_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
@@ -28,11 +29,13 @@ Widget _buildRoomsTourStep({
   required String title,
   required String description,
   required Widget child,
+  TooltipPosition? tooltipPosition,
 }) {
   return Showcase(
     key: showcaseKey,
     title: title,
     description: description,
+    tooltipPosition: tooltipPosition,
     tooltipBackgroundColor: AppColors.surfaceDark,
     textColor: AppColors.textPrimaryDark,
     titleTextStyle: const TextStyle(
@@ -1887,6 +1890,10 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     final locationsAsync = ref.watch(locationsWithDerivedUsageProvider);
     final itemsAsync = ref.watch(allItemsProvider);
     final hasSeenRoomsTour = ref.watch(roomsTourControllerProvider);
+    // Only start the tour when the Locations tab (index 1) is actually visible.
+    // All KeepAlive PageView children build simultaneously, so without this
+    // guard every screen fires its tour at once, stacking dark overlays.
+    final activeTab = ref.watch(mainTabProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kBg = isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
     final kMuted =
@@ -1898,7 +1905,9 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
       globalTooltipActionConfig: appShowcaseTooltipActionConfig,
       globalTooltipActions: appShowcaseTooltipActions(),
       builder: (tourContext) {
-        if (hasSeenRoomsTour.valueOrNull == false && !_roomsTourQueued) {
+        if (activeTab == AppNavTab.locations.index &&
+            hasSeenRoomsTour.valueOrNull == false &&
+            !_roomsTourQueued) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || _roomsTourQueued) return;
             _roomsTourQueued = true;
@@ -1932,14 +1941,25 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                         setState(() => _roomsSearchQuery = value),
                     onSearchClear: _clearRoomsSearch,
                   ),
+                  // The showcase anchor is a tiny invisible strip at the top of
+                  // the list area so the tooltip renders within the safe area
+                  // (wrapping the full Expanded would push the tooltip to the
+                  // physical screen bottom, hiding buttons under the nav bar).
+                  _buildRoomsTourStep(
+                    showcaseKey: _roomsListShowcaseKey,
+                    title: 'Your Location Tree',
+                    description: 'Areas contain Rooms, Rooms contain Zones. '
+                        'Items are saved to Zones. '
+                        'Tap an area or room to expand it.',
+                    tooltipPosition: TooltipPosition.bottom,
+                    child: Container(
+                      height: 56,
+                      width: double.infinity,
+                      color: Colors.transparent,
+                    ),
+                  ),
                   Expanded(
-                    child: _buildRoomsTourStep(
-                      showcaseKey: _roomsListShowcaseKey,
-                      title: 'Your Location Tree',
-                      description: 'Areas contain Rooms, Rooms contain Zones. '
-                          'Items are saved to Zones. '
-                          'Tap an area or room to expand it.',
-                      child: locationsAsync.when(
+                    child: locationsAsync.when(
                         loading: () => const Center(
                           child: CircularProgressIndicator(
                               color: AppColors.primary),
@@ -2267,7 +2287,6 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                         },
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -2369,6 +2388,7 @@ class _TopHeader extends StatelessWidget {
                     description:
                         'Filter this screen to quickly find a room or zone '
                         'without opening the app-wide search.',
+                    tooltipPosition: TooltipPosition.bottom,
                     child: IconButton(
                       onPressed: onSearchTap,
                       icon: Icon(
@@ -2389,6 +2409,7 @@ class _TopHeader extends StatelessWidget {
                     description:
                         'Create a new room first, then add zones for more '
                         'precise storage tracking.',
+                    tooltipPosition: TooltipPosition.bottom,
                     child: InkWell(
                       onTap: onAddTap,
                       borderRadius: BorderRadius.circular(999),

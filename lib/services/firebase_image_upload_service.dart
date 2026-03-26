@@ -7,6 +7,35 @@ import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
 import 'image_optimizer_service.dart';
 
+/// The result of uploading all images for one item.
+///
+/// Both lists are in the same slot order (index 0 = image_0, etc.).
+/// [downloadUrls] contains HTTPS Firebase Storage download URLs that can be
+/// used with Image.network() immediately — they may become stale if the
+/// underlying Storage object is re-uploaded or the token is revoked.
+/// [storagePaths] contains the authoritative Firebase Storage object paths
+/// (e.g. "users/uid/items/uuid/image_0.webp") that never expire and can
+/// always be used to fetch a fresh download URL.
+class ImageUploadResult {
+  const ImageUploadResult({
+    required this.downloadUrls,
+    required this.storagePaths,
+  });
+
+  /// HTTPS download URLs — fast to display, may become stale over time.
+  final List<String> downloadUrls;
+
+  /// Firebase Storage object paths — durable, use to refresh stale URLs.
+  final List<String> storagePaths;
+
+  /// Returns true if at least one image was successfully uploaded/resolved.
+  bool get hasImages => downloadUrls.isNotEmpty;
+
+  /// Returns true when every slot produced both a URL and a storage path.
+  bool get isFullyUploaded =>
+      downloadUrls.length == storagePaths.length && downloadUrls.isNotEmpty;
+}
+
 class FirebaseImageUploadService {
   FirebaseImageUploadService({
     required FirebaseStorage storage,
@@ -20,14 +49,20 @@ class FirebaseImageUploadService {
   static const String _sourceModifiedMsKey = 'sourceModifiedMs';
   static const String _sourceBytesKey = 'sourceBytes';
 
-  Future<List<String>> uploadItemImages({
+  /// Uploads all images for [itemUuid] to Firebase Storage and returns both
+  /// the HTTPS download URLs (for immediate display) and the durable Storage
+  /// object paths (for refresh when URLs go stale).
+  ///
+  /// If [imagePaths] is empty all existing Storage images are deleted and
+  /// an empty [ImageUploadResult] is returned.
+  Future<ImageUploadResult> uploadItemImages({
     required String userId,
     required String itemUuid,
     required List<String> imagePaths,
   }) async {
     if (imagePaths.isEmpty) {
       await deleteItemImages(userId: userId, itemUuid: itemUuid);
-      return const [];
+      return const ImageUploadResult(downloadUrls: [], storagePaths: []);
     }
 
     // Process each image slot in parallel using Future.wait.
@@ -43,12 +78,15 @@ class FirebaseImageUploadService {
     final results = await Future.wait(futures);
 
     final downloadUrls = <String>[];
+    final storagePaths = <String>[];
     final keepStoragePaths = <String>{};
+
     for (final result in results) {
       if (result.downloadUrl != null) {
         downloadUrls.add(result.downloadUrl!);
       }
       if (result.storagePath != null) {
+        storagePaths.add(result.storagePath!);
         keepStoragePaths.add(result.storagePath!);
       }
     }
@@ -60,7 +98,59 @@ class FirebaseImageUploadService {
       keepStoragePaths: keepStoragePaths,
     );
 
-    return downloadUrls;
+    return ImageUploadResult(
+      downloadUrls: downloadUrls,
+      storagePaths: storagePaths,
+    );
+  }
+
+  /// Resolves image paths from a cloud restore into displayable HTTPS URLs.
+  ///
+  /// **Primary path** — [storagePaths] (Firebase Storage object paths, e.g.
+  /// "users/uid/items/uuid/image_0.webp") are used to call [getDownloadURL()]
+  /// and get a guaranteed-fresh URL. This is the correct path after a
+  /// reinstall because the stored download URL may have become stale.
+  ///
+  /// **Fallback 1** — if no storage paths are provided (legacy backup docs
+  /// that predate the storage-path field), [downloadUrls] are tried as-is.
+  ///
+  /// **Fallback 2** — if both are empty or all resolutions fail, the service
+  /// lists the item's Storage folder and returns whatever files it finds.
+  Future<List<String>> resolveItemImageUrls({
+    required String userId,
+    required String itemUuid,
+    List<String> downloadUrls = const [],
+    List<String> storagePaths = const [],
+  }) async {
+    // ── Primary: use durable storage paths to get fresh download URLs ────────
+    if (storagePaths.isNotEmpty) {
+      final freshUrls = await _resolveFromStoragePaths(storagePaths);
+      if (freshUrls.isNotEmpty) {
+        debugPrint(
+          'FirebaseImageUploadService: resolved ${freshUrls.length} '
+          'fresh URL(s) from storage paths for $itemUuid',
+        );
+        return freshUrls;
+      }
+      // Storage paths exist but files are gone — log clearly.
+      debugPrint(
+        'FirebaseImageUploadService: storage paths present but all files '
+        'missing for $itemUuid — will try download URLs and folder listing',
+      );
+    }
+
+    // ── Fallback 1: use stored download URLs (legacy / pre-storagePaths) ─────
+    if (downloadUrls.isNotEmpty) {
+      final resolvedUrls = await resolveCloudImageUrls(
+        userId: userId,
+        itemUuid: itemUuid,
+        imagePaths: downloadUrls,
+      );
+      if (resolvedUrls.isNotEmpty) return resolvedUrls;
+    }
+
+    // ── Fallback 2: list the item's Storage folder ────────────────────────────
+    return _listStoredItemImageUrls(userId: userId, itemUuid: itemUuid);
   }
 
   /// Resolves image paths restored from cloud into displayable download URLs.
@@ -68,7 +158,7 @@ class FirebaseImageUploadService {
   /// Older backups may have an empty `imagePaths` array in Firestore even when
   /// the actual image files still exist in Firebase Storage. Some legacy data
   /// may also store `gs://` or raw storage paths, which `Image.network` cannot
-  /// render directly. This helper normalizes those cases and falls back to the
+  /// render directly. This helper normalises those cases and falls back to the
   /// item's storage folder when needed.
   Future<List<String>> resolveCloudImageUrls({
     required String userId,
@@ -103,9 +193,28 @@ class FirebaseImageUploadService {
   }) async {
     if (path.trim().isEmpty) return const _UploadSlotResult();
 
-    // Already a remote URL — nothing to upload.
+    // Already a remote URL or gs:// path — nothing to upload. Resolve the
+    // storage path so we can store it as the canonical durable reference.
     if (PathUtils.isRemotePath(path)) {
       final fullPath = _tryResolveStoragePath(path);
+      // If it's a gs:// URI, get a fresh download URL.
+      if (path.trim().toLowerCase().startsWith('gs://')) {
+        try {
+          final downloadUrl = await _storage.refFromURL(path).getDownloadURL();
+          return _UploadSlotResult(
+            downloadUrl: downloadUrl,
+            storagePath: fullPath,
+          );
+        } catch (e) {
+          if (!_isMissingObjectError(e)) {
+            debugPrint(
+              'FirebaseImageUploadService: failed to resolve gs:// URL $path: $e',
+            );
+          }
+          return const _UploadSlotResult();
+        }
+      }
+      // HTTPS URL — return as-is with its storage path for future refresh.
       return _UploadSlotResult(downloadUrl: path, storagePath: fullPath);
     }
 
@@ -247,6 +356,34 @@ class FirebaseImageUploadService {
         debugPrint('FirebaseImageUploadService prune error: $e');
       }
     }
+  }
+
+  /// Converts [storagePaths] (Firebase Storage object paths) into fresh HTTPS
+  /// download URLs by calling [getDownloadURL()] directly on each ref.
+  /// Missing objects are skipped; other errors are logged and skipped.
+  Future<List<String>> _resolveFromStoragePaths(
+    List<String> storagePaths,
+  ) async {
+    final urls = <String>[];
+    for (final storagePath in storagePaths) {
+      if (storagePath.trim().isEmpty) continue;
+      try {
+        final ref = storagePath.toLowerCase().startsWith('gs://')
+            ? _storage.refFromURL(storagePath)
+            : _storage.ref().child(storagePath);
+        final url = await ref.getDownloadURL();
+        urls.add(url);
+      } catch (e) {
+        if (!_isMissingObjectError(e)) {
+          debugPrint(
+            'FirebaseImageUploadService: failed to get fresh URL for '
+            '$storagePath: $e',
+          );
+        }
+        // Object is gone — skip this slot.
+      }
+    }
+    return urls;
   }
 
   bool _isMissingObjectError(dynamic error) {

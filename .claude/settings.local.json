@@ -7,7 +7,10 @@
       "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/screens/search/**)",
       "Bash(dart analyze:*)",
       "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/core/constants/**)",
-      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/**)"
+      "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/**)",
+      "Bash(find /c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev -name showcase.dart -path *showcaseview*)",
+      "Bash(grep -n \"TooltipPosition\\\\|enum Tooltip\" /c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev/showcaseview-4.0.1/lib/src/*.dart)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

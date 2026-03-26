@@ -6,16 +6,32 @@ import 'package:path/path.dart' as p;
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
 
+/// Represents an invoice/PDF file that has been saved to Firebase Storage.
+///
+/// [path] is an HTTPS download URL — use it to open the file immediately.
+/// [storagePath] is the durable Firebase Storage object path (e.g.
+/// "users/uid/items/uuid/invoices/invoice.pdf"). Use it to get a fresh
+/// download URL when [path] becomes stale after a reinstall.
 class StoredInvoiceFile {
   const StoredInvoiceFile({
     required this.path,
     required this.fileName,
     this.sizeBytes,
+    this.storagePath,
   });
 
+  /// HTTPS download URL — fast to open, may become stale over time.
   final String path;
+
+  /// Human-readable file name (e.g. "receipt.pdf").
   final String fileName;
+
+  /// File size in bytes, if known.
   final int? sizeBytes;
+
+  /// Firebase Storage object path — durable, never expires.
+  /// Use to call [getDownloadURL()] when [path] is stale.
+  final String? storagePath;
 }
 
 class FirebaseInvoiceStorageService {
@@ -25,6 +41,14 @@ class FirebaseInvoiceStorageService {
 
   final FirebaseStorage _storage;
 
+  /// Uploads [invoicePath] (a local file path) to Firebase Storage and
+  /// returns a [StoredInvoiceFile] with both the HTTPS download URL and the
+  /// durable Storage object path.
+  ///
+  /// If [invoicePath] is already a remote URL it is returned as-is with the
+  /// Storage path resolved when possible.
+  /// If the local file is missing and a previously-uploaded file exists in
+  /// Storage it is reused.
   Future<StoredInvoiceFile?> uploadItemInvoice({
     required String userId,
     required String itemUuid,
@@ -39,15 +63,20 @@ class FirebaseInvoiceStorageService {
     }
 
     if (PathUtils.isRemotePath(trimmedPath)) {
+      // Already a remote URL — resolve its Storage path for durability.
+      final storagePath = _tryResolveStoragePath(trimmedPath);
       return StoredInvoiceFile(
         path: trimmedPath,
         fileName: _resolvedFileName(trimmedPath, fallback: invoiceFileName),
         sizeBytes: invoiceFileSizeBytes,
+        storagePath: storagePath,
       );
     }
 
     final localFile = File(trimmedPath);
     if (!await localFile.exists()) {
+      // Local file is missing (e.g. after reinstall) — try to reuse the
+      // previously-uploaded file from Storage.
       return _getStoredInvoice(
         userId: userId,
         itemUuid: itemUuid,
@@ -59,9 +88,9 @@ class FirebaseInvoiceStorageService {
     final resolvedFileName =
         _resolvedFileName(trimmedPath, fallback: invoiceFileName);
     final extension = p.extension(resolvedFileName);
-    final storagePath =
+    final storageObjectPath =
         '${_invoiceFolder(userId, itemUuid)}/invoice${extension.isEmpty ? '' : extension}';
-    final ref = _storage.ref().child(storagePath);
+    final ref = _storage.ref().child(storageObjectPath);
     final fileSize = invoiceFileSizeBytes ?? await localFile.length();
 
     await ref.putFile(
@@ -86,16 +115,54 @@ class FirebaseInvoiceStorageService {
       path: await ref.getDownloadURL(),
       fileName: resolvedFileName,
       sizeBytes: fileSize,
+      storagePath: ref.fullPath, // ← durable canonical reference
     );
   }
 
+  /// Resolves an invoice from a cloud-restore record into a usable
+  /// [StoredInvoiceFile].
+  ///
+  /// Resolution order:
+  /// 1. If [storagePath] is provided (new backup format), call
+  ///    [getDownloadURL()] on it for a guaranteed-fresh URL.
+  /// 2. Else if [invoicePath] is a valid remote path, use it directly.
+  /// 3. Fall back to listing the item's invoice folder in Storage.
   Future<StoredInvoiceFile?> resolveCloudInvoice({
     required String userId,
     required String itemUuid,
     String? invoicePath,
     String? invoiceFileName,
     int? invoiceFileSizeBytes,
+    String? storagePath, // durable Storage object path (new)
   }) async {
+    // ── Primary: use durable storage path for a fresh download URL ──────────
+    if (storagePath != null && storagePath.trim().isNotEmpty) {
+      try {
+        final ref = storagePath.toLowerCase().startsWith('gs://')
+            ? _storage.refFromURL(storagePath)
+            : _storage.ref().child(storagePath);
+        final freshUrl = await ref.getDownloadURL();
+        final metadata = await ref.getMetadata();
+        final name = invoiceFileName?.trim().isNotEmpty == true
+            ? invoiceFileName!.trim()
+            : metadata.customMetadata?['originalFileName'] ??
+                p.basename(storagePath);
+        return StoredInvoiceFile(
+          path: freshUrl,
+          fileName: name,
+          sizeBytes: invoiceFileSizeBytes ?? metadata.size,
+          storagePath: ref.fullPath,
+        );
+      } catch (e) {
+        if (!_isMissingObjectError(e)) {
+          // Unexpected error — log but continue to fallbacks.
+          rethrow;
+        }
+        // Storage object gone — fall through to other fallbacks.
+      }
+    }
+
+    // ── Fallback 1: use the stored download/remote URL ────────────────────────
     final trimmedPath = invoicePath?.trim() ?? '';
     if (trimmedPath.isNotEmpty) {
       final resolvedPath = await _resolveRemotePath(trimmedPath);
@@ -104,10 +171,12 @@ class FirebaseInvoiceStorageService {
           path: resolvedPath,
           fileName: _resolvedFileName(trimmedPath, fallback: invoiceFileName),
           sizeBytes: invoiceFileSizeBytes,
+          storagePath: _tryResolveStoragePath(trimmedPath),
         );
       }
     }
 
+    // ── Fallback 2: list the item's invoice folder ────────────────────────────
     return _getStoredInvoice(
       userId: userId,
       itemUuid: itemUuid,
@@ -180,6 +249,7 @@ class FirebaseInvoiceStorageService {
             : metadata.customMetadata?['originalFileName'] ??
                 p.basename(ref.fullPath),
         sizeBytes: fallbackSizeBytes ?? metadata.size,
+        storagePath: ref.fullPath, // ← always include durable path
       );
     } catch (error) {
       if (_isMissingObjectError(error)) {
@@ -212,6 +282,16 @@ class FirebaseInvoiceStorageService {
     }
 
     return null;
+  }
+
+  /// Attempts to extract the Firebase Storage object path from a URL.
+  /// Returns null if the URL is not a Firebase Storage URL.
+  String? _tryResolveStoragePath(String url) {
+    try {
+      return _storage.refFromURL(url).fullPath;
+    } catch (_) {
+      return null;
+    }
   }
 
   String _invoiceFolder(String userId, String itemUuid) {

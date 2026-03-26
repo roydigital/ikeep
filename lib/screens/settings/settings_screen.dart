@@ -16,6 +16,7 @@ import '../../domain/models/sync_status.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
+import '../../providers/main_tab_provider.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
@@ -97,11 +98,13 @@ Widget _buildSettingsTourStep({
   required String title,
   required String description,
   required Widget child,
+  TooltipPosition? tooltipPosition,
 }) {
   return Showcase(
     key: showcaseKey,
     title: title,
     description: description,
+    tooltipPosition: tooltipPosition,
     tooltipBackgroundColor: AppColors.surfaceDark,
     textColor: AppColors.textPrimaryDark,
     titleTextStyle: const TextStyle(
@@ -471,6 +474,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
     }
     final hasSeenSettingsTour = ref.watch(settingsTourControllerProvider);
+    // Only start the tour when the Settings tab (index 3) is actually visible.
+    final activeTab = ref.watch(mainTabProvider);
     final syncStatus = ref.watch(syncStatusProvider);
     final backedUpCountAsync = ref.watch(backedUpItemsCountProvider);
     final backedUpCount = backedUpCountAsync.valueOrNull ?? 0;
@@ -513,7 +518,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       globalTooltipActionConfig: appShowcaseTooltipActionConfig,
       globalTooltipActions: appShowcaseTooltipActions(),
       builder: (tourContext) {
-        if (hasSeenSettingsTour.valueOrNull == false && !_settingsTourQueued) {
+        if (activeTab == AppNavTab.settings.index &&
+            hasSeenSettingsTour.valueOrNull == false &&
+            !_settingsTourQueued) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || _settingsTourQueued) return;
             _settingsTourQueued = true;
@@ -564,6 +571,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               title: 'Your Account',
                               description:
                                   'Connect your account, confirm your membership status, and see whether backup is active.',
+                              tooltipPosition: TooltipPosition.bottom,
                               child: _AccountCard(
                                 backupEnabled: backupEnabled,
                                 backedUpCount: backedUpCount,
@@ -588,6 +596,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               title: 'Tune Your Preferences',
                               description:
                                   'Adjust theme and reminder behavior here so Ikeep matches how you actually use it.',
+                              tooltipPosition: TooltipPosition.top,
                               child: _PreferencesCard(
                                 darkMode: _darkMode,
                                 stillThere: _stillThere,
@@ -610,6 +619,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               title: 'Backup And Family Features',
                               description:
                                   'Monitor sync status, trigger a backup, and manage family-sharing features from this card.',
+                              tooltipPosition: TooltipPosition.top,
                               child: _CloudAndFamilyCard(
                                 statusText: statusText,
                                 statusColor: statusColor,

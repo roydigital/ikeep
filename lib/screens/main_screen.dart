@@ -158,6 +158,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                       title: 'Start Here!',
                       description:
                           'Tap to save your first item, document, or memory.',
+                      tooltipPosition: TooltipPosition.top,
                       tooltipBackgroundColor: AppColors.surfaceDark,
                       textColor: AppColors.textPrimaryDark,
                       titleTextStyle: const TextStyle(
