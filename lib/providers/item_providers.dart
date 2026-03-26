@@ -403,6 +403,31 @@ class ItemsNotifier extends StateNotifier<bool> {
     return null;
   }
 
+  /// Enables cloud backup for [item]: persists [isBackedUp = true] to the
+  /// local database and immediately runs the Firebase sync, awaiting the
+  /// full result (including image uploads).
+  ///
+  /// Returns null on full success, an error/warning string on failure.
+  /// Unlike [updateItem], the sync is NOT deferred — the caller blocks until
+  /// images and metadata are confirmed uploaded.
+  Future<String?> backupItem(Item item) async {
+    final syncItem = item.copyWith(isBackedUp: true, updatedAt: DateTime.now());
+    final failure =
+        await _ref.read(itemRepositoryProvider).updateItem(syncItem);
+    if (failure != null) return failure.message;
+
+    final previousStatus = _ref.read(syncStatusProvider);
+    _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
+
+    final syncError =
+        await _syncItemToCloud(syncItem, fallbackStatus: previousStatus);
+
+    _invalidateItemLists();
+    _ref.invalidate(singleItemProvider(item.uuid));
+
+    return syncError;
+  }
+
   Future<String?> _syncItemToCloud(
     Item item, {
     SyncResult? fallbackStatus,
@@ -437,6 +462,13 @@ class ItemsNotifier extends StateNotifier<bool> {
       publishErrors: publishErrorsToStatus,
       fallbackStatus: fallbackStatus,
     );
+
+    // Photos failed to upload but item metadata was saved — warn the user
+    // so they know to retry rather than assuming everything was backed up.
+    if (result.isSuccess && result.partialFailure) {
+      return 'Item backed up, but photos could not be uploaded. '
+          'Check your connection and try again.';
+    }
 
     if (result.status != SyncStatus.error) {
       return null;

@@ -148,12 +148,11 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     }
 
     await ref.read(settingsProvider.notifier).setBackupEnabled(true);
-    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
-          item.copyWith(
-            isBackedUp: true,
-            updatedAt: DateTime.now(),
-          ),
-        );
+
+    // backupItem awaits the full Firebase sync (including image uploads) so
+    // the user gets accurate feedback — not just "DB saved" but "images uploaded".
+    final error =
+        await ref.read(itemsNotifierProvider.notifier).backupItem(item);
     if (!mounted) return;
     _endOp();
 
@@ -162,8 +161,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         await _showCloudQuotaFeedback();
         return;
       }
+      // Partial failure: item metadata saved but photos could not upload.
+      // Use a warning colour so the user knows backup is partial.
+      final isPartialUploadFailure = error.contains('photos could not be uploaded');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text(error),
+          backgroundColor:
+              isPartialUploadFailure ? AppColors.warning : AppColors.error,
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

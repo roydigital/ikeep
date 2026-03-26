@@ -351,6 +351,11 @@ class Item {
       'uuid': uuid,
       'name': name,
       'locationUuid': locationUuid,
+      // Hierarchical location FKs — needed to restore zone/room/area links
+      // without relying solely on the migration service at startup.
+      'areaUuid': areaUuid,
+      'roomUuid': roomUuid,
+      'zoneUuid': zoneUuid,
       'imagePaths': imagePaths,
       'tags': tags,
       'savedAt': savedAt.toIso8601String(),

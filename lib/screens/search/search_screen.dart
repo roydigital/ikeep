@@ -256,8 +256,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               setState(() {
-                _selectedLocationPath =
-                    (match.fullPath ?? match.name).trim();
+                _selectedLocationPath = (match.fullPath ?? match.name).trim();
                 _selectedLocationUuid = match.uuid;
                 _activeFilter = _FilterType.location;
               });
@@ -321,27 +320,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 onModeChanged: (_) {},
                 showBackButton: !widget.isEmbedded,
               ),
-              // The showcase anchor is a tiny invisible strip at the top of
-              // the list area so the tooltip renders within the safe area
-              // (wrapping the full Expanded would push the tooltip to the
-              // physical screen bottom, hiding buttons under the nav bar).
-              _buildListingTourStep(
-                showcaseKey: _resultsShowcaseKey,
-                title: 'Browse Everything',
-                description:
-                    'Your items appear here. Open any card to view details, edit information, or jump back to where it is stored.',
-                tooltipPosition: TooltipPosition.bottom,
-                child: Container(
-                  height: 56,
-                  width: double.infinity,
-                  color: Colors.transparent,
-                ),
-              ),
               Expanded(
                 child: _ResultsList(
                   isDark: isDark,
                   applyFilter: _applyFilter,
                   activeFilter: _activeFilter,
+                  resultsShowcaseKey: _resultsShowcaseKey,
                   bottomPadding: widget.isEmbedded
                       ? AppNavBar.contentBottomSpacing(context)
                       : 0,
@@ -435,10 +419,10 @@ class _SearchHeader extends StatelessWidget {
                       icon: Icon(
                         Icons.arrow_back,
                         color: isDark
-                          ? AppColors.textPrimaryDark
-                          : AppColors.textPrimaryLight,
+                            ? AppColors.textPrimaryDark
+                            : AppColors.textPrimaryLight,
+                      ),
                     ),
-                  ),
                   Expanded(
                     child: Text(
                       'Search Results',
@@ -825,12 +809,14 @@ class _ResultsList extends ConsumerStatefulWidget {
     required this.isDark,
     required this.applyFilter,
     required this.activeFilter,
+    required this.resultsShowcaseKey,
     this.bottomPadding = 0,
   });
 
   final bool isDark;
   final List<Item> Function(List<Item>) applyFilter;
   final _FilterType activeFilter;
+  final GlobalKey resultsShowcaseKey;
 
   /// Extra bottom padding when embedded in MainScreen (accounts for fixed nav bar).
   final double bottomPadding;
@@ -955,6 +941,78 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
         activeFilter != _FilterType.tags;
   }
 
+  EdgeInsets _resultsListPadding() {
+    return EdgeInsets.fromLTRB(
+      AppDimensions.spacingMd,
+      AppDimensions.spacingSm,
+      AppDimensions.spacingMd,
+      AppDimensions.spacingMd + widget.bottomPadding,
+    );
+  }
+
+  Widget _buildResultsShowcaseAnchor() {
+    return _buildListingTourStep(
+      showcaseKey: widget.resultsShowcaseKey,
+      title: 'Browse Everything',
+      description:
+          'Your items appear here. Open any card to view details, edit information, or jump back to where it is stored.',
+      tooltipPosition: TooltipPosition.bottom,
+      child: const SizedBox(
+        height: 1,
+        width: double.infinity,
+      ),
+    );
+  }
+
+  Widget _buildResultsState(Widget child) {
+    return ListView(
+      controller: _scrollController,
+      padding: _resultsListPadding(),
+      children: [
+        _buildResultsShowcaseAnchor(),
+        const SizedBox(height: AppDimensions.spacingSm),
+        child,
+      ],
+    );
+  }
+
+  Widget _buildResultsListView(
+    List<Item> filtered, {
+    bool isLoadingMore = false,
+  }) {
+    return ListView.separated(
+      controller: _scrollController,
+      padding: _resultsListPadding(),
+      itemCount: filtered.length + (isLoadingMore ? 1 : 0) + 1,
+      separatorBuilder: (_, index) => SizedBox(
+        height: index == 0 ? AppDimensions.spacingSm : AppDimensions.spacingMd,
+      ),
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          // Keep the showcase target inside the results scroll view so it
+          // does not reserve a fixed blank strip below the header.
+          return _buildResultsShowcaseAnchor();
+        }
+
+        final resultIndex = i - 1;
+        if (isLoadingMore && resultIndex >= filtered.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppDimensions.spacingSm),
+            child: Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
+        }
+
+        final item = filtered[resultIndex];
+        if (item.imagePaths.isNotEmpty) {
+          return _RichResultCard(item: item, isDark: widget.isDark);
+        }
+        return _CompactResultItem(item: item, isDark: widget.isDark);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final query = ref.watch(itemSearchQueryProvider);
@@ -969,12 +1027,12 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
 
     if (useLazyLoading) {
       if (_isInitialLoading) {
-        return const Center(
+        return _buildResultsState(const Center(
           child: CircularProgressIndicator(color: AppColors.primary),
-        );
+        ));
       }
       if (_loadingError != null && _lazyItems.isEmpty) {
-        return Center(
+        return _buildResultsState(Center(
           child: Text(
             'Something went wrong',
             style: TextStyle(
@@ -983,54 +1041,28 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
                   : AppColors.textSecondaryLight,
             ),
           ),
-        );
+        ));
       }
 
       final filtered = widget.applyFilter(_lazyItems);
       if (filtered.isEmpty) {
-        return _EmptyState(
+        return _buildResultsState(_EmptyState(
           query: query,
           isDark: widget.isDark,
           isHouseholdMode: false,
-        );
+        ));
       }
 
-      return ListView.separated(
-        controller: _scrollController,
-        padding: EdgeInsets.fromLTRB(
-          AppDimensions.spacingMd,
-          AppDimensions.spacingMd,
-          AppDimensions.spacingMd,
-          AppDimensions.spacingMd + widget.bottomPadding,
-        ),
-        itemCount: filtered.length + (_isLoadingMore ? 1 : 0),
-        separatorBuilder: (_, __) =>
-            const SizedBox(height: AppDimensions.spacingMd),
-        itemBuilder: (context, i) {
-          if (i >= filtered.length) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: AppDimensions.spacingSm),
-              child: Center(
-                child: CircularProgressIndicator(color: AppColors.primary),
-              ),
-            );
-          }
-          final item = filtered[i];
-          if (item.imagePaths.isNotEmpty) {
-            return _RichResultCard(item: item, isDark: widget.isDark);
-          }
-          return _CompactResultItem(item: item, isDark: widget.isDark);
-        },
-      );
+      return _buildResultsListView(filtered, isLoadingMore: _isLoadingMore);
     }
 
     final sourceItemsAsync = ref.watch(allItemsProvider);
 
     return sourceItemsAsync.when(
-      loading: () => const Center(
+      loading: () => _buildResultsState(const Center(
         child: CircularProgressIndicator(color: AppColors.primary),
-      ),
-      error: (err, _) => Center(
+      )),
+      error: (err, _) => _buildResultsState(Center(
         child: Text(
           'Something went wrong',
           style: TextStyle(
@@ -1039,7 +1071,7 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
                 : AppColors.textSecondaryLight,
           ),
         ),
-      ),
+      )),
       data: (items) {
         final queryLower = query.trim().toLowerCase();
         final queryFiltered = queryLower.isEmpty
@@ -1055,31 +1087,13 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
               }).toList();
         final filtered = widget.applyFilter(queryFiltered);
         if (filtered.isEmpty) {
-          return _EmptyState(
+          return _buildResultsState(_EmptyState(
             query: query,
             isDark: widget.isDark,
             isHouseholdMode: false,
-          );
+          ));
         }
-        return ListView.separated(
-          controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(
-            AppDimensions.spacingMd,
-            AppDimensions.spacingMd,
-            AppDimensions.spacingMd,
-            AppDimensions.spacingMd + widget.bottomPadding,
-          ),
-          itemCount: filtered.length,
-          separatorBuilder: (_, __) =>
-              const SizedBox(height: AppDimensions.spacingMd),
-          itemBuilder: (context, i) {
-            final item = filtered[i];
-            if (item.imagePaths.isNotEmpty) {
-              return _RichResultCard(item: item, isDark: widget.isDark);
-            }
-            return _CompactResultItem(item: item, isDark: widget.isDark);
-          },
-        );
+        return _buildResultsListView(filtered);
       },
     );
   }

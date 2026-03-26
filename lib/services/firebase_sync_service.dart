@@ -217,7 +217,7 @@ class FirebaseSyncService implements SyncService {
         ),
       );
       _lastSyncedAt = DateTime.now();
-      return SyncResult.success();
+      return SyncResult.success(partialFailure: !fullyUploaded);
     } on SyncException catch (e) {
       debugPrint('FirebaseSyncService.syncItem quota error: $e');
       return SyncResult.error(e.message);
@@ -320,7 +320,7 @@ class FirebaseSyncService implements SyncService {
         _ensureUserDocument(user), // 0
         _locationDao.recalculateUsageCounts(), // 1
         _locationDao.getAllLocations(), // 2
-        _itemDao.getAllItems(), // 3
+        _itemDao.getAllItems(includeArchived: true), // 3 — include archived so their state syncs
         _locationsRef.get(), // 4
         _itemsRef.get(), // 5
       ]);
@@ -428,17 +428,20 @@ class FirebaseSyncService implements SyncService {
         }
       }
 
-      // Import remote-only items locally (pure SQLite, fast).
-      // _itemFromFirestore resolves HTTPS URLs using the durable Storage paths
-      // stored in the Firestore document (new 'imageStoragePaths' field), so
-      // restored items always receive fresh, working download URLs.
-      if (itemsToImportLocally.isNotEmpty) {
+      // Import remote-only items locally in controlled parallel batches.
+      // _itemFromFirestore makes Storage network calls (getDownloadURL,
+      // listAll) for each item's images and invoice. Unbounded concurrency on
+      // large libraries hits Firebase Storage rate limits and can OOM on
+      // lower-end devices. Using the same _syncBatchSize as uploads keeps
+      // total concurrent Storage requests predictable.
+      for (var i = 0; i < itemsToImportLocally.length; i += _syncBatchSize) {
+        final batch = itemsToImportLocally.skip(i).take(_syncBatchSize);
         await Future.wait(
-          itemsToImportLocally.map((data) async {
+          batch.map((data) async {
             try {
               final restoredItem = await _itemFromFirestore(data);
-              // Check whether an older version of this item is already in the
-              // local DB (from a previous partial restore) and upsert safely.
+              // Upsert safely: a previous partial restore may have already
+              // written this item — update it rather than inserting a duplicate.
               final existing =
                   await _itemDao.getItemByUuid(restoredItem.uuid);
               if (existing != null) {
@@ -497,6 +500,7 @@ class FirebaseSyncService implements SyncService {
   ///
   /// Used on fresh installs to decide whether to offer or auto-trigger restore.
   /// Returns false if the user is not signed in.
+  @override
   Future<bool> hasRemoteBackup() async {
     final user = _user;
     if (user == null) return false;
@@ -626,22 +630,46 @@ class FirebaseSyncService implements SyncService {
         storagePaths: imageStoragePaths,
       );
 
-      // Resolve invoice — prefer durable storage path for a fresh URL.
-      resolvedInvoice = await _invoiceStorageService.resolveCloudInvoice(
-        userId: storageUserId,
-        itemUuid: itemUuid,
-        invoicePath: data['invoicePath'] as String?,
-        invoiceFileName: data['invoiceFileName'] as String?,
-        invoiceFileSizeBytes:
-            (data['invoiceFileSizeBytes'] as num?)?.toInt(),
-        storagePath: invoiceStoragePath,
-      );
+      // Resolve invoice only when the Firestore doc records one. Without this
+      // guard every item would trigger a Storage folder listAll() as the
+      // final fallback in resolveCloudInvoice, costing one network call per
+      // item even when no invoice was ever uploaded.
+      final rawInvoicePath = (data['invoicePath'] as String?)?.trim();
+      final hasInvoiceRecord = (invoiceStoragePath?.isNotEmpty ?? false) ||
+          (rawInvoicePath?.isNotEmpty ?? false);
+
+      if (hasInvoiceRecord) {
+        try {
+          resolvedInvoice = await _invoiceStorageService.resolveCloudInvoice(
+            userId: storageUserId,
+            itemUuid: itemUuid,
+            invoicePath: rawInvoicePath,
+            invoiceFileName: data['invoiceFileName'] as String?,
+            invoiceFileSizeBytes:
+                (data['invoiceFileSizeBytes'] as num?)?.toInt(),
+            storagePath: invoiceStoragePath,
+          );
+        } catch (e) {
+          // An unexpected Storage error (e.g. permission-denied, network
+          // timeout) must not abort the entire item import. Restore the
+          // item without its invoice — the user can re-attach it manually.
+          debugPrint(
+            'FirebaseSyncService: could not resolve invoice for '
+            '$itemUuid — importing item without invoice. Error: $e',
+          );
+        }
+      }
     }
 
     return Item(
       uuid: itemUuid,
       name: (data['name'] as String?) ?? 'Untitled item',
       locationUuid: data['locationUuid'] as String?,
+      // Hierarchical location FKs — present in new backups, null in legacy
+      // ones (the migration service fills them in on first startup).
+      areaUuid: data['areaUuid'] as String?,
+      roomUuid: data['roomUuid'] as String?,
+      zoneUuid: data['zoneUuid'] as String?,
       imagePaths: resolvedImagePaths,
       tags: List<String>.from((data['tags'] as List?) ?? const []),
       savedAt: _parseDateTime(data['savedAt']) ?? DateTime.now(),

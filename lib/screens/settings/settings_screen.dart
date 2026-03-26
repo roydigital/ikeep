@@ -18,6 +18,7 @@ import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/main_tab_provider.dart';
 import '../../providers/location_providers.dart';
+import '../../providers/restore_provider.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/sync_providers.dart';
@@ -188,7 +189,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (account == null) {
         _showInfo('Google sign-in cancelled');
       } else {
-        _showInfo('Signed in successfully');
+        _enableRemoteSyncMetadataNow();
+        final syncResult =
+            await ref.read(autoRestoreProvider.notifier).syncAfterSignIn();
+        if (!mounted) return;
+        if (syncResult.isSuccess) {
+          _showInfo(
+            syncResult.partialFailure
+                ? 'Signed in. Cloud backup synced with some attachment issues'
+                : 'Signed in and cloud backup synced',
+          );
+        } else if (syncResult.isSyncing) {
+          _showInfo('Signed in. Your cloud backup is syncing now');
+        } else {
+          _showInfo(
+            syncResult.errorMessage ??
+                'Signed in, but cloud backup sync failed',
+          );
+        }
       }
     } catch (e, st) {
       debugPrint('Google sign-in failed: $e');
@@ -345,7 +363,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(rootLocationsProvider);
     if (!mounted) return;
     final message = result.isSuccess
-        ? 'Sync completed'
+        ? (result.partialFailure
+            ? 'Sync completed — some attachments could not be uploaded'
+            : 'Sync completed')
         : (result.errorMessage ?? 'Sync failed');
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));

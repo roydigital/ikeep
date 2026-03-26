@@ -56,15 +56,39 @@ class ItemDao {
     return Item.fromMap(rows.first);
   }
 
-  /// Returns all non-archived items, newest first, with location join.
-  Future<List<Item>> getAllItems({int? limit}) async {
+  /// Returns all backed-up items regardless of archived state, newest first.
+  ///
+  /// Used by [FirebaseSyncService.fullSync] so that archived items are pushed
+  /// to Firestore and their archived state stays in sync across devices/installs.
+  Future<List<Item>> getAllBackedUpItems() async {
     final db = await _db;
     final rows = await db.rawQuery('''
       SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
       FROM ${DbConstants.tableItems} i
       LEFT JOIN ${DbConstants.tableLocations} l
         ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
-      WHERE i.${DbConstants.colItemIsArchived} = 0
+      WHERE i.${DbConstants.colItemIsBackedUp} = 1
+      ORDER BY i.${DbConstants.colItemSavedAt} DESC
+    ''');
+    return rows.map(Item.fromMap).toList();
+  }
+
+  /// Returns items, newest first, with location join.
+  ///
+  /// [includeArchived] defaults to false (home screen behaviour). Pass true
+  /// to include archived items — used by [FirebaseSyncService.fullSync] so
+  /// that archived items are pushed/pulled and their state stays consistent
+  /// across devices and reinstalls.
+  Future<List<Item>> getAllItems({int? limit, bool includeArchived = false}) async {
+    final db = await _db;
+    final archivedClause =
+        includeArchived ? '' : 'WHERE i.${DbConstants.colItemIsArchived} = 0';
+    final rows = await db.rawQuery('''
+      SELECT i.*, l.name AS location_name, l.full_path AS location_full_path
+      FROM ${DbConstants.tableItems} i
+      LEFT JOIN ${DbConstants.tableLocations} l
+        ON i.${DbConstants.colItemLocationUuid} = l.${DbConstants.colLocUuid}
+      $archivedClause
       ORDER BY i.${DbConstants.colItemSavedAt} DESC
       ${limit != null ? 'LIMIT $limit' : ''}
     ''');

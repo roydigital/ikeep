@@ -3,59 +3,21 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:showcaseview/showcaseview.dart';
-
 import '../../core/utils/location_hierarchy_utils.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/location_model.dart';
-import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
-import '../../providers/main_tab_provider.dart';
 import '../../providers/location_usage_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/app_nav_bar.dart';
-import '../../widgets/app_showcase.dart';
+
 import 'add_new_room_screen.dart';
 import 'rooms_loading_overlay.dart';
 
-// ── Showcase helper ───────────────────────────────────────────────────────────
-
-Widget _buildRoomsTourStep({
-  required GlobalKey showcaseKey,
-  required String title,
-  required String description,
-  required Widget child,
-  TooltipPosition? tooltipPosition,
-}) {
-  return Showcase(
-    key: showcaseKey,
-    title: title,
-    description: description,
-    tooltipPosition: tooltipPosition,
-    tooltipBackgroundColor: AppColors.surfaceDark,
-    textColor: AppColors.textPrimaryDark,
-    titleTextStyle: const TextStyle(
-      color: AppColors.textPrimaryDark,
-      fontSize: 18,
-      fontWeight: FontWeight.w800,
-    ),
-    descTextStyle: const TextStyle(
-      color: AppColors.textSecondaryDark,
-      fontSize: 14,
-      height: 1.45,
-    ),
-    tooltipBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-    targetBorderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-    targetPadding: const EdgeInsets.all(6),
-    overlayOpacity: 0.78,
-    disableDefaultTargetGestures: true,
-    child: child,
-  );
-}
 
 const List<_RoomsSuggestionTemplate> _kFeaturedAreaTemplates = [
   _RoomsSuggestionTemplate(
@@ -167,10 +129,6 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
 
   final Map<String, String> _locationImageByUuid = {};
 
-  final GlobalKey _roomsSearchShowcaseKey = GlobalKey();
-  final GlobalKey _roomsAddShowcaseKey = GlobalKey();
-  final GlobalKey _roomsListShowcaseKey = GlobalKey();
-  bool _roomsTourQueued = false;
   bool _isBusy = false;
   String _busyLabel = 'Syncing changes...';
 
@@ -1889,46 +1847,18 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
   Widget build(BuildContext context) {
     final locationsAsync = ref.watch(locationsWithDerivedUsageProvider);
     final itemsAsync = ref.watch(allItemsProvider);
-    final hasSeenRoomsTour = ref.watch(roomsTourControllerProvider);
-    // Only start the tour when the Locations tab (index 1) is actually visible.
-    // All KeepAlive PageView children build simultaneously, so without this
-    // guard every screen fires its tour at once, stacking dark overlays.
-    final activeTab = ref.watch(mainTabProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kBg = isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
     final kMuted =
         isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    return ShowCaseWidget(
-      blurValue: 1.5,
-      enableAutoScroll: true,
-      globalTooltipActionConfig: appShowcaseTooltipActionConfig,
-      globalTooltipActions: appShowcaseTooltipActions(),
-      builder: (tourContext) {
-        if (activeTab == AppNavTab.locations.index &&
-            hasSeenRoomsTour.valueOrNull == false &&
-            !_roomsTourQueued) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || _roomsTourQueued) return;
-            _roomsTourQueued = true;
-            ShowCaseWidget.of(tourContext).startShowCase([
-              _roomsSearchShowcaseKey,
-              _roomsAddShowcaseKey,
-              _roomsListShowcaseKey,
-            ]);
-            ref.read(roomsTourControllerProvider.notifier).markSeen();
-          });
-        }
-
-        return Stack(
+    return Stack(
           children: [
             Scaffold(
               backgroundColor: kBg,
               body: Column(
                 children: [
                   _TopHeader(
-                    searchShowcaseKey: _roomsSearchShowcaseKey,
-                    addShowcaseKey: _roomsAddShowcaseKey,
                     onAddTap: _openAddRoomFlow,
                     isSearchVisible: _isRoomsSearchVisible,
                     searchQuery: _roomsSearchQuery,
@@ -1941,360 +1871,338 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                         setState(() => _roomsSearchQuery = value),
                     onSearchClear: _clearRoomsSearch,
                   ),
-                  // The showcase anchor is a tiny invisible strip at the top of
-                  // the list area so the tooltip renders within the safe area
-                  // (wrapping the full Expanded would push the tooltip to the
-                  // physical screen bottom, hiding buttons under the nav bar).
-                  _buildRoomsTourStep(
-                    showcaseKey: _roomsListShowcaseKey,
-                    title: 'Your Location Tree',
-                    description: 'Areas contain Rooms, Rooms contain Zones. '
-                        'Items are saved to Zones. '
-                        'Tap an area or room to expand it.',
-                    tooltipPosition: TooltipPosition.bottom,
-                    child: Container(
-                      height: 56,
-                      width: double.infinity,
-                      color: Colors.transparent,
-                    ),
-                  ),
                   Expanded(
                     child: locationsAsync.when(
-                        loading: () => const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary),
-                        ),
-                        error: (error, _) => Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              'Failed to load locations.\n$error',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: kMuted),
-                            ),
+                      loading: () => const Center(
+                        child:
+                            CircularProgressIndicator(color: AppColors.primary),
+                      ),
+                      error: (error, _) => Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            'Failed to load locations.\n$error',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: kMuted),
                           ),
                         ),
-                        data: (allLocations) {
-                          final hierarchy =
-                              LocationHierarchy.fromLocations(allLocations);
-                          final searchState =
-                              _RoomsLocationSearchState.fromQuery(
-                            hierarchy,
-                            _roomsSearchQuery,
-                          );
-                          final areas = searchState.isActive
-                              ? hierarchy.areas
-                                  .where(
-                                    (area) =>
-                                        searchState.isAreaVisible(area.uuid),
-                                  )
-                                  .toList(growable: false)
-                              : hierarchy.areas;
-
-                          final activeItemCount = itemsAsync.valueOrNull
-                                  ?.where((item) => !item.isArchived)
-                                  .length ??
-                              allLocations
-                                  .where((location) =>
-                                      location.type == LocationType.zone)
-                                  .fold<int>(
-                                    0,
-                                    (sum, location) =>
-                                        sum + location.usageCount,
-                                  );
-
-                          final overview = _RoomsOverview.fromHierarchy(
-                            hierarchy,
-                            allLocations,
-                            activeItemCount,
-                          );
-
-                          final areaTemplates = _kFeaturedAreaTemplates
-                              .where(
-                                (template) => !hierarchy.areas.any(
+                      ),
+                      data: (allLocations) {
+                        final hierarchy =
+                            LocationHierarchy.fromLocations(allLocations);
+                        final searchState = _RoomsLocationSearchState.fromQuery(
+                          hierarchy,
+                          _roomsSearchQuery,
+                        );
+                        final areas = searchState.isActive
+                            ? hierarchy.areas
+                                .where(
                                   (area) =>
-                                      area.name.trim().toLowerCase() ==
-                                      template.label.toLowerCase(),
+                                      searchState.isAreaVisible(area.uuid),
+                                )
+                                .toList(growable: false)
+                            : hierarchy.areas;
+
+                        final activeItemCount = itemsAsync.valueOrNull
+                                ?.where((item) => !item.isArchived)
+                                .length ??
+                            allLocations
+                                .where((location) =>
+                                    location.type == LocationType.zone)
+                                .fold<int>(
+                                  0,
+                                  (sum, location) => sum + location.usageCount,
+                                );
+
+                        final overview = _RoomsOverview.fromHierarchy(
+                          hierarchy,
+                          allLocations,
+                          activeItemCount,
+                        );
+
+                        final areaTemplates = _kFeaturedAreaTemplates
+                            .where(
+                              (template) => !hierarchy.areas.any(
+                                (area) =>
+                                    area.name.trim().toLowerCase() ==
+                                    template.label.toLowerCase(),
+                              ),
+                            )
+                            .toList(growable: false);
+
+                        final nextIncompleteStep = overview.areaCount == 0
+                            ? 0
+                            : overview.roomCount == 0
+                                ? 1
+                                : overview.zoneCount == 0
+                                    ? 2
+                                    : overview.itemCount == 0
+                                        ? 3
+                                        : -1;
+                        final showSetupProgress = !searchState.isActive &&
+                            areas.isNotEmpty &&
+                            nextIncompleteStep != -1;
+                        final setupSteps = <_RoomsSetupTask>[
+                          _RoomsSetupTask(
+                            icon: Icons.home_work_outlined,
+                            title: overview.areaCount == 0
+                                ? 'Create your first area'
+                                : _countLabel(overview.areaCount, 'area'),
+                            description: overview.areaCount == 0
+                                ? 'Start with the biggest space you remember naturally, like Home, Office or Garage.'
+                                : 'Areas are the top-level map of your spaces, and they are ready.',
+                            isComplete: overview.areaCount > 0,
+                            actionLabel:
+                                overview.areaCount == 0 ? 'Create' : null,
+                            onTap: overview.areaCount == 0
+                                ? () => _addArea()
+                                : null,
+                            isRecommended: nextIncompleteStep == 0,
+                          ),
+                          _RoomsSetupTask(
+                            icon: Icons.meeting_room_outlined,
+                            title: overview.roomCount == 0
+                                ? 'Add your first room'
+                                : _countLabel(overview.roomCount, 'room'),
+                            description: overview.roomCount == 0
+                                ? overview.areaCount == 0
+                                    ? 'Use guided setup to create a room as soon as your first area exists.'
+                                    : 'Break ${overview.firstAreaWithoutRooms?.name ?? 'your area'} into real rooms so the screen feels structured.'
+                                : 'Rooms split bigger areas into memorable places people actually think about.',
+                            isComplete: overview.roomCount > 0,
+                            actionLabel: overview.roomCount == 0
+                                ? (overview.areaCount == 0
+                                    ? 'Guided setup'
+                                    : 'Add room')
+                                : null,
+                            onTap: overview.roomCount == 0
+                                ? (overview.areaCount == 0
+                                    ? _openAddRoomFlow
+                                    : () => _addRoom(
+                                          overview.firstAreaWithoutRooms ??
+                                              hierarchy.areas.first,
+                                        ))
+                                : null,
+                            isRecommended: nextIncompleteStep == 1,
+                          ),
+                          _RoomsSetupTask(
+                            icon: Icons.widgets_outlined,
+                            title: overview.zoneCount == 0
+                                ? 'Add your first zone'
+                                : _countLabel(overview.zoneCount, 'zone'),
+                            description: overview.zoneCount == 0
+                                ? overview.roomCount == 0
+                                    ? 'Create a room first, then add the exact shelf, drawer or cabinet where items live.'
+                                    : 'Zones make item locations precise. Start with ${overview.firstRoomWithoutZones?.name ?? 'your next room'}.'
+                                : 'Zones are the exact places search and item saving rely on.',
+                            isComplete: overview.zoneCount > 0,
+                            actionLabel: overview.zoneCount == 0
+                                ? (overview.roomCount == 0
+                                    ? 'Add room'
+                                    : 'Add zone')
+                                : null,
+                            onTap: overview.zoneCount == 0
+                                ? (overview.roomCount == 0
+                                    ? () => _addRoom(
+                                          overview.firstAreaWithoutRooms ??
+                                              hierarchy.areas.first,
+                                        )
+                                    : () => _addZone(
+                                          overview.firstRoomWithoutZones!,
+                                        ))
+                                : null,
+                            isRecommended: nextIncompleteStep == 2,
+                          ),
+                          _RoomsSetupTask(
+                            icon: Icons.inventory_2_outlined,
+                            title: overview.itemCount == 0
+                                ? 'Save your first item'
+                                : _countLabel(overview.itemCount, 'item'),
+                            description: overview.itemCount == 0
+                                ? overview.zoneCount == 0
+                                    ? 'Finish one zone first, then save a real item into it.'
+                                    : 'Your structure is ready. Add one real item so search and recall become useful immediately.'
+                                : 'Items are already connected to your location map.',
+                            isComplete: overview.itemCount > 0,
+                            actionLabel: overview.itemCount == 0
+                                ? (overview.zoneCount == 0
+                                    ? (overview.roomCount == 0
+                                        ? 'Add room'
+                                        : 'Add zone')
+                                    : 'Save item')
+                                : null,
+                            onTap: overview.itemCount == 0
+                                ? (overview.zoneCount == 0
+                                    ? (overview.roomCount == 0
+                                        ? () => _addRoom(
+                                              overview.firstAreaWithoutRooms ??
+                                                  hierarchy.areas.first,
+                                            )
+                                        : () => _addZone(
+                                              overview.firstRoomWithoutZones!,
+                                            ))
+                                    : () => context.push(AppRoutes.save))
+                                : null,
+                            isRecommended: nextIncompleteStep == 3,
+                          ),
+                        ];
+
+                        final guidanceArea = areas.isNotEmpty
+                            ? overview.firstAreaWithoutRooms
+                            : null;
+                        final guidanceRoom = areas.isNotEmpty
+                            ? overview.firstRoomWithoutZones
+                            : null;
+
+                        return ListView(
+                          padding: EdgeInsets.only(
+                            left: 16,
+                            right: 16,
+                            top: AppDimensions.spacingSm,
+                            bottom: AppNavBar.contentBottomSpacing(context),
+                          ),
+                          children: [
+                            if (_isRoomsSearchVisible)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _RoomsSearchSummary(
+                                  query: searchState.query,
+                                  matchCount: searchState.matchCount,
+                                  isDark: isDark,
                                 ),
+                              ),
+                            if (showSetupProgress)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 14),
+                                child: _RoomsSetupProgressCard(
+                                  isDark: isDark,
+                                  steps: setupSteps,
+                                ),
+                              ),
+                            if (!searchState.isActive && areas.isEmpty)
+                              _RoomsEmptyState(
+                                isDark: isDark,
+                                suggestedAreas: areaTemplates.isEmpty
+                                    ? _kFeaturedAreaTemplates
+                                    : areaTemplates,
+                                starterPacks: _kRoomsStarterPacks,
+                                onCreateAreaTap: () => _addArea(),
+                                onGuidedAddTap: _openAddRoomFlow,
+                                onSuggestionTap: (template) =>
+                                    _createAreaQuick(template.label),
+                                onStarterPackTap: _applyStarterPack,
                               )
-                              .toList(growable: false);
-
-                          final nextIncompleteStep = overview.areaCount == 0
-                              ? 0
-                              : overview.roomCount == 0
-                                  ? 1
-                                  : overview.zoneCount == 0
-                                      ? 2
-                                      : overview.itemCount == 0
-                                          ? 3
-                                          : -1;
-                          final showSetupProgress = !searchState.isActive &&
-                              areas.isNotEmpty &&
-                              nextIncompleteStep != -1;
-                          final setupSteps = <_RoomsSetupTask>[
-                            _RoomsSetupTask(
-                              icon: Icons.home_work_outlined,
-                              title: overview.areaCount == 0
-                                  ? 'Create your first area'
-                                  : _countLabel(overview.areaCount, 'area'),
-                              description: overview.areaCount == 0
-                                  ? 'Start with the biggest space you remember naturally, like Home, Office or Garage.'
-                                  : 'Areas are the top-level map of your spaces, and they are ready.',
-                              isComplete: overview.areaCount > 0,
-                              actionLabel:
-                                  overview.areaCount == 0 ? 'Create' : null,
-                              onTap: overview.areaCount == 0
-                                  ? () => _addArea()
-                                  : null,
-                              isRecommended: nextIncompleteStep == 0,
-                            ),
-                            _RoomsSetupTask(
-                              icon: Icons.meeting_room_outlined,
-                              title: overview.roomCount == 0
-                                  ? 'Add your first room'
-                                  : _countLabel(overview.roomCount, 'room'),
-                              description: overview.roomCount == 0
-                                  ? overview.areaCount == 0
-                                      ? 'Use guided setup to create a room as soon as your first area exists.'
-                                      : 'Break ${overview.firstAreaWithoutRooms?.name ?? 'your area'} into real rooms so the screen feels structured.'
-                                  : 'Rooms split bigger areas into memorable places people actually think about.',
-                              isComplete: overview.roomCount > 0,
-                              actionLabel: overview.roomCount == 0
-                                  ? (overview.areaCount == 0
-                                      ? 'Guided setup'
-                                      : 'Add room')
-                                  : null,
-                              onTap: overview.roomCount == 0
-                                  ? (overview.areaCount == 0
-                                      ? _openAddRoomFlow
-                                      : () => _addRoom(
-                                            overview.firstAreaWithoutRooms ??
-                                                hierarchy.areas.first,
-                                          ))
-                                  : null,
-                              isRecommended: nextIncompleteStep == 1,
-                            ),
-                            _RoomsSetupTask(
-                              icon: Icons.widgets_outlined,
-                              title: overview.zoneCount == 0
-                                  ? 'Add your first zone'
-                                  : _countLabel(overview.zoneCount, 'zone'),
-                              description: overview.zoneCount == 0
-                                  ? overview.roomCount == 0
-                                      ? 'Create a room first, then add the exact shelf, drawer or cabinet where items live.'
-                                      : 'Zones make item locations precise. Start with ${overview.firstRoomWithoutZones?.name ?? 'your next room'}.'
-                                  : 'Zones are the exact places search and item saving rely on.',
-                              isComplete: overview.zoneCount > 0,
-                              actionLabel: overview.zoneCount == 0
-                                  ? (overview.roomCount == 0
-                                      ? 'Add room'
-                                      : 'Add zone')
-                                  : null,
-                              onTap: overview.zoneCount == 0
-                                  ? (overview.roomCount == 0
-                                      ? () => _addRoom(
-                                            overview.firstAreaWithoutRooms ??
-                                                hierarchy.areas.first,
-                                          )
-                                      : () => _addZone(
-                                            overview.firstRoomWithoutZones!,
-                                          ))
-                                  : null,
-                              isRecommended: nextIncompleteStep == 2,
-                            ),
-                            _RoomsSetupTask(
-                              icon: Icons.inventory_2_outlined,
-                              title: overview.itemCount == 0
-                                  ? 'Save your first item'
-                                  : _countLabel(overview.itemCount, 'item'),
-                              description: overview.itemCount == 0
-                                  ? overview.zoneCount == 0
-                                      ? 'Finish one zone first, then save a real item into it.'
-                                      : 'Your structure is ready. Add one real item so search and recall become useful immediately.'
-                                  : 'Items are already connected to your location map.',
-                              isComplete: overview.itemCount > 0,
-                              actionLabel: overview.itemCount == 0
-                                  ? (overview.zoneCount == 0
-                                      ? (overview.roomCount == 0
-                                          ? 'Add room'
-                                          : 'Add zone')
-                                      : 'Save item')
-                                  : null,
-                              onTap: overview.itemCount == 0
-                                  ? (overview.zoneCount == 0
-                                      ? (overview.roomCount == 0
-                                          ? () => _addRoom(
-                                                overview.firstAreaWithoutRooms ??
-                                                    hierarchy.areas.first,
-                                              )
-                                          : () => _addZone(
-                                                overview.firstRoomWithoutZones!,
-                                              ))
-                                      : () => context.push(AppRoutes.save))
-                                  : null,
-                              isRecommended: nextIncompleteStep == 3,
-                            ),
-                          ];
-
-                          final guidanceArea = areas.isNotEmpty
-                              ? overview.firstAreaWithoutRooms
-                              : null;
-                          final guidanceRoom = areas.isNotEmpty
-                              ? overview.firstRoomWithoutZones
-                              : null;
-
-                          return ListView(
-                            padding: EdgeInsets.only(
-                              left: 16,
-                              right: 16,
-                              top: AppDimensions.spacingMd,
-                              bottom: AppNavBar.contentBottomSpacing(context),
-                            ),
-                            children: [
-                              if (_isRoomsSearchVisible)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _RoomsSearchSummary(
-                                    query: searchState.query,
-                                    matchCount: searchState.matchCount,
-                                    isDark: isDark,
-                                  ),
-                                ),
-                              if (showSetupProgress)
+                            else ...[
+                              if (!searchState.isActive && guidanceArea != null)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 14),
-                                  child: _RoomsSetupProgressCard(
+                                  child: _RoomsGuidanceCard(
                                     isDark: isDark,
-                                    steps: setupSteps,
+                                    icon: Icons.auto_awesome_rounded,
+                                    title:
+                                        'Quick room ideas for ${guidanceArea.name}',
+                                    description:
+                                        'Tap once to create common rooms and make this area feel organized immediately.',
+                                    suggestions:
+                                        _roomTemplatesForArea(guidanceArea),
+                                    onSuggestionTap: (template) =>
+                                        _createRoomQuick(
+                                      guidanceArea,
+                                      template.label,
+                                      iconName: template.iconName,
+                                    ),
                                   ),
-                                ),
-                              if (!searchState.isActive && areas.isEmpty)
-                                _RoomsEmptyState(
-                                  isDark: isDark,
-                                  suggestedAreas: areaTemplates.isEmpty
-                                      ? _kFeaturedAreaTemplates
-                                      : areaTemplates,
-                                  starterPacks: _kRoomsStarterPacks,
-                                  onCreateAreaTap: () => _addArea(),
-                                  onGuidedAddTap: _openAddRoomFlow,
-                                  onSuggestionTap: (template) =>
-                                      _createAreaQuick(template.label),
-                                  onStarterPackTap: _applyStarterPack,
                                 )
-                              else ...[
-                                if (!searchState.isActive &&
-                                    guidanceArea != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _RoomsGuidanceCard(
-                                      isDark: isDark,
-                                      icon: Icons.auto_awesome_rounded,
-                                      title:
-                                          'Quick room ideas for ${guidanceArea.name}',
-                                      description:
-                                          'Tap once to create common rooms and make this area feel organized immediately.',
-                                      suggestions:
-                                          _roomTemplatesForArea(guidanceArea),
-                                      onSuggestionTap: (template) =>
-                                          _createRoomQuick(
-                                        guidanceArea,
-                                        template.label,
-                                        iconName: template.iconName,
-                                      ),
-                                    ),
-                                  )
-                                else if (!searchState.isActive &&
-                                    guidanceRoom != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _RoomsGuidanceCard(
-                                      isDark: isDark,
-                                      icon: Icons.tips_and_updates_outlined,
-                                      title:
-                                          'Smart zone ideas for ${guidanceRoom.name}',
-                                      description:
-                                          'Create exact spots now so saving and finding items later feels effortless.',
-                                      suggestions:
-                                          _zoneTemplatesForParent(guidanceRoom),
-                                      onSuggestionTap: (template) =>
-                                          _createZoneQuick(
-                                        guidanceRoom,
-                                        template.label,
-                                        iconName: template.iconName,
-                                      ),
-                                    ),
-                                  )
-                                else if (!searchState.isActive &&
-                                    overview.areaCount <= 2 &&
-                                    areaTemplates.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _RoomsGuidanceCard(
-                                      isDark: isDark,
-                                      icon: Icons.add_home_work_outlined,
-                                      title: 'Popular area templates',
-                                      description:
-                                          'Grow your structure with one tap instead of leaving the screen feeling empty.',
-                                      suggestions: areaTemplates,
-                                      onSuggestionTap: (template) =>
-                                          _createAreaQuick(template.label),
+                              else if (!searchState.isActive &&
+                                  guidanceRoom != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: _RoomsGuidanceCard(
+                                    isDark: isDark,
+                                    icon: Icons.tips_and_updates_outlined,
+                                    title:
+                                        'Smart zone ideas for ${guidanceRoom.name}',
+                                    description:
+                                        'Create exact spots now so saving and finding items later feels effortless.',
+                                    suggestions:
+                                        _zoneTemplatesForParent(guidanceRoom),
+                                    onSuggestionTap: (template) =>
+                                        _createZoneQuick(
+                                      guidanceRoom,
+                                      template.label,
+                                      iconName: template.iconName,
                                     ),
                                   ),
-                                ...areas.map(
-                                  (area) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _buildAreaCard(
-                                      hierarchy,
-                                      area,
-                                      isDark: isDark,
-                                      searchState: searchState,
-                                    ),
+                                )
+                              else if (!searchState.isActive &&
+                                  overview.areaCount <= 2 &&
+                                  areaTemplates.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: _RoomsGuidanceCard(
+                                    isDark: isDark,
+                                    icon: Icons.add_home_work_outlined,
+                                    title: 'Popular area templates',
+                                    description:
+                                        'Grow your structure with one tap instead of leaving the screen feeling empty.',
+                                    suggestions: areaTemplates,
+                                    onSuggestionTap: (template) =>
+                                        _createAreaQuick(template.label),
                                   ),
                                 ),
-                                if (searchState.isActive && areas.isEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 32),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.search_off_rounded,
-                                          color: kMuted,
-                                          size: 48,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'No rooms or zones found.',
-                                          style: TextStyle(
-                                            color: kMuted,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          'Try another search term to find a room or zone.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                              color: kMuted, fontSize: 13),
-                                        ),
-                                      ],
-                                    ),
+                              ...areas.map(
+                                (area) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: _buildAreaCard(
+                                    hierarchy,
+                                    area,
+                                    isDark: isDark,
+                                    searchState: searchState,
                                   ),
-                              ],
+                                ),
+                              ),
+                              if (searchState.isActive && areas.isEmpty)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 32),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.search_off_rounded,
+                                        color: kMuted,
+                                        size: 48,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'No rooms or zones found.',
+                                        style: TextStyle(
+                                          color: kMuted,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Try another search term to find a room or zone.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            color: kMuted, fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                             ],
-                          );
-                        },
-                      ),
+                          ],
+                        );
+                      },
                     ),
+                  ),
                 ],
               ),
             ),
             if (_isBusy) RoomsLoadingOverlay(label: _busyLabel),
           ],
         );
-      },
-    );
   }
 }
 
@@ -2302,8 +2210,6 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
 
 class _TopHeader extends StatelessWidget {
   const _TopHeader({
-    required this.searchShowcaseKey,
-    required this.addShowcaseKey,
     required this.onAddTap,
     required this.isSearchVisible,
     required this.searchQuery,
@@ -2314,8 +2220,6 @@ class _TopHeader extends StatelessWidget {
     required this.onSearchClear,
   });
 
-  final GlobalKey searchShowcaseKey;
-  final GlobalKey addShowcaseKey;
   final VoidCallback onAddTap;
   final bool isSearchVisible;
   final String searchQuery;
@@ -2382,35 +2286,20 @@ class _TopHeader extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _buildRoomsTourStep(
-                    showcaseKey: searchShowcaseKey,
-                    title: 'Search Rooms & Zones',
-                    description:
-                        'Filter this screen to quickly find a room or zone '
-                        'without opening the app-wide search.',
-                    tooltipPosition: TooltipPosition.bottom,
-                    child: IconButton(
-                      onPressed: onSearchTap,
-                      icon: Icon(
-                        isSearchVisible
-                            ? Icons.close_rounded
-                            : Icons.search_rounded,
-                        color: isSearchVisible
-                            ? AppColors.primary
-                            : (isDark
-                                ? AppColors.textSecondaryDark
-                                : AppColors.textSecondaryLight),
-                      ),
+                  IconButton(
+                    onPressed: onSearchTap,
+                    icon: Icon(
+                      isSearchVisible
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
+                      color: isSearchVisible
+                          ? AppColors.primary
+                          : (isDark
+                              ? AppColors.textSecondaryDark
+                              : AppColors.textSecondaryLight),
                     ),
                   ),
-                  _buildRoomsTourStep(
-                    showcaseKey: addShowcaseKey,
-                    title: 'Add a Room',
-                    description:
-                        'Create a new room first, then add zones for more '
-                        'precise storage tracking.',
-                    tooltipPosition: TooltipPosition.bottom,
-                    child: InkWell(
+                  InkWell(
                       onTap: onAddTap,
                       borderRadius: BorderRadius.circular(999),
                       child: Container(
@@ -2431,7 +2320,6 @@ class _TopHeader extends StatelessWidget {
                             color: Colors.white, size: 30),
                       ),
                     ),
-                  ),
                 ],
               ),
               AnimatedSize(

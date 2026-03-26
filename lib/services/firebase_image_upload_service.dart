@@ -134,8 +134,9 @@ class FirebaseImageUploadService {
       }
       // Storage paths exist but files are gone — log clearly.
       debugPrint(
-        'FirebaseImageUploadService: storage paths present but all files '
-        'missing for $itemUuid — will try download URLs and folder listing',
+        'FirebaseImageUploadService: could not get fresh URLs for $itemUuid '
+        'via storage paths (files deleted or Storage rules block read) — '
+        'falling back to stored download URLs',
       );
     }
 
@@ -361,6 +362,13 @@ class FirebaseImageUploadService {
   /// Converts [storagePaths] (Firebase Storage object paths) into fresh HTTPS
   /// download URLs by calling [getDownloadURL()] directly on each ref.
   /// Missing objects are skipped; other errors are logged and skipped.
+  ///
+  /// NOTE: [getDownloadURL()] requires `read` permission in Firebase Storage
+  /// security rules. If this returns an empty list despite images being
+  /// present in Storage, check your Firebase Storage rules — they must allow:
+  ///   match /users/{userId}/{allPaths=**} {
+  ///     allow read: if request.auth != null && request.auth.uid == userId;
+  ///   }
   Future<List<String>> _resolveFromStoragePaths(
     List<String> storagePaths,
   ) async {
@@ -374,13 +382,17 @@ class FirebaseImageUploadService {
         final url = await ref.getDownloadURL();
         urls.add(url);
       } catch (e) {
-        if (!_isMissingObjectError(e)) {
+        if (_isMissingObjectError(e)) {
+          // File was deleted from Storage — skip silently.
+        } else {
+          // Likely a permission-denied error: Firebase Storage security rules
+          // may not allow read access for this user. The fallback to stored
+          // HTTPS download URLs (rawImagePaths) will be tried next.
           debugPrint(
-            'FirebaseImageUploadService: failed to get fresh URL for '
-            '$storagePath: $e',
+            'FirebaseImageUploadService: getDownloadURL failed for '
+            '$storagePath — may be a Storage rules issue: $e',
           );
         }
-        // Object is gone — skip this slot.
       }
     }
     return urls;
