@@ -1207,6 +1207,9 @@ class _LentPulseSection extends ConsumerWidget {
                             child: item.imagePaths.isNotEmpty
                                 ? AdaptiveImage(
                                     path: item.imagePaths.first,
+                                    itemUuid: item.uuid,
+                                    imageIndex: 0,
+                                    variant: AdaptiveImageVariant.thumbnail,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_) => const Icon(
                                       Icons.image_outlined,
@@ -1307,6 +1310,9 @@ class _ItemCard extends StatelessWidget {
               child: item.imagePaths.isNotEmpty
                   ? AdaptiveImage(
                       path: item.imagePaths.first,
+                      itemUuid: item.uuid,
+                      imageIndex: 0,
+                      variant: AdaptiveImageVariant.thumbnail,
                       width: double.infinity,
                       fit: BoxFit.cover,
                       errorBuilder: (_) => const _Placeholder(),
@@ -1513,6 +1519,9 @@ class _ForgottenItemCard extends StatelessWidget {
               child: item.imagePaths.isNotEmpty
                   ? AdaptiveImage(
                       path: item.imagePaths.first,
+                      itemUuid: item.uuid,
+                      imageIndex: 0,
+                      variant: AdaptiveImageVariant.thumbnail,
                       fit: BoxFit.cover,
                       errorBuilder: (_) => const _Placeholder(),
                     )

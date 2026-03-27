@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/constants/feature_limits.dart';
-import '../../core/utils/path_utils.dart';
 import '../../services/invoice_service.dart';
 import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/household_member.dart';
@@ -252,7 +251,12 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                     // ── Image gallery ────────────────────────
                                     if (images.isNotEmpty) ...[
                                       GestureDetector(
-                                        onTap: () => _zoom(selected, isDark),
+                                        onTap: () => _zoom(
+                                          item,
+                                          _selectedImage,
+                                          selected,
+                                          isDark,
+                                        ),
                                         child: ClipRRect(
                                           borderRadius:
                                               BorderRadius.circular(20),
@@ -261,8 +265,13 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                             child: Stack(
                                               fit: StackFit.expand,
                                               children: [
-                                                _img(selected!, BoxFit.cover,
-                                                    isDark),
+                                                _img(
+                                                  item,
+                                                  selected!,
+                                                  BoxFit.cover,
+                                                  isDark,
+                                                  imageIndex: _selectedImage,
+                                                ),
                                                 Positioned(
                                                   top: 12,
                                                   right: 12,
@@ -309,7 +318,11 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                                 );
                                               }
                                               return _thumb(
-                                                  images[i], i, isDark);
+                                                item,
+                                                images[i],
+                                                i,
+                                                isDark,
+                                              );
                                             },
                                           ),
                                         ),
@@ -1223,9 +1236,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   }
 
   bool _isLocalInvoicePath(String? path) {
-    final trimmedPath = path?.trim() ?? '';
-    if (trimmedPath.isEmpty) return false;
-    return !PathUtils.isRemotePath(trimmedPath);
+    return InvoiceService.isSafeLocalInvoicePath(path);
   }
 
   Future<void> _deleteDraftInvoiceIfNeeded(
@@ -1384,8 +1395,8 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       return;
     }
 
-    final opened = await ref.read(invoiceServiceProvider).openInvoice(
-          invoicePath,
+    final opened = await ref.read(invoiceServiceProvider).openInvoiceForItem(
+          item,
         );
     if (!mounted || opened) return;
 
@@ -2529,7 +2540,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  void _zoom(String? path, bool isDark) {
+  void _zoom(Item item, int imageIndex, String? path, bool isDark) {
     if (path == null || path.isEmpty) return;
     showDialog<void>(
       context: context,
@@ -2539,7 +2550,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         child: Stack(children: [
           InteractiveViewer(
               child: AspectRatio(
-                  aspectRatio: 1, child: _img(path, BoxFit.contain, isDark))),
+            aspectRatio: 1,
+            child: _img(
+              item,
+              path,
+              BoxFit.contain,
+              isDark,
+              imageIndex: imageIndex,
+            ),
+          )),
           Positioned(
               top: 8,
               right: 8,
@@ -2553,9 +2572,19 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  Widget _img(String path, BoxFit fit, bool isDark) {
+  Widget _img(
+    Item item,
+    String path,
+    BoxFit fit,
+    bool isDark, {
+    required int imageIndex,
+    AdaptiveImageVariant variant = AdaptiveImageVariant.fullImage,
+  }) {
     return AdaptiveImage(
       path: path,
+      itemUuid: item.uuid,
+      imageIndex: imageIndex,
+      variant: variant,
       fit: fit,
       errorBuilder: (_) => Container(
         color: isDark
@@ -2568,7 +2597,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     );
   }
 
-  Widget _thumb(String path, int index, bool isDark) {
+  Widget _thumb(Item item, String path, int index, bool isDark) {
     final active = index == _selectedImage;
     return GestureDetector(
       onTap: () => setState(() => _selectedImage = index),
@@ -2582,7 +2611,14 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           ),
         ),
         clipBehavior: Clip.antiAlias,
-        child: _img(path, BoxFit.cover, isDark),
+        child: _img(
+          item,
+          path,
+          BoxFit.cover,
+          isDark,
+          imageIndex: index,
+          variant: AdaptiveImageVariant.thumbnail,
+        ),
       ),
     );
   }

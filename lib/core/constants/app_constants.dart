@@ -1,9 +1,12 @@
+import 'feature_limits.dart';
+
 // App-wide constants that are not theme or DB related.
 class AppConstants {
   AppConstants._();
 
   static const String appName = 'Ikeep';
   static const String appTagline = 'Where did I keep it?';
+  static const String buildLabel = 'Ikeep Version 2.4.0 (b892)';
 
   // Item limits
   static const int maxImagesPerItem = 3;
@@ -18,10 +21,10 @@ class AppConstants {
 
   // Image quality
   static const int imageCompressionQuality = 80; // 0-100
-  static const int thumbnailSize = 200; // pixels
-  static const int uploadImageQuality = 80; // 0-100
-  static const int uploadImageMaxDimension = 1280; // pixels
-  static const int uploadImageTargetBytes = 250 * 1024; // 250 KB
+  static const int thumbnailSize = thumbnailMaxDimensionPx; // pixels
+  static const int uploadImageQuality = fullImageUploadQuality; // 0-100
+  static const int uploadImageMaxDimension = maxFullImageDimensionPx; // pixels
+  static const int uploadImageTargetBytes = targetFullImageBytes;
 
   // Search
   static const int searchDebounceMs = 300;

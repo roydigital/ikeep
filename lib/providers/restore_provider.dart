@@ -68,7 +68,7 @@ class AutoRestoreState {
 /// gap:
 ///
 /// 1. Detects whether the signed-in user has items in Firestore.
-/// 2. If yes, runs a full sync to restore items and their attachments.
+/// 2. If yes, runs the default personal-backup sync flow.
 /// 3. After restore, reconciles [AppSettings.isBackupEnabled] so the UI
 ///    reflects the correct state.
 ///
@@ -88,7 +88,7 @@ class AutoRestoreNotifier extends StateNotifier<AutoRestoreState> {
       _ref.read(firebaseAuthProvider).currentUser ??
       _ref.read(authStateProvider).valueOrNull;
 
-  /// Runs a full sync immediately after an interactive Google sign-in.
+  /// Runs the default personal-backup sync immediately after sign-in.
   ///
   /// This mirrors the manual Online Backup action so the user's cloud items
   /// become visible as soon as sign-in completes.
@@ -174,11 +174,20 @@ class AutoRestoreNotifier extends StateNotifier<AutoRestoreState> {
   Future<SyncResult> _runFullSync() async {
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
 
+    try {
+      await _ref.read(cloudObservationServiceProvider).recordRestore(
+            source: 'auto_restore_sync_all',
+            metadataOnly: true,
+          );
+    } catch (error) {
+      debugPrint('AutoRestoreNotifier: restore observation failed: $error');
+    }
+
     SyncResult result;
     try {
-      result = await _ref.read(syncServiceProvider).fullSync();
+      result = await _ref.read(syncServiceProvider).syncAll();
     } catch (e) {
-      debugPrint('AutoRestoreNotifier: fullSync threw: $e');
+      debugPrint('AutoRestoreNotifier: syncAll threw: $e');
       result = SyncResult.error(e.toString());
     }
 

@@ -5,8 +5,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../core/constants/feature_limits.dart';
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
+import '../domain/models/cloud_media_descriptor.dart';
 import 'pdf_optimizer_service.dart';
 
 /// Represents an invoice/PDF file that has been saved to Firebase Storage.
@@ -25,6 +27,7 @@ class StoredInvoiceFile {
     this.originalFileSizeBytes,
     this.mimeType,
     this.compressionApplied = false,
+    this.mediaDescriptor,
   });
 
   /// HTTPS download URL — fast to open, may become stale over time.
@@ -52,6 +55,9 @@ class StoredInvoiceFile {
 
   /// Whether the file was compressed/optimized before upload.
   final bool compressionApplied;
+
+  /// Lightweight metadata for the uploaded/reused cloud asset.
+  final CloudMediaDescriptor? mediaDescriptor;
 }
 
 class FirebaseInvoiceStorageService {
@@ -103,11 +109,19 @@ class FirebaseInvoiceStorageService {
       // Already a remote URL — resolve its Storage path for durability.
       debugPrint('[IkeepInvoice] Invoice is already a remote URL — skipping upload');
       final storagePath = _tryResolveStoragePath(trimmedPath);
+      final resolvedFileName =
+          _resolvedFileName(trimmedPath, fallback: invoiceFileName);
       return StoredInvoiceFile(
         path: trimmedPath,
-        fileName: _resolvedFileName(trimmedPath, fallback: invoiceFileName),
+        fileName: resolvedFileName,
         sizeBytes: invoiceFileSizeBytes,
         storagePath: storagePath,
+        mimeType: _contentTypeFor(resolvedFileName),
+        mediaDescriptor: await _descriptorFromStoragePath(
+          storagePath,
+          fallbackMimeType: _contentTypeFor(resolvedFileName),
+          fallbackSizeBytes: invoiceFileSizeBytes,
+        ),
       );
     }
 
@@ -121,7 +135,7 @@ class FirebaseInvoiceStorageService {
         '[IkeepInvoice] Local invoice file missing at $trimmedPath — '
         'trying to reuse previously-uploaded Storage file',
       );
-      return _getStoredInvoice(
+      return _getStoredInvoiceWithDescriptor(
         userId: userId,
         itemUuid: itemUuid,
         fallbackFileName: invoiceFileName,
@@ -134,13 +148,19 @@ class FirebaseInvoiceStorageService {
 
     // ── PDF optimization: validate size + attempt compression ────────────
     File fileToUpload = localFile;
-    int fileSize = invoiceFileSizeBytes ?? await localFile.length();
+    int fileSize = await localFile.length();
     String originalFileNameResolved = resolvedFileName;
     int originalFileSizeBytesResolved = fileSize;
     String mimeType = _contentTypeFor(resolvedFileName);
     bool compressionApplied = false;
 
     if (_pdfOptimizer.isPdf(resolvedFileName)) {
+      if (fileSize > maxPdfBytes) {
+        debugPrint(
+          '[IkeepInvoice] PDF exceeds hard limit before optimization: '
+          '$fileSize bytes',
+        );
+      }
       debugPrint('[IkeepInvoice] PDF detected — running optimizer...');
       // Throws PdfTooLargeException if file exceeds hard limit.
       final pdfResult = await _pdfOptimizer.optimizeForUpload(
@@ -166,6 +186,10 @@ class FirebaseInvoiceStorageService {
     final storageObjectPath =
         '${_invoiceFolder(userId, itemUuid)}/invoice${extension.isEmpty ? '' : extension}';
     final ref = _storage.ref().child(storageObjectPath);
+    final uploadBytes = await fileToUpload.readAsBytes();
+    final contentHash = CloudMediaHashing.hashBytes(uploadBytes);
+    final version = DateTime.now().millisecondsSinceEpoch;
+    final updatedAt = DateTime.now().toUtc();
 
     debugPrint(
       '[IkeepInvoice] Uploading invoice: fileName=$resolvedFileName '
@@ -176,12 +200,17 @@ class FirebaseInvoiceStorageService {
       fileToUpload,
       SettableMetadata(
         contentType: mimeType,
-        cacheControl: 'public,max-age=31536000',
+        cacheControl: StorageConstants.firebaseLongLivedCacheControl,
         customMetadata: {
           'originalFileName': originalFileNameResolved,
           'sourceBytes': originalFileSizeBytesResolved.toString(),
           'uploadedBytes': fileSize.toString(),
           'compressionApplied': compressionApplied.toString(),
+          StorageConstants.contentHashMetadataKey: contentHash,
+          StorageConstants.versionMetadataKey: version.toString(),
+          StorageConstants.updatedAtMetadataKey: updatedAt.toIso8601String(),
+          StorageConstants.byteSizeMetadataKey: fileSize.toString(),
+          StorageConstants.mimeTypeMetadataKey: mimeType,
         },
       ),
     ).timeout(_putFileTimeout, onTimeout: () {
@@ -210,6 +239,14 @@ class FirebaseInvoiceStorageService {
       originalFileSizeBytes: originalFileSizeBytesResolved,
       mimeType: mimeType,
       compressionApplied: compressionApplied,
+      mediaDescriptor: CloudMediaDescriptor(
+        storagePath: ref.fullPath,
+        mimeType: mimeType,
+        byteSize: fileSize,
+        contentHash: contentHash,
+        version: version,
+        updatedAt: updatedAt,
+      ),
     );
   }
 
@@ -246,6 +283,7 @@ class FirebaseInvoiceStorageService {
           fileName: name,
           sizeBytes: invoiceFileSizeBytes ?? metadata.size,
           storagePath: ref.fullPath,
+          mediaDescriptor: _descriptorFromMetadata(ref.fullPath, metadata),
         );
       } catch (e) {
         if (!_isMissingObjectError(e)) {
@@ -261,17 +299,26 @@ class FirebaseInvoiceStorageService {
     if (trimmedPath.isNotEmpty) {
       final resolvedPath = await _resolveRemotePath(trimmedPath);
       if (resolvedPath != null) {
+        final resolvedFileName =
+            _resolvedFileName(trimmedPath, fallback: invoiceFileName);
+        final resolvedStoragePath = _tryResolveStoragePath(trimmedPath);
         return StoredInvoiceFile(
           path: resolvedPath,
-          fileName: _resolvedFileName(trimmedPath, fallback: invoiceFileName),
+          fileName: resolvedFileName,
           sizeBytes: invoiceFileSizeBytes,
-          storagePath: _tryResolveStoragePath(trimmedPath),
+          storagePath: resolvedStoragePath,
+          mimeType: _contentTypeFor(resolvedFileName),
+          mediaDescriptor: await _descriptorFromStoragePath(
+            resolvedStoragePath,
+            fallbackMimeType: _contentTypeFor(resolvedFileName),
+            fallbackSizeBytes: invoiceFileSizeBytes,
+          ),
         );
       }
     }
 
     // ── Fallback 2: list the item's invoice folder ────────────────────────────
-    return _getStoredInvoice(
+    return _getStoredInvoiceWithDescriptor(
       userId: userId,
       itemUuid: itemUuid,
       fallbackFileName: invoiceFileName,
@@ -353,6 +400,40 @@ class FirebaseInvoiceStorageService {
     }
   }
 
+  Future<StoredInvoiceFile?> _getStoredInvoiceWithDescriptor({
+    required String userId,
+    required String itemUuid,
+    String? fallbackFileName,
+    int? fallbackSizeBytes,
+  }) async {
+    final stored = await _getStoredInvoice(
+      userId: userId,
+      itemUuid: itemUuid,
+      fallbackFileName: fallbackFileName,
+      fallbackSizeBytes: fallbackSizeBytes,
+    );
+    if (stored == null) return null;
+
+    final descriptor = stored.mediaDescriptor ??
+        await _descriptorFromStoragePath(
+          stored.storagePath,
+          fallbackMimeType: stored.mimeType ?? _contentTypeFor(stored.fileName),
+          fallbackSizeBytes: stored.sizeBytes,
+        );
+
+    return StoredInvoiceFile(
+      path: stored.path,
+      fileName: stored.fileName,
+      sizeBytes: stored.sizeBytes,
+      storagePath: stored.storagePath,
+      originalFileName: stored.originalFileName,
+      originalFileSizeBytes: stored.originalFileSizeBytes,
+      mimeType: stored.mimeType ?? _contentTypeFor(stored.fileName),
+      compressionApplied: stored.compressionApplied,
+      mediaDescriptor: descriptor,
+    );
+  }
+
   Future<String?> _resolveRemotePath(String value) async {
     final normalized = value.trim();
     if (normalized.isEmpty) return null;
@@ -396,7 +477,7 @@ class FirebaseInvoiceStorageService {
   }
 
   String _invoiceFolder(String userId, String itemUuid) {
-    return '${StorageConstants.firebaseItemImagesRoot}/$userId/items/$itemUuid/invoices';
+    return '${StorageConstants.firebaseItemImagesRoot}/$userId/${StorageConstants.firebaseItemsSegment}/$itemUuid/${StorageConstants.firebaseInvoicesSegment}';
   }
 
   String _resolvedFileName(String path, {String? fallback}) {
@@ -459,5 +540,72 @@ class FirebaseInvoiceStorageService {
     }
 
     return false;
+  }
+
+  Future<CloudMediaDescriptor?> _descriptorFromStoragePath(
+    String? storagePath, {
+    required String fallbackMimeType,
+    int? fallbackSizeBytes,
+  }) async {
+    if (storagePath == null || storagePath.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final ref = storagePath.toLowerCase().startsWith('gs://')
+          ? _storage.refFromURL(storagePath)
+          : _storage.ref().child(storagePath);
+      final metadata = await ref.getMetadata().timeout(_getMetadataTimeout);
+      return _descriptorFromMetadata(ref.fullPath, metadata);
+    } catch (error) {
+      if (!_isMissingObjectError(error)) {
+        debugPrint(
+          '[IkeepInvoice] Descriptor lookup failed for $storagePath: $error',
+        );
+      }
+      return CloudMediaDescriptor(
+        storagePath: storagePath,
+        mimeType: fallbackMimeType,
+        byteSize: fallbackSizeBytes ?? 0,
+        version: 1,
+        updatedAt: DateTime.now().toUtc(),
+      );
+    }
+  }
+
+  CloudMediaDescriptor _descriptorFromMetadata(
+    String storagePath,
+    FullMetadata metadata,
+  ) {
+    final customMetadata = metadata.customMetadata ?? const {};
+    final updatedAt =
+        _parseDateTime(customMetadata[StorageConstants.updatedAtMetadataKey]) ??
+            metadata.updated ??
+            DateTime.now().toUtc();
+    final version = int.tryParse(
+          customMetadata[StorageConstants.versionMetadataKey] ?? '',
+        ) ??
+        updatedAt.millisecondsSinceEpoch;
+    final byteSize = int.tryParse(
+          customMetadata[StorageConstants.byteSizeMetadataKey] ?? '',
+        ) ??
+        metadata.size ??
+        0;
+
+    return CloudMediaDescriptor(
+      storagePath: storagePath,
+      mimeType: customMetadata[StorageConstants.mimeTypeMetadataKey] ??
+          metadata.contentType ??
+          'application/octet-stream',
+      byteSize: byteSize,
+      contentHash: customMetadata[StorageConstants.contentHashMetadataKey],
+      version: version <= 0 ? 1 : version,
+      updatedAt: updatedAt,
+    );
+  }
+
+  DateTime? _parseDateTime(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    return DateTime.tryParse(value)?.toUtc();
   }
 }

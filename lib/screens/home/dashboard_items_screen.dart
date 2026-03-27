@@ -488,6 +488,9 @@ class _DashboardItemThumbnail extends StatelessWidget {
       child: item.imagePaths.isNotEmpty
           ? AdaptiveImage(
               path: item.imagePaths.first,
+              itemUuid: item.uuid,
+              imageIndex: 0,
+              variant: AdaptiveImageVariant.thumbnail,
               fit: BoxFit.cover,
               errorBuilder: (_) => const Icon(
                 Icons.image_outlined,

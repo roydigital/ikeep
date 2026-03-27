@@ -10,6 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/constants/feature_limits.dart';
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
+import '../domain/models/item.dart';
+import 'item_cloud_media_service.dart';
 
 /// Thrown when the user selects a PDF that exceeds the hard size limit.
 class InvoiceTooLargeException implements Exception {
@@ -36,12 +38,59 @@ class PickedInvoiceFile {
 }
 
 class InvoiceService {
+  InvoiceService({
+    ItemCloudMediaService? itemCloudMediaService,
+  }) : _itemCloudMediaService = itemCloudMediaService;
+
   static const MethodChannel _nativeInvoicePickerChannel =
       MethodChannel('ikeep/native_invoice_picker');
+  final ItemCloudMediaService? _itemCloudMediaService;
+
+  static bool isStoragePlaceholderPath(String? path) {
+    final trimmedPath = path?.trim() ?? '';
+    if (trimmedPath.isEmpty) return false;
+    if (trimmedPath.toLowerCase().startsWith('gs://')) return true;
+    return trimmedPath.startsWith('${StorageConstants.firebaseItemImagesRoot}/');
+  }
+
+  static bool isSafeLocalInvoicePath(String? path) {
+    final trimmedPath = path?.trim() ?? '';
+    if (trimmedPath.isEmpty) return false;
+    if (PathUtils.isRemotePath(trimmedPath)) return false;
+    if (isStoragePlaceholderPath(trimmedPath)) return false;
+    return true;
+  }
+
+  Future<bool> openInvoiceForItem(Item item) async {
+    final invoicePath = item.invoicePath?.trim();
+    final resolvedPath = await _itemCloudMediaService?.resolveInvoicePath(
+      itemUuid: item.uuid,
+      fallbackPath: invoicePath,
+    );
+    final resolvedOpenablePath = resolvedPath?.trim() ?? '';
+    if (resolvedOpenablePath.isNotEmpty) {
+      debugPrint('[IkeepInvoice] opening resolved invoice path item=${item.uuid}');
+      return openInvoice(resolvedOpenablePath);
+    }
+
+    final fallbackPath = invoicePath?.trim() ?? '';
+    if (fallbackPath.isEmpty || isStoragePlaceholderPath(fallbackPath)) {
+      debugPrint(
+        '[IkeepInvoice] no openable invoice fallback item=${item.uuid}',
+      );
+      return false;
+    }
+    debugPrint('[IkeepInvoice] using legacy invoice fallback item=${item.uuid}');
+    return openInvoice(fallbackPath);
+  }
 
   Future<bool> openInvoice(String invoicePath) async {
     final trimmedPath = invoicePath.trim();
     if (trimmedPath.isEmpty) return false;
+    if (isStoragePlaceholderPath(trimmedPath)) {
+      debugPrint('[IkeepInvoice] blocked storage placeholder open: $trimmedPath');
+      return false;
+    }
 
     if (PathUtils.isRemotePath(trimmedPath)) {
       final uri = Uri.tryParse(trimmedPath);
@@ -181,6 +230,12 @@ class InvoiceService {
   Future<void> deleteInvoice(String invoicePath) async {
     final trimmedPath = invoicePath.trim();
     if (trimmedPath.isEmpty) return;
+    if (!isSafeLocalInvoicePath(trimmedPath)) {
+      debugPrint(
+        '[IkeepInvoice] skipping non-local invoice delete: $trimmedPath',
+      );
+      return;
+    }
 
     final file = File(trimmedPath);
     if (await file.exists()) {

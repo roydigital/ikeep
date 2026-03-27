@@ -181,6 +181,13 @@ class DatabaseHelper {
       )
     ''');
 
+    _createMediaCacheTable(batch);
+    _createItemCloudMediaTable(batch);
+    _createSyncCheckpointTable(batch);
+    _createCloudUsageSnapshotsTable(batch);
+    _createCloudObservationMetricsTable(batch);
+    _createCloudMediaObservationTable(batch);
+
     // Indexes for common queries
     batch.execute(
         'CREATE INDEX idx_items_location ON ${DbConstants.tableItems}(${DbConstants.colItemLocationUuid})');
@@ -212,6 +219,11 @@ class DatabaseHelper {
         'CREATE INDEX idx_borrow_owner_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowOwnerMemberUuid}, ${DbConstants.colBorrowStatus})');
     batch.execute(
         'CREATE INDEX idx_borrow_requester_status ON ${DbConstants.tableBorrowRequests}(${DbConstants.colBorrowRequesterMemberUuid}, ${DbConstants.colBorrowStatus})');
+    _createMediaCacheIndexes(batch);
+    _createItemCloudMediaIndexes(batch);
+    _createCloudUsageSnapshotIndexes(batch);
+    _createCloudObservationMetricsIndexes(batch);
+    _createCloudMediaObservationIndexes(batch);
 
     await batch.commit(noResult: true);
   }
@@ -636,6 +648,41 @@ class DatabaseHelper {
         WHERE ${DbConstants.colItemLastMovedAt} IS NULL
       ''');
     }
+
+    if (oldVersion < 16) {
+      await _ensureMediaCacheTable(db);
+      await _ensureMediaCacheIndexes(db);
+    }
+
+    if (oldVersion < 17) {
+      await _ensureItemCloudMediaTable(db);
+      await _ensureItemCloudMediaIndexes(db);
+    }
+
+    if (oldVersion < 18) {
+      await _ensureSyncCheckpointTable(db);
+    }
+
+    if (oldVersion < 19) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableSyncCheckpoints,
+        DbConstants.colSyncCheckpointHouseholdId,
+        'TEXT',
+      );
+    }
+
+    if (oldVersion < 20) {
+      await _ensureCloudUsageSnapshotsTable(db);
+      await _ensureCloudUsageSnapshotIndexes(db);
+    }
+
+    if (oldVersion < 21) {
+      await _ensureCloudObservationMetricsTable(db);
+      await _ensureCloudObservationMetricsIndexes(db);
+      await _ensureCloudMediaObservationTable(db);
+      await _ensureCloudMediaObservationIndexes(db);
+    }
   }
 
   Future<void> _onOpen(Database db) async {
@@ -707,6 +754,17 @@ class DatabaseHelper {
           ON DELETE CASCADE
       )
     ''');
+    await _ensureMediaCacheTable(db);
+    await _ensureMediaCacheIndexes(db);
+    await _ensureItemCloudMediaTable(db);
+    await _ensureItemCloudMediaIndexes(db);
+    await _ensureSyncCheckpointTable(db);
+    await _ensureCloudUsageSnapshotsTable(db);
+    await _ensureCloudUsageSnapshotIndexes(db);
+    await _ensureCloudObservationMetricsTable(db);
+    await _ensureCloudObservationMetricsIndexes(db);
+    await _ensureCloudMediaObservationTable(db);
+    await _ensureCloudMediaObservationIndexes(db);
   }
 
   Future<void> _addColumnIfMissing(
@@ -774,6 +832,346 @@ class DatabaseHelper {
         $_nowMs
       )
     ''');
+  }
+
+  void _createMediaCacheTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableMediaCache} (
+        ${DbConstants.colMediaCacheKey} TEXT PRIMARY KEY,
+        ${DbConstants.colMediaCacheType} TEXT NOT NULL,
+        ${DbConstants.colMediaStoragePath} TEXT NOT NULL,
+        ${DbConstants.colMediaVersion} INTEGER,
+        ${DbConstants.colMediaContentHash} TEXT,
+        ${DbConstants.colMediaLocalFilePath} TEXT NOT NULL,
+        ${DbConstants.colMediaMimeType} TEXT NOT NULL,
+        ${DbConstants.colMediaByteSize} INTEGER,
+        ${DbConstants.colMediaCreatedAt} INTEGER NOT NULL,
+        ${DbConstants.colMediaLastAccessedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  void _createMediaCacheIndexes(Batch batch) {
+    batch.execute(
+      'CREATE INDEX idx_media_cache_storage_type '
+      'ON ${DbConstants.tableMediaCache}('
+      '${DbConstants.colMediaStoragePath}, ${DbConstants.colMediaCacheType})',
+    );
+    batch.execute(
+      'CREATE INDEX idx_media_cache_last_accessed '
+      'ON ${DbConstants.tableMediaCache}('
+      '${DbConstants.colMediaLastAccessedAt} DESC)',
+    );
+  }
+
+  Future<void> _ensureMediaCacheTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableMediaCache} (
+        ${DbConstants.colMediaCacheKey} TEXT PRIMARY KEY,
+        ${DbConstants.colMediaCacheType} TEXT NOT NULL,
+        ${DbConstants.colMediaStoragePath} TEXT NOT NULL,
+        ${DbConstants.colMediaVersion} INTEGER,
+        ${DbConstants.colMediaContentHash} TEXT,
+        ${DbConstants.colMediaLocalFilePath} TEXT NOT NULL,
+        ${DbConstants.colMediaMimeType} TEXT NOT NULL,
+        ${DbConstants.colMediaByteSize} INTEGER,
+        ${DbConstants.colMediaCreatedAt} INTEGER NOT NULL,
+        ${DbConstants.colMediaLastAccessedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _ensureMediaCacheIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_media_cache_storage_type '
+      'ON ${DbConstants.tableMediaCache}('
+      '${DbConstants.colMediaStoragePath}, ${DbConstants.colMediaCacheType})',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_media_cache_last_accessed '
+      'ON ${DbConstants.tableMediaCache}('
+      '${DbConstants.colMediaLastAccessedAt} DESC)',
+    );
+  }
+
+  void _createItemCloudMediaTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableItemCloudMedia} (
+        ${DbConstants.colItemCloudMediaItemUuid} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaRole} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaSlotIndex} INTEGER NOT NULL,
+        ${DbConstants.colItemCloudMediaStoragePath} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaThumbnailPath} TEXT,
+        ${DbConstants.colItemCloudMediaMimeType} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaByteSize} INTEGER,
+        ${DbConstants.colItemCloudMediaContentHash} TEXT,
+        ${DbConstants.colItemCloudMediaVersion} INTEGER,
+        ${DbConstants.colItemCloudMediaUpdatedAt} INTEGER NOT NULL,
+        PRIMARY KEY (
+          ${DbConstants.colItemCloudMediaItemUuid},
+          ${DbConstants.colItemCloudMediaRole},
+          ${DbConstants.colItemCloudMediaSlotIndex}
+        ),
+        FOREIGN KEY (${DbConstants.colItemCloudMediaItemUuid})
+          REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
+          ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  void _createItemCloudMediaIndexes(Batch batch) {
+    batch.execute(
+      'CREATE INDEX idx_item_cloud_media_item_role '
+      'ON ${DbConstants.tableItemCloudMedia}('
+      '${DbConstants.colItemCloudMediaItemUuid}, '
+      '${DbConstants.colItemCloudMediaRole})',
+    );
+  }
+
+  Future<void> _ensureItemCloudMediaTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableItemCloudMedia} (
+        ${DbConstants.colItemCloudMediaItemUuid} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaRole} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaSlotIndex} INTEGER NOT NULL,
+        ${DbConstants.colItemCloudMediaStoragePath} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaThumbnailPath} TEXT,
+        ${DbConstants.colItemCloudMediaMimeType} TEXT NOT NULL,
+        ${DbConstants.colItemCloudMediaByteSize} INTEGER,
+        ${DbConstants.colItemCloudMediaContentHash} TEXT,
+        ${DbConstants.colItemCloudMediaVersion} INTEGER,
+        ${DbConstants.colItemCloudMediaUpdatedAt} INTEGER NOT NULL,
+        PRIMARY KEY (
+          ${DbConstants.colItemCloudMediaItemUuid},
+          ${DbConstants.colItemCloudMediaRole},
+          ${DbConstants.colItemCloudMediaSlotIndex}
+        ),
+        FOREIGN KEY (${DbConstants.colItemCloudMediaItemUuid})
+          REFERENCES ${DbConstants.tableItems}(${DbConstants.colItemUuid})
+          ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _ensureItemCloudMediaIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_item_cloud_media_item_role '
+      'ON ${DbConstants.tableItemCloudMedia}('
+      '${DbConstants.colItemCloudMediaItemUuid}, '
+      '${DbConstants.colItemCloudMediaRole})',
+    );
+  }
+
+  void _createSyncCheckpointTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableSyncCheckpoints} (
+        ${DbConstants.colSyncCheckpointScope} TEXT PRIMARY KEY,
+        ${DbConstants.colSyncCheckpointHouseholdId} TEXT,
+        ${DbConstants.colSyncCheckpointLastPullAt} INTEGER,
+        ${DbConstants.colSyncCheckpointLastPushAt} INTEGER,
+        ${DbConstants.colSyncCheckpointLastFullSyncAt} INTEGER,
+        ${DbConstants.colSyncCheckpointRemoteCursor} TEXT,
+        ${DbConstants.colSyncCheckpointUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _ensureSyncCheckpointTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableSyncCheckpoints} (
+        ${DbConstants.colSyncCheckpointScope} TEXT PRIMARY KEY,
+        ${DbConstants.colSyncCheckpointHouseholdId} TEXT,
+        ${DbConstants.colSyncCheckpointLastPullAt} INTEGER,
+        ${DbConstants.colSyncCheckpointLastPushAt} INTEGER,
+        ${DbConstants.colSyncCheckpointLastFullSyncAt} INTEGER,
+        ${DbConstants.colSyncCheckpointRemoteCursor} TEXT,
+        ${DbConstants.colSyncCheckpointUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  void _createCloudUsageSnapshotsTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableCloudUsageSnapshots} (
+        ${DbConstants.colCloudUsageScope} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudUsageHouseholdId} TEXT,
+        ${DbConstants.colCloudUsagePlanMode} TEXT NOT NULL,
+        ${DbConstants.colCloudUsageBackedUpItemCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalImageCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalPdfCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalStoredBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageHouseholdMemberCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  void _createCloudUsageSnapshotIndexes(Batch batch) {
+    batch.execute(
+      'CREATE INDEX idx_cloud_usage_household '
+      'ON ${DbConstants.tableCloudUsageSnapshots}('
+      '${DbConstants.colCloudUsageHouseholdId})',
+    );
+    batch.execute(
+      'CREATE INDEX idx_cloud_usage_updated_at '
+      'ON ${DbConstants.tableCloudUsageSnapshots}('
+      '${DbConstants.colCloudUsageUpdatedAt} DESC)',
+    );
+  }
+
+  Future<void> _ensureCloudUsageSnapshotsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableCloudUsageSnapshots} (
+        ${DbConstants.colCloudUsageScope} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudUsageHouseholdId} TEXT,
+        ${DbConstants.colCloudUsagePlanMode} TEXT NOT NULL,
+        ${DbConstants.colCloudUsageBackedUpItemCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalImageCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalPdfCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageTotalStoredBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageHouseholdMemberCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudUsageUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _ensureCloudUsageSnapshotIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cloud_usage_household '
+      'ON ${DbConstants.tableCloudUsageSnapshots}('
+      '${DbConstants.colCloudUsageHouseholdId})',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cloud_usage_updated_at '
+      'ON ${DbConstants.tableCloudUsageSnapshots}('
+      '${DbConstants.colCloudUsageUpdatedAt} DESC)',
+    );
+  }
+
+  void _createCloudObservationMetricsTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableCloudObservationMetrics} (
+        ${DbConstants.colCloudObservationScope} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudObservationPlanMode} TEXT NOT NULL,
+        ${DbConstants.colCloudObservationRestoreCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationRestoreBurstCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationFullMediaHydrationCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationMetadataOnlyRestoreCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationThumbnailDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationFullImageDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationPdfDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationEstimatedDownloadBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationEstimatedUploadBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationRepeatedSyncCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationLastRestoreAt} INTEGER,
+        ${DbConstants.colCloudObservationLastHeavyDownloadAt} INTEGER,
+        ${DbConstants.colCloudObservationLastSyncAt} INTEGER,
+        ${DbConstants.colCloudObservationUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  void _createCloudObservationMetricsIndexes(Batch batch) {
+    batch.execute(
+      'CREATE INDEX idx_cloud_observation_updated_at '
+      'ON ${DbConstants.tableCloudObservationMetrics}('
+      '${DbConstants.colCloudObservationUpdatedAt} DESC)',
+    );
+  }
+
+  Future<void> _ensureCloudObservationMetricsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableCloudObservationMetrics} (
+        ${DbConstants.colCloudObservationScope} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudObservationPlanMode} TEXT NOT NULL,
+        ${DbConstants.colCloudObservationRestoreCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationRestoreBurstCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationFullMediaHydrationCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationMetadataOnlyRestoreCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationThumbnailDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationFullImageDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationPdfDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationEstimatedDownloadBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationEstimatedUploadBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationRepeatedSyncCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudObservationLastRestoreAt} INTEGER,
+        ${DbConstants.colCloudObservationLastHeavyDownloadAt} INTEGER,
+        ${DbConstants.colCloudObservationLastSyncAt} INTEGER,
+        ${DbConstants.colCloudObservationUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _ensureCloudObservationMetricsIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cloud_observation_updated_at '
+      'ON ${DbConstants.tableCloudObservationMetrics}('
+      '${DbConstants.colCloudObservationUpdatedAt} DESC)',
+    );
+  }
+
+  void _createCloudMediaObservationTable(Batch batch) {
+    batch.execute('''
+      CREATE TABLE ${DbConstants.tableCloudMediaObservation} (
+        ${DbConstants.colCloudMediaObservationKey} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudMediaObservationType} TEXT NOT NULL,
+        ${DbConstants.colCloudMediaObservationStoragePath} TEXT NOT NULL,
+        ${DbConstants.colCloudMediaObservationVersion} INTEGER,
+        ${DbConstants.colCloudMediaObservationContentHash} TEXT,
+        ${DbConstants.colCloudMediaObservationDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationTotalDownloadedBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationLastDownloadedBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationCreatedAt} INTEGER NOT NULL,
+        ${DbConstants.colCloudMediaObservationLastDownloadedAt} INTEGER NOT NULL,
+        ${DbConstants.colCloudMediaObservationUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  void _createCloudMediaObservationIndexes(Batch batch) {
+    batch.execute(
+      'CREATE INDEX idx_cloud_media_observation_storage_type '
+      'ON ${DbConstants.tableCloudMediaObservation}('
+      '${DbConstants.colCloudMediaObservationStoragePath}, '
+      '${DbConstants.colCloudMediaObservationType})',
+    );
+    batch.execute(
+      'CREATE INDEX idx_cloud_media_observation_last_downloaded '
+      'ON ${DbConstants.tableCloudMediaObservation}('
+      '${DbConstants.colCloudMediaObservationLastDownloadedAt} DESC)',
+    );
+  }
+
+  Future<void> _ensureCloudMediaObservationTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DbConstants.tableCloudMediaObservation} (
+        ${DbConstants.colCloudMediaObservationKey} TEXT PRIMARY KEY,
+        ${DbConstants.colCloudMediaObservationType} TEXT NOT NULL,
+        ${DbConstants.colCloudMediaObservationStoragePath} TEXT NOT NULL,
+        ${DbConstants.colCloudMediaObservationVersion} INTEGER,
+        ${DbConstants.colCloudMediaObservationContentHash} TEXT,
+        ${DbConstants.colCloudMediaObservationDownloadCount} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationTotalDownloadedBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationLastDownloadedBytes} INTEGER NOT NULL DEFAULT 0,
+        ${DbConstants.colCloudMediaObservationCreatedAt} INTEGER NOT NULL,
+        ${DbConstants.colCloudMediaObservationLastDownloadedAt} INTEGER NOT NULL,
+        ${DbConstants.colCloudMediaObservationUpdatedAt} INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _ensureCloudMediaObservationIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cloud_media_observation_storage_type '
+      'ON ${DbConstants.tableCloudMediaObservation}('
+      '${DbConstants.colCloudMediaObservationStoragePath}, '
+      '${DbConstants.colCloudMediaObservationType})',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cloud_media_observation_last_downloaded '
+      'ON ${DbConstants.tableCloudMediaObservation}('
+      '${DbConstants.colCloudMediaObservationLastDownloadedAt} DESC)',
+    );
   }
 
   Future<void> close() async {

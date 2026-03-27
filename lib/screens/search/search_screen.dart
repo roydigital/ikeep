@@ -1744,6 +1744,9 @@ class _RichResultCard extends ConsumerWidget {
                   height: AppDimensions.thumbnailLarge + 8,
                   child: AdaptiveImage(
                     path: item.imagePaths.first,
+                    itemUuid: item.uuid,
+                    imageIndex: 0,
+                    variant: AdaptiveImageVariant.thumbnail,
                     fit: BoxFit.cover,
                     errorBuilder: (_) => _ThumbnailPlaceholder(isDark: isDark),
                   ),

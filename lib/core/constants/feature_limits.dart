@@ -1,6 +1,24 @@
+// Future paid-plan caps. During Closed Testing these are observed and logged
+// by the quota service, but not hard-enforced at the entitlement layer.
 const int cloudBackupLimit = 1000;
 const int cloudBackupWarningThreshold = 900;
 const int itemPhotoLimit = 3;
+const int itemPdfLimit = 1;
+const int householdMemberLimit = 5;
+
+// Media byte targets and ceilings used by the cloud contract and upload
+// pipeline. Later phases will use the same constants for lazy restore and
+// cache invalidation.
+const int targetFullImageBytes = 220 * 1024; // ~220 KB
+const int minTargetFullImageBytes = 160 * 1024; // ~160 KB
+const int maxFullImageBytes = 220 * 1024; // ~220 KB
+const int maxFullImageDimensionPx = 1280;
+const int fullImageUploadQuality = 80;
+const int targetThumbnailBytes = 40 * 1024; // ~40 KB
+const int minTargetThumbnailBytes = 20 * 1024; // ~20 KB
+const int maxThumbnailBytes = 40 * 1024; // ~40 KB
+const int thumbnailMaxDimensionPx = 280;
+const int thumbnailUploadQuality = 72;
 
 // ── PDF upload size policy ──────────────────────────────────────────────────
 // Soft limit: PDFs above this size trigger an optimization attempt before
@@ -10,6 +28,7 @@ const int pdfSoftLimitBytes = 2 * 1024 * 1024; // 2 MB
 // Hard limit: PDFs that remain above this size after optimization (or if
 // optimization is unavailable) are rejected outright.
 const int pdfHardLimitBytes = 10 * 1024 * 1024; // 10 MB
+const int maxPdfBytes = pdfHardLimitBytes;
 
 const String pdfSoftLimitLabel = '2 MB';
 const String pdfHardLimitLabel = '10 MB';

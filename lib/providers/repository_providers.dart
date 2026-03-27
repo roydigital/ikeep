@@ -20,7 +20,9 @@ final itemRepositoryProvider = Provider<ItemRepository>(
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
     historyDao: ref.watch(historyDaoProvider),
+    pendingSyncDao: ref.watch(pendingSyncDaoProvider),
     householdCloudService: ref.watch(householdCloudServiceProvider),
+    itemCloudMediaService: ref.watch(itemCloudMediaServiceProvider),
   ),
 );
 
@@ -41,6 +43,7 @@ final locationHierarchyRepositoryProvider =
 final historyRepositoryProvider = Provider<HistoryRepository>(
   (ref) => HistoryRepositoryImpl(
     historyDao: ref.watch(historyDaoProvider),
+    pendingSyncDao: ref.watch(pendingSyncDaoProvider),
     householdCloudService: ref.watch(householdCloudServiceProvider),
   ),
 );

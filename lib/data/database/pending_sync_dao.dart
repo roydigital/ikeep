@@ -53,17 +53,26 @@ class PendingSyncDao {
     required Map<String, dynamic> payload,
   }) async {
     final db = await _db;
-    await db.insert(
-      DbConstants.tablePendingSync,
-      {
-        DbConstants.colSyncOperationType: operationType,
-        DbConstants.colSyncEntityType: entityType,
-        DbConstants.colSyncEntityUuid: entityUuid,
-        DbConstants.colSyncPayload: jsonEncode(payload),
-        DbConstants.colSyncFailedAt: DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.transaction((txn) async {
+      await txn.delete(
+        DbConstants.tablePendingSync,
+        where:
+            '${DbConstants.colSyncEntityType} = ? AND '
+            '${DbConstants.colSyncEntityUuid} = ?',
+        whereArgs: [entityType, entityUuid],
+      );
+      await txn.insert(
+        DbConstants.tablePendingSync,
+        {
+          DbConstants.colSyncOperationType: operationType,
+          DbConstants.colSyncEntityType: entityType,
+          DbConstants.colSyncEntityUuid: entityUuid,
+          DbConstants.colSyncPayload: jsonEncode(payload),
+          DbConstants.colSyncFailedAt: DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
   }
 
   Future<List<PendingSyncOperation>> getAll() async {
@@ -75,12 +84,46 @@ class PendingSyncDao {
     return rows.map(PendingSyncOperation.fromMap).toList();
   }
 
+  Future<List<PendingSyncOperation>> getByEntityType(String entityType) async {
+    final db = await _db;
+    final rows = await db.query(
+      DbConstants.tablePendingSync,
+      where: '${DbConstants.colSyncEntityType} = ?',
+      whereArgs: [entityType],
+      orderBy: '${DbConstants.colSyncFailedAt} ASC',
+    );
+    return rows.map(PendingSyncOperation.fromMap).toList();
+  }
+
   Future<void> deleteById(int id) async {
     final db = await _db;
     await db.delete(
       DbConstants.tablePendingSync,
       where: '${DbConstants.colSyncId} = ?',
       whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteByEntity({
+    required String entityType,
+    required String entityUuid,
+  }) async {
+    final db = await _db;
+    await db.delete(
+      DbConstants.tablePendingSync,
+      where:
+          '${DbConstants.colSyncEntityType} = ? AND '
+          '${DbConstants.colSyncEntityUuid} = ?',
+      whereArgs: [entityType, entityUuid],
+    );
+  }
+
+  Future<void> deleteByEntityType(String entityType) async {
+    final db = await _db;
+    await db.delete(
+      DbConstants.tablePendingSync,
+      where: '${DbConstants.colSyncEntityType} = ?',
+      whereArgs: [entityType],
     );
   }
 }

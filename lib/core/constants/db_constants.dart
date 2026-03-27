@@ -4,10 +4,8 @@ class DbConstants {
 
   static const String dbName = 'ikeep.db';
 
-  /// v15 — adds explicit item event timestamps:
-  /// - last_updated_at for non-location edits
-  /// - last_moved_at for actual location changes
-  static const int dbVersion = 15;
+  /// v20 — adds persistent cloud usage snapshots for quota/accounting.
+  static const int dbVersion = 21;
 
   // households
   static const String tableHouseholds = 'households';
@@ -124,4 +122,102 @@ class DbConstants {
   static const String colSyncEntityUuid = 'entity_uuid';
   static const String colSyncPayload = 'payload'; // JSON
   static const String colSyncFailedAt = 'failed_at'; // Unix ms
+
+  // media_cache_entries
+  static const String tableMediaCache = 'media_cache_entries';
+  static const String colMediaCacheKey = 'cache_key';
+  static const String colMediaCacheType = 'media_type';
+  static const String colMediaStoragePath = 'storage_path';
+  static const String colMediaVersion = 'version';
+  static const String colMediaContentHash = 'content_hash';
+  static const String colMediaLocalFilePath = 'local_file_path';
+  static const String colMediaMimeType = 'mime_type';
+  static const String colMediaByteSize = 'byte_size';
+  static const String colMediaCreatedAt = 'created_at';
+  static const String colMediaLastAccessedAt = 'last_accessed_at';
+
+  // item_cloud_media_references
+  static const String tableItemCloudMedia = 'item_cloud_media_references';
+  static const String colItemCloudMediaItemUuid = 'item_uuid';
+  static const String colItemCloudMediaRole = 'media_role';
+  static const String colItemCloudMediaSlotIndex = 'slot_index';
+  static const String colItemCloudMediaStoragePath = 'storage_path';
+  static const String colItemCloudMediaThumbnailPath = 'thumbnail_path';
+  static const String colItemCloudMediaMimeType = 'mime_type';
+  static const String colItemCloudMediaByteSize = 'byte_size';
+  static const String colItemCloudMediaContentHash = 'content_hash';
+  static const String colItemCloudMediaVersion = 'version';
+  static const String colItemCloudMediaUpdatedAt = 'updated_at';
+
+  // sync_checkpoints
+  static const String tableSyncCheckpoints = 'sync_checkpoints';
+  static const String colSyncCheckpointScope = 'sync_scope';
+  static const String colSyncCheckpointHouseholdId = 'household_id';
+  static const String colSyncCheckpointLastPullAt = 'last_successful_pull_at';
+  static const String colSyncCheckpointLastPushAt = 'last_successful_push_at';
+  static const String colSyncCheckpointLastFullSyncAt = 'last_full_sync_at';
+  static const String colSyncCheckpointRemoteCursor =
+      'last_known_remote_checkpoint';
+  static const String colSyncCheckpointUpdatedAt = 'updated_at';
+
+  // cloud_usage_snapshots
+  static const String tableCloudUsageSnapshots = 'cloud_usage_snapshots';
+  static const String colCloudUsageScope = 'usage_scope';
+  static const String colCloudUsageHouseholdId = 'household_id';
+  static const String colCloudUsagePlanMode = 'plan_mode';
+  static const String colCloudUsageBackedUpItemCount = 'backed_up_item_count';
+  static const String colCloudUsageTotalImageCount = 'total_image_count';
+  static const String colCloudUsageTotalPdfCount = 'total_pdf_count';
+  static const String colCloudUsageTotalStoredBytes = 'total_stored_bytes';
+  static const String colCloudUsageHouseholdMemberCount =
+      'household_member_count';
+  static const String colCloudUsageUpdatedAt = 'updated_at';
+
+  // cloud_observation_metrics
+  static const String tableCloudObservationMetrics =
+      'cloud_observation_metrics';
+  static const String colCloudObservationScope = 'observation_scope';
+  static const String colCloudObservationPlanMode = 'plan_mode';
+  static const String colCloudObservationRestoreCount = 'restore_count';
+  static const String colCloudObservationRestoreBurstCount =
+      'restore_burst_count';
+  static const String colCloudObservationFullMediaHydrationCount =
+      'full_media_hydration_count';
+  static const String colCloudObservationMetadataOnlyRestoreCount =
+      'metadata_only_restore_count';
+  static const String colCloudObservationThumbnailDownloadCount =
+      'thumbnail_download_count';
+  static const String colCloudObservationFullImageDownloadCount =
+      'full_image_download_count';
+  static const String colCloudObservationPdfDownloadCount =
+      'pdf_download_count';
+  static const String colCloudObservationEstimatedDownloadBytes =
+      'estimated_download_bytes';
+  static const String colCloudObservationEstimatedUploadBytes =
+      'estimated_upload_bytes';
+  static const String colCloudObservationRepeatedSyncCount =
+      'repeated_sync_count';
+  static const String colCloudObservationLastRestoreAt = 'last_restore_at';
+  static const String colCloudObservationLastHeavyDownloadAt =
+      'last_heavy_download_at';
+  static const String colCloudObservationLastSyncAt = 'last_sync_at';
+  static const String colCloudObservationUpdatedAt = 'updated_at';
+
+  // cloud_media_observation_activity
+  static const String tableCloudMediaObservation =
+      'cloud_media_observation_activity';
+  static const String colCloudMediaObservationKey = 'activity_key';
+  static const String colCloudMediaObservationType = 'media_type';
+  static const String colCloudMediaObservationStoragePath = 'storage_path';
+  static const String colCloudMediaObservationVersion = 'version';
+  static const String colCloudMediaObservationContentHash = 'content_hash';
+  static const String colCloudMediaObservationDownloadCount = 'download_count';
+  static const String colCloudMediaObservationTotalDownloadedBytes =
+      'total_downloaded_bytes';
+  static const String colCloudMediaObservationLastDownloadedBytes =
+      'last_downloaded_bytes';
+  static const String colCloudMediaObservationCreatedAt = 'created_at';
+  static const String colCloudMediaObservationLastDownloadedAt =
+      'last_downloaded_at';
+  static const String colCloudMediaObservationUpdatedAt = 'updated_at';
 }

@@ -30,6 +30,24 @@ class HouseholdMemberDao {
     return rows.map(HouseholdMember.fromMap).toList();
   }
 
+  Future<int> countMembersForHousehold(String householdId) async {
+    final db = await _db;
+    final trimmedHouseholdId = householdId.trim();
+    if (trimmedHouseholdId.isEmpty) {
+      return 0;
+    }
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS count
+      FROM ${DbConstants.tableHouseholdMembers}
+      WHERE ${DbConstants.colMemberHouseholdUuid} = ?
+      ''',
+      [trimmedHouseholdId],
+    );
+    return (rows.first['count'] as int?) ?? 0;
+  }
+
   Future<void> replaceAllMembers(List<HouseholdMember> members) async {
     final db = await _db;
     await db.transaction((txn) async {

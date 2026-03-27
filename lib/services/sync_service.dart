@@ -7,8 +7,17 @@ import '../domain/models/sync_status.dart';
 abstract class SyncService {
   Future<SyncResult> syncItem(Item item);
   Future<SyncResult> syncLocation(LocationModel location);
-  Future<SyncResult> deleteRemoteItem(String uuid);
+  Future<SyncResult> deleteRemoteItem(
+    String uuid, {
+    String reason = 'deleted',
+  });
   Future<SyncResult> deleteRemoteLocation(String uuid);
+
+  /// Performs the default personal-backup sync path.
+  ///
+  /// Phase 5A makes this delta-first with safe fallback to [fullSync()] when
+  /// checkpoints are missing, stale, or otherwise unsafe.
+  Future<SyncResult> syncAll();
 
   /// Performs a full bidirectional sync (pull remote → push local changes).
   Future<SyncResult> fullSync();

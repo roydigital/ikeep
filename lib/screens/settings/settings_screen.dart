@@ -10,8 +10,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/feature_limits.dart';
 import '../../domain/models/item.dart';
+import '../../domain/models/cloud_entitlement.dart';
 import '../../domain/models/sync_status.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/home_tour_provider.dart';
@@ -26,6 +28,7 @@ import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
+import 'cloud_diagnostics_screen.dart';
 
 const _kAccent = AppColors.primary;
 
@@ -351,7 +354,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     _enableRemoteSyncMetadataNow();
     ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
-    final result = await ref.read(syncServiceProvider).fullSync();
+    final result = await ref.read(syncServiceProvider).syncAll();
     ref.read(syncStatusProvider.notifier).state = result;
     ref.invalidate(lastSyncedAtProvider);
     ref.invalidate(allItemsProvider);
@@ -470,6 +473,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SnackBar(content: Text('Failed to export data')),
       );
     }
+  }
+
+  Future<void> _openCloudDiagnostics() async {
+    final planMode = ref.read(cloudEntitlementModeProvider);
+    if (planMode != CloudEntitlementMode.closedTestingFreeAccess) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return const FractionallySizedBox(
+          heightFactor: 0.94,
+          child: CloudDiagnosticsPanel(),
+        );
+      },
+    );
   }
 
   void _showInfo(String message) {
@@ -682,11 +705,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ),
                             const SizedBox(height: 52),
                             Center(
-                              child: Text(
-                                'Ikeep Version 2.4.0 (b892)',
-                                style: TextStyle(
-                                  color: _kTextMuted,
-                                  fontSize: 12,
+                              child: GestureDetector(
+                                onLongPress: _openCloudDiagnostics,
+                                child: Text(
+                                  AppConstants.buildLabel,
+                                  style: TextStyle(
+                                    color: _kTextMuted,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
                             ),

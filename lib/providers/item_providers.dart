@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart' show listEquals;
-import '../core/constants/feature_limits.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/fuzzy_search.dart';
@@ -11,6 +10,7 @@ import 'database_provider.dart';
 import '../domain/models/sync_status.dart';
 import 'location_providers.dart';
 import 'repository_providers.dart';
+import '../services/invoice_service.dart';
 import 'service_providers.dart';
 import 'settings_provider.dart';
 import 'sync_providers.dart';
@@ -235,6 +235,9 @@ final searchResultsProvider =
 // ── Notifier for mutations ────────────────────────────────────────────────────
 
 class ItemsNotifier extends StateNotifier<bool> {
+  static const _deleteReasonDeleted = 'deleted';
+  static const _deleteReasonBackupDisabled = 'backup_disabled';
+
   ItemsNotifier(this._ref) : super(false);
 
   final Ref _ref;
@@ -393,14 +396,16 @@ class ItemsNotifier extends StateNotifier<bool> {
     final failure = await _ref.read(itemRepositoryProvider).deleteItem(uuid);
     if (failure != null) return failure.message;
 
-    await _syncDeleteItem(uuid);
+    if (existingItem != null && _hasRemoteBackup(existingItem)) {
+      await _syncDeleteItem(
+        uuid,
+        reason: _deleteReasonDeleted,
+      );
+    }
 
     final invoicePath = existingItem?.invoicePath?.trim();
     if (invoicePath != null &&
-        invoicePath.isNotEmpty &&
-        !invoicePath.startsWith('http://') &&
-        !invoicePath.startsWith('https://') &&
-        !invoicePath.startsWith('gs://')) {
+        InvoiceService.isSafeLocalInvoicePath(invoicePath)) {
       await _ref.read(invoiceServiceProvider).deleteInvoice(invoicePath);
     }
 
@@ -456,6 +461,7 @@ class ItemsNotifier extends StateNotifier<bool> {
       if (hadRemoteBackup) {
         final deleteResult = await _syncDeleteItem(
           item.uuid,
+          reason: _deleteReasonBackupDisabled,
           fallbackStatus: fallbackStatus,
           publishErrorsToStatus: publishErrorsToStatus,
         );
@@ -508,10 +514,14 @@ class ItemsNotifier extends StateNotifier<bool> {
 
   Future<SyncResult> _syncDeleteItem(
     String uuid, {
+    String reason = _deleteReasonDeleted,
     SyncResult? fallbackStatus,
     bool publishErrorsToStatus = true,
   }) async {
-    final result = await _ref.read(syncServiceProvider).deleteRemoteItem(uuid);
+    final result = await _ref.read(syncServiceProvider).deleteRemoteItem(
+          uuid,
+          reason: reason,
+        );
     publishSyncResult(
       _ref,
       result,
@@ -533,8 +543,10 @@ class ItemsNotifier extends StateNotifier<bool> {
       return null;
     }
 
-    final backedUpCount = await _ref.read(backedUpItemsCountProvider.future);
-    if (backedUpCount <= cloudBackupLimit) {
+    final evaluation = await _ref
+        .read(cloudQuotaServiceProvider)
+        .evaluatePersonalItemWrite(item);
+    if (evaluation.allowedNow) {
       return null;
     }
 
@@ -547,7 +559,7 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(item.uuid));
-    return cloudBackupQuotaExceededError();
+    return evaluation.message;
   }
 
   void _scheduleCloudSync({
@@ -564,7 +576,11 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     unawaited(() async {
       if (needsDelete) {
-        await _syncDeleteItem(item.uuid, fallbackStatus: previousStatus);
+        await _syncDeleteItem(
+          item.uuid,
+          reason: _deleteReasonBackupDisabled,
+          fallbackStatus: previousStatus,
+        );
       } else {
         await _syncItemToCloud(item, fallbackStatus: previousStatus);
       }
@@ -643,7 +659,12 @@ class ItemsNotifier extends StateNotifier<bool> {
   }
 
   bool _isCloudQuotaExceeded(String? message) {
-    return (message ?? '').contains('Cloud quota exceeded');
+    final normalized = (message ?? '').toLowerCase();
+    return normalized.contains('cloud quota exceeded') ||
+        normalized.contains('future paid-plan item limit') ||
+        normalized.contains('image-per-item limit') ||
+        normalized.contains('pdf-per-item limit') ||
+        normalized.contains('household cap');
   }
 
   bool _hasRemoteBackup(Item? item) {

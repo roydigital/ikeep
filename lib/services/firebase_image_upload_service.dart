@@ -3,9 +3,12 @@ import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
+import '../core/constants/feature_limits.dart';
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
+import '../domain/models/cloud_media_descriptor.dart';
 import 'image_optimizer_service.dart';
 
 /// The result of uploading all images for one item.
@@ -21,6 +24,7 @@ class ImageUploadResult {
   const ImageUploadResult({
     required this.downloadUrls,
     required this.storagePaths,
+    this.mediaDescriptors = const [],
   });
 
   /// HTTPS download URLs — fast to display, may become stale over time.
@@ -28,6 +32,9 @@ class ImageUploadResult {
 
   /// Firebase Storage object paths — durable, use to refresh stale URLs.
   final List<String> storagePaths;
+
+  /// Lightweight metadata for each uploaded/reused image object.
+  final List<CloudMediaDescriptor> mediaDescriptors;
 
   /// Returns true if at least one image was successfully uploaded/resolved.
   bool get hasImages => downloadUrls.isNotEmpty;
@@ -47,8 +54,6 @@ class FirebaseImageUploadService {
   final FirebaseStorage _storage;
   final ImageOptimizerService _optimizer;
   final Map<String, _CachedUpload> _uploadCache = {};
-  static const String _sourceModifiedMsKey = 'sourceModifiedMs';
-  static const String _sourceBytesKey = 'sourceBytes';
 
   /// Timeouts for individual Firebase Storage operations.
   static const _putFileTimeout = Duration(seconds: 60);
@@ -78,6 +83,12 @@ class FirebaseImageUploadService {
       return const ImageUploadResult(downloadUrls: [], storagePaths: []);
     }
 
+    if (imagePaths.length > itemPhotoLimit) {
+      throw StateError(
+        'Items can back up at most $itemPhotoLimit images.',
+      );
+    }
+
     // Process each image slot in parallel using Future.wait.
     final futures = <Future<_UploadSlotResult>>[];
     for (var index = 0; index < imagePaths.length; index++) {
@@ -92,6 +103,7 @@ class FirebaseImageUploadService {
 
     final downloadUrls = <String>[];
     final storagePaths = <String>[];
+    final mediaDescriptors = <CloudMediaDescriptor>[];
     final keepStoragePaths = <String>{};
 
     for (final result in results) {
@@ -101,6 +113,13 @@ class FirebaseImageUploadService {
       if (result.storagePath != null) {
         storagePaths.add(result.storagePath!);
         keepStoragePaths.add(result.storagePath!);
+      }
+      if (result.mediaDescriptor != null) {
+        mediaDescriptors.add(result.mediaDescriptor!);
+        final thumbnailPath = result.mediaDescriptor!.thumbnailPath;
+        if (thumbnailPath != null && thumbnailPath.trim().isNotEmpty) {
+          keepStoragePaths.add(thumbnailPath);
+        }
       }
     }
 
@@ -120,6 +139,7 @@ class FirebaseImageUploadService {
     return ImageUploadResult(
       downloadUrls: downloadUrls,
       storagePaths: storagePaths,
+      mediaDescriptors: mediaDescriptors,
     );
   }
 
@@ -217,6 +237,9 @@ class FirebaseImageUploadService {
     // storage path so we can store it as the canonical durable reference.
     if (PathUtils.isRemotePath(path)) {
       final fullPath = _tryResolveStoragePath(path);
+      final descriptor = fullPath == null
+          ? null
+          : await _descriptorFromStoragePath(fullPath);
       // If it's a gs:// URI, get a fresh download URL.
       if (path.trim().toLowerCase().startsWith('gs://')) {
         try {
@@ -230,6 +253,7 @@ class FirebaseImageUploadService {
           return _UploadSlotResult(
             downloadUrl: downloadUrl,
             storagePath: fullPath,
+            mediaDescriptor: descriptor,
           );
         } catch (e) {
           if (!_isMissingObjectError(e)) {
@@ -242,7 +266,11 @@ class FirebaseImageUploadService {
       }
       // HTTPS URL — return as-is with its storage path for future refresh.
       debugPrint('[IkeepUpload] slot $index: already a remote URL, skipping upload');
-      return _UploadSlotResult(downloadUrl: path, storagePath: fullPath);
+      return _UploadSlotResult(
+        downloadUrl: path,
+        storagePath: fullPath,
+        mediaDescriptor: descriptor,
+      );
     }
 
     debugPrint('[IkeepUpload] slot $index: local file selected → $path');
@@ -298,6 +326,7 @@ class FirebaseImageUploadService {
       return _UploadSlotResult(
         downloadUrl: cached.downloadUrl,
         storagePath: cached.fullPath,
+        mediaDescriptor: cached.mediaDescriptor,
       );
     }
 
@@ -312,6 +341,7 @@ class FirebaseImageUploadService {
       return _UploadSlotResult(
         downloadUrl: reused.downloadUrl,
         storagePath: reused.fullPath,
+        mediaDescriptor: reused.mediaDescriptor,
       );
     }
 
@@ -319,7 +349,13 @@ class FirebaseImageUploadService {
     debugPrint(
       '[IkeepUpload] slot $index: optimizing image for upload → $storagePath',
     );
-    final optimized = await _optimizer.optimizeForUpload(path);
+    final optimizedBundle = await _optimizer.optimizeForCloudUpload(path);
+    final optimized = optimizedBundle.fullImage;
+    final optimizedBytes = await optimized.file.readAsBytes();
+    final contentHash = CloudMediaHashing.hashBytes(optimizedBytes);
+    final version = localFileState.modifiedMs;
+    final updatedAt = DateTime.now().toUtc();
+    String? thumbnailPath;
     debugPrint(
       '[IkeepUpload] slot $index: optimized to ${optimized.byteSize} bytes '
       '(${optimized.contentType}) — starting putFile',
@@ -329,12 +365,21 @@ class FirebaseImageUploadService {
         optimized.file,
         SettableMetadata(
           contentType: optimized.contentType,
-          cacheControl: 'public,max-age=31536000',
+          cacheControl: StorageConstants.firebaseLongLivedCacheControl,
           customMetadata: {
             'optimized': 'true',
             'optimizedBytes': optimized.byteSize.toString(),
-            _sourceModifiedMsKey: localFileState.modifiedMs.toString(),
-            _sourceBytesKey: localFileState.byteSize.toString(),
+            StorageConstants.sourceModifiedMsMetadataKey:
+                localFileState.modifiedMs.toString(),
+            StorageConstants.sourceBytesMetadataKey:
+                localFileState.byteSize.toString(),
+            StorageConstants.contentHashMetadataKey: contentHash,
+            StorageConstants.versionMetadataKey: version.toString(),
+            StorageConstants.updatedAtMetadataKey:
+                updatedAt.toIso8601String(),
+            StorageConstants.byteSizeMetadataKey:
+                optimized.byteSize.toString(),
+            StorageConstants.mimeTypeMetadataKey: optimized.contentType,
           },
         ),
       ).timeout(_putFileTimeout, onTimeout: () {
@@ -355,13 +400,31 @@ class FirebaseImageUploadService {
         },
       );
       debugPrint('[IkeepUpload] slot $index: download URL received');
+      thumbnailPath = await _uploadThumbnail(
+        imageRef: ref,
+        thumbnail: optimizedBundle.thumbnail,
+        localFileState: localFileState,
+        version: version,
+        updatedAt: updatedAt,
+      );
+      final descriptor = CloudMediaDescriptor(
+        storagePath: ref.fullPath,
+        thumbnailPath: thumbnailPath,
+        mimeType: optimized.contentType,
+        byteSize: optimized.byteSize,
+        contentHash: contentHash,
+        version: version,
+        updatedAt: updatedAt,
+      );
       _uploadCache[cacheKey] = _CachedUpload(
         fullPath: ref.fullPath,
         downloadUrl: downloadUrl,
+        mediaDescriptor: descriptor,
       );
       return _UploadSlotResult(
         downloadUrl: downloadUrl,
         storagePath: ref.fullPath,
+        mediaDescriptor: descriptor,
       );
     } catch (e) {
       // Do NOT swallow putFile errors with _isMissingObjectError — that check
@@ -380,6 +443,11 @@ class FirebaseImageUploadService {
       rethrow;
     } finally {
       await _safeDelete(optimized.file);
+      final thumbnailFile = optimizedBundle.thumbnail?.file;
+      if (thumbnailFile != null &&
+          thumbnailFile.path != optimized.file.path) {
+        await _safeDelete(thumbnailFile);
+      }
     }
   }
 
@@ -486,7 +554,7 @@ class FirebaseImageUploadService {
   }
 
   String _itemFolder(String userId, String itemUuid) {
-    return '${StorageConstants.firebaseItemImagesRoot}/$userId/items/$itemUuid';
+    return '${StorageConstants.firebaseItemImagesRoot}/$userId/${StorageConstants.firebaseItemsSegment}/$itemUuid';
   }
 
   String _storagePathFor({
@@ -521,6 +589,10 @@ class FirebaseImageUploadService {
       final cached = _CachedUpload(
         fullPath: ref.fullPath,
         downloadUrl: downloadUrl,
+        mediaDescriptor: await _descriptorFromMetadata(
+          ref: ref,
+          metadata: metadata,
+        ),
       );
       if (cacheKey != null) {
         _uploadCache[cacheKey] = cached;
@@ -549,6 +621,7 @@ class FirebaseImageUploadService {
       return _UploadSlotResult(
         downloadUrl: downloadUrl,
         storagePath: preferredRef.fullPath,
+        mediaDescriptor: await _descriptorFromReference(preferredRef),
       );
     } catch (e) {
       if (!_isMissingObjectError(e)) {
@@ -574,6 +647,7 @@ class FirebaseImageUploadService {
           return _UploadSlotResult(
             downloadUrl: downloadUrl,
             storagePath: candidate.fullPath,
+            mediaDescriptor: await _descriptorFromReference(candidate),
           );
         } catch (e) {
           if (!_isMissingObjectError(e)) {
@@ -644,7 +718,10 @@ class FirebaseImageUploadService {
     try {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
       final list = await folder.listAll().timeout(_listAllTimeout);
-      final refs = [...list.items]..sort(_compareStorageRefsBySlot);
+      final refs = list.items
+          .where((ref) => !_isThumbnailPath(ref.fullPath))
+          .toList(growable: false)
+        ..sort(_compareStorageRefsBySlot);
 
       final urls = <String>[];
       for (final ref in refs) {
@@ -694,9 +771,150 @@ class FirebaseImageUploadService {
     final customMetadata = metadata.customMetadata;
     if (customMetadata == null) return false;
 
-    return customMetadata[_sourceModifiedMsKey] ==
+    return customMetadata[StorageConstants.sourceModifiedMsMetadataKey] ==
             localFileState.modifiedMs.toString() &&
-        customMetadata[_sourceBytesKey] == localFileState.byteSize.toString();
+        customMetadata[StorageConstants.sourceBytesMetadataKey] ==
+            localFileState.byteSize.toString();
+  }
+
+  Future<CloudMediaDescriptor?> _descriptorFromStoragePath(
+    String storagePath,
+  ) async {
+    try {
+      final ref = storagePath.toLowerCase().startsWith('gs://')
+          ? _storage.refFromURL(storagePath)
+          : _storage.ref().child(storagePath);
+      return _descriptorFromReference(ref);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<CloudMediaDescriptor?> _descriptorFromReference(Reference ref) async {
+    try {
+      final metadata = await ref.getMetadata().timeout(_getMetadataTimeout);
+      return _descriptorFromMetadata(ref: ref, metadata: metadata);
+    } catch (e) {
+      if (_isMissingObjectError(e)) {
+        return null;
+      }
+      debugPrint(
+        'FirebaseImageUploadService: descriptor lookup failed for ${ref.fullPath}: $e',
+      );
+      return null;
+    }
+  }
+
+  Future<CloudMediaDescriptor> _descriptorFromMetadata({
+    required Reference ref,
+    required FullMetadata metadata,
+  }) async {
+    final customMetadata = metadata.customMetadata ?? const {};
+    final updatedAt =
+        _parseDateTime(customMetadata[StorageConstants.updatedAtMetadataKey]) ??
+            metadata.updated ??
+            DateTime.now().toUtc();
+    final version = int.tryParse(
+          customMetadata[StorageConstants.versionMetadataKey] ?? '',
+        ) ??
+        updatedAt.millisecondsSinceEpoch;
+    final byteSize = int.tryParse(
+          customMetadata[StorageConstants.byteSizeMetadataKey] ?? '',
+        ) ??
+        metadata.size ??
+        0;
+
+    return CloudMediaDescriptor(
+      storagePath: ref.fullPath,
+      thumbnailPath: await _resolveExistingThumbnailPath(ref.fullPath),
+      mimeType: customMetadata[StorageConstants.mimeTypeMetadataKey] ??
+          metadata.contentType ??
+          _optimizer.preferredContentType,
+      byteSize: byteSize,
+      contentHash: customMetadata[StorageConstants.contentHashMetadataKey],
+      version: version <= 0 ? 1 : version,
+      updatedAt: updatedAt,
+    );
+  }
+
+  DateTime? _parseDateTime(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    return DateTime.tryParse(value)?.toUtc();
+  }
+
+  Future<String?> _uploadThumbnail({
+    required Reference imageRef,
+    required OptimizedImageResult? thumbnail,
+    required _LocalFileState localFileState,
+    required int version,
+    required DateTime updatedAt,
+  }) async {
+    if (thumbnail == null) return null;
+
+    final thumbnailStoragePath = _thumbnailStoragePathFor(imageRef.fullPath);
+    final thumbRef = _storage.ref().child(thumbnailStoragePath);
+
+    try {
+      final thumbnailBytes = await thumbnail.file.readAsBytes();
+      final thumbnailHash = CloudMediaHashing.hashBytes(thumbnailBytes);
+      await thumbRef.putFile(
+        thumbnail.file,
+        SettableMetadata(
+          contentType: thumbnail.contentType,
+          cacheControl: StorageConstants.firebaseLongLivedCacheControl,
+          customMetadata: {
+            StorageConstants.sourceModifiedMsMetadataKey:
+                localFileState.modifiedMs.toString(),
+            StorageConstants.sourceBytesMetadataKey:
+                localFileState.byteSize.toString(),
+            StorageConstants.contentHashMetadataKey: thumbnailHash,
+            StorageConstants.versionMetadataKey: version.toString(),
+            StorageConstants.updatedAtMetadataKey:
+                updatedAt.toIso8601String(),
+            StorageConstants.byteSizeMetadataKey:
+                thumbnail.byteSize.toString(),
+            StorageConstants.mimeTypeMetadataKey: thumbnail.contentType,
+          },
+        ),
+      ).timeout(_putFileTimeout);
+      return thumbRef.fullPath;
+    } catch (error) {
+      debugPrint(
+        '[IkeepUpload] thumbnail upload failed for ${imageRef.fullPath}: $error',
+      );
+      return null;
+    }
+  }
+
+  Future<String?> _resolveExistingThumbnailPath(String imageStoragePath) async {
+    final thumbnailStoragePath = _thumbnailStoragePathFor(imageStoragePath);
+    final thumbRef = _storage.ref().child(thumbnailStoragePath);
+
+    try {
+      await thumbRef.getMetadata().timeout(_getMetadataTimeout);
+      return thumbRef.fullPath;
+    } catch (error) {
+      if (!_isMissingObjectError(error)) {
+        debugPrint(
+          'FirebaseImageUploadService: thumbnail lookup failed for $thumbnailStoragePath: $error',
+        );
+      }
+      return null;
+    }
+  }
+
+  String _thumbnailStoragePathFor(String imageStoragePath) {
+    final extension = p.extension(imageStoragePath);
+    final baseName = p.basenameWithoutExtension(imageStoragePath);
+    final directory = p.dirname(imageStoragePath).replaceAll('\\', '/');
+    final resolvedExtension =
+        extension.isEmpty ? _optimizer.preferredUploadExtension : extension;
+    return '$directory/$baseName${StorageConstants.firebaseThumbnailSuffix}$resolvedExtension';
+  }
+
+  bool _isThumbnailPath(String storagePath) {
+    final fileName = p.basenameWithoutExtension(storagePath);
+    return fileName.endsWith(StorageConstants.firebaseThumbnailSuffix);
   }
 
   Future<_LocalFileState?> _localFileState(String localPath) async {
@@ -731,20 +949,27 @@ class FirebaseImageUploadService {
 }
 
 class _UploadSlotResult {
-  const _UploadSlotResult({this.downloadUrl, this.storagePath});
+  const _UploadSlotResult({
+    this.downloadUrl,
+    this.storagePath,
+    this.mediaDescriptor,
+  });
 
   final String? downloadUrl;
   final String? storagePath;
+  final CloudMediaDescriptor? mediaDescriptor;
 }
 
 class _CachedUpload {
   const _CachedUpload({
     required this.fullPath,
     required this.downloadUrl,
+    required this.mediaDescriptor,
   });
 
   final String fullPath;
   final String downloadUrl;
+  final CloudMediaDescriptor mediaDescriptor;
 }
 
 class _LocalFileState {
