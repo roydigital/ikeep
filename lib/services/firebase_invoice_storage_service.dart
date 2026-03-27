@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -62,6 +63,11 @@ class FirebaseInvoiceStorageService {
 
   final FirebaseStorage _storage;
   final PdfOptimizerService _pdfOptimizer;
+
+  static const _putFileTimeout = Duration(seconds: 90);
+  static const _getUrlTimeout = Duration(seconds: 15);
+  static const _listAllTimeout = Duration(seconds: 15);
+  static const _getMetadataTimeout = Duration(seconds: 10);
 
   /// Uploads [invoicePath] (a local file path) to Firebase Storage and
   /// returns a [StoredInvoiceFile] with both the HTTPS download URL and the
@@ -178,7 +184,12 @@ class FirebaseInvoiceStorageService {
           'compressionApplied': compressionApplied.toString(),
         },
       ),
-    );
+    ).timeout(_putFileTimeout, onTimeout: () {
+      throw TimeoutException(
+        'Invoice putFile timed out after ${_putFileTimeout.inSeconds}s '
+        'for $itemUuid',
+      );
+    });
     debugPrint('[IkeepInvoice] Invoice putFile SUCCESS → fetching download URL');
 
     await _pruneUnexpectedInvoices(
@@ -187,7 +198,7 @@ class FirebaseInvoiceStorageService {
       keepStoragePath: ref.fullPath,
     );
 
-    final downloadUrl = await ref.getDownloadURL();
+    final downloadUrl = await ref.getDownloadURL().timeout(_getUrlTimeout);
     debugPrint('[IkeepInvoice] Invoice download URL received');
 
     return StoredInvoiceFile(
@@ -224,8 +235,8 @@ class FirebaseInvoiceStorageService {
         final ref = storagePath.toLowerCase().startsWith('gs://')
             ? _storage.refFromURL(storagePath)
             : _storage.ref().child(storagePath);
-        final freshUrl = await ref.getDownloadURL();
-        final metadata = await ref.getMetadata();
+        final freshUrl = await ref.getDownloadURL().timeout(_getUrlTimeout);
+        final metadata = await ref.getMetadata().timeout(_getMetadataTimeout);
         final name = invoiceFileName?.trim().isNotEmpty == true
             ? invoiceFileName!.trim()
             : metadata.customMetadata?['originalFileName'] ??
@@ -274,7 +285,7 @@ class FirebaseInvoiceStorageService {
   }) async {
     try {
       final folder = _storage.ref().child(_invoiceFolder(userId, itemUuid));
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       await Future.wait(list.items.map((ref) async {
         try {
           await ref.delete();
@@ -294,7 +305,7 @@ class FirebaseInvoiceStorageService {
   }) async {
     try {
       final folder = _storage.ref().child(_invoiceFolder(userId, itemUuid));
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       final staleRefs = list.items
           .where((ref) => ref.fullPath != keepStoragePath)
           .toList(growable: false);
@@ -324,9 +335,9 @@ class FirebaseInvoiceStorageService {
       final refs = [...list.items]
         ..sort((a, b) => a.fullPath.compareTo(b.fullPath));
       final ref = refs.first;
-      final metadata = await ref.getMetadata();
+      final metadata = await ref.getMetadata().timeout(_getMetadataTimeout);
       return StoredInvoiceFile(
-        path: await ref.getDownloadURL(),
+        path: await ref.getDownloadURL().timeout(_getUrlTimeout),
         fileName: fallbackFileName?.trim().isNotEmpty == true
             ? fallbackFileName!.trim()
             : metadata.customMetadata?['originalFileName'] ??
@@ -352,10 +363,17 @@ class FirebaseInvoiceStorageService {
 
     try {
       if (normalized.toLowerCase().startsWith('gs://')) {
-        return await _storage.refFromURL(normalized).getDownloadURL();
+        return await _storage
+            .refFromURL(normalized)
+            .getDownloadURL()
+            .timeout(_getUrlTimeout);
       }
       if (normalized.contains('/')) {
-        return await _storage.ref().child(normalized).getDownloadURL();
+        return await _storage
+            .ref()
+            .child(normalized)
+            .getDownloadURL()
+            .timeout(_getUrlTimeout);
       }
     } catch (error) {
       if (_isMissingObjectError(error)) {

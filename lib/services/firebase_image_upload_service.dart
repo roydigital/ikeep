@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -48,6 +49,12 @@ class FirebaseImageUploadService {
   final Map<String, _CachedUpload> _uploadCache = {};
   static const String _sourceModifiedMsKey = 'sourceModifiedMs';
   static const String _sourceBytesKey = 'sourceBytes';
+
+  /// Timeouts for individual Firebase Storage operations.
+  static const _putFileTimeout = Duration(seconds: 60);
+  static const _getUrlTimeout = Duration(seconds: 15);
+  static const _listAllTimeout = Duration(seconds: 15);
+  static const _getMetadataTimeout = Duration(seconds: 10);
 
   /// Uploads all images for [itemUuid] to Firebase Storage and returns both
   /// the HTTPS download URLs (for immediate display) and the durable Storage
@@ -213,7 +220,10 @@ class FirebaseImageUploadService {
       // If it's a gs:// URI, get a fresh download URL.
       if (path.trim().toLowerCase().startsWith('gs://')) {
         try {
-          final downloadUrl = await _storage.refFromURL(path).getDownloadURL();
+          final downloadUrl = await _storage
+              .refFromURL(path)
+              .getDownloadURL()
+              .timeout(_getUrlTimeout);
           debugPrint(
             '[IkeepUpload] slot $index resolved gs:// → downloadUrl received',
           );
@@ -327,11 +337,24 @@ class FirebaseImageUploadService {
             _sourceBytesKey: localFileState.byteSize.toString(),
           },
         ),
-      );
+      ).timeout(_putFileTimeout, onTimeout: () {
+        throw TimeoutException(
+          'Image putFile timed out after ${_putFileTimeout.inSeconds}s '
+          'for slot $index ($storagePath)',
+        );
+      });
       debugPrint('[IkeepUpload] slot $index: putFile SUCCESS → fetching download URL');
 
-      final downloadUrl = await ref.getDownloadURL();
-      debugPrint('[IkeepUpload] slot $index: download URL received ✓');
+      final downloadUrl = await ref.getDownloadURL().timeout(
+        _getUrlTimeout,
+        onTimeout: () {
+          throw TimeoutException(
+            'getDownloadURL timed out after ${_getUrlTimeout.inSeconds}s '
+            'for slot $index ($storagePath)',
+          );
+        },
+      );
+      debugPrint('[IkeepUpload] slot $index: download URL received');
       _uploadCache[cacheKey] = _CachedUpload(
         fullPath: ref.fullPath,
         downloadUrl: downloadUrl,
@@ -366,7 +389,7 @@ class FirebaseImageUploadService {
   }) async {
     try {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       // Delete all images in parallel.
       await Future.wait(list.items.map((ref) async {
         try {
@@ -391,7 +414,7 @@ class FirebaseImageUploadService {
   }) async {
     final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
     try {
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       final toDelete =
           list.items.where((ref) => !keepStoragePaths.contains(ref.fullPath));
       // Delete stale images in parallel.
@@ -429,7 +452,7 @@ class FirebaseImageUploadService {
         final ref = storagePath.toLowerCase().startsWith('gs://')
             ? _storage.refFromURL(storagePath)
             : _storage.ref().child(storagePath);
-        final url = await ref.getDownloadURL();
+        final url = await ref.getDownloadURL().timeout(_getUrlTimeout);
         urls.add(url);
       } catch (e) {
         if (_isMissingObjectError(e)) {
@@ -489,12 +512,12 @@ class FirebaseImageUploadService {
     String? cacheKey,
   }) async {
     try {
-      final metadata = await ref.getMetadata();
+      final metadata = await ref.getMetadata().timeout(_getMetadataTimeout);
       if (!_matchesLocalFile(metadata, localFileState)) {
         return null;
       }
 
-      final downloadUrl = await ref.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL().timeout(_getUrlTimeout);
       final cached = _CachedUpload(
         fullPath: ref.fullPath,
         downloadUrl: downloadUrl,
@@ -521,7 +544,8 @@ class FirebaseImageUploadService {
     required Reference preferredRef,
   }) async {
     try {
-      final downloadUrl = await preferredRef.getDownloadURL();
+      final downloadUrl =
+          await preferredRef.getDownloadURL().timeout(_getUrlTimeout);
       return _UploadSlotResult(
         downloadUrl: downloadUrl,
         storagePath: preferredRef.fullPath,
@@ -537,7 +561,7 @@ class FirebaseImageUploadService {
 
     try {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       final filePrefix = 'image_$index.';
 
       for (final candidate in list.items) {
@@ -545,7 +569,8 @@ class FirebaseImageUploadService {
         if (!fileName.startsWith(filePrefix)) continue;
 
         try {
-          final downloadUrl = await candidate.getDownloadURL();
+          final downloadUrl =
+              await candidate.getDownloadURL().timeout(_getUrlTimeout);
           return _UploadSlotResult(
             downloadUrl: downloadUrl,
             storagePath: candidate.fullPath,
@@ -579,7 +604,10 @@ class FirebaseImageUploadService {
 
     if (normalizedPath.startsWith('gs://')) {
       try {
-        return await _storage.refFromURL(trimmedPath).getDownloadURL();
+        return await _storage
+            .refFromURL(trimmedPath)
+            .getDownloadURL()
+            .timeout(_getUrlTimeout);
       } catch (e) {
         if (!_isMissingObjectError(e)) {
           debugPrint(
@@ -592,7 +620,11 @@ class FirebaseImageUploadService {
 
     if (trimmedPath.contains('/')) {
       try {
-        return await _storage.ref().child(trimmedPath).getDownloadURL();
+        return await _storage
+            .ref()
+            .child(trimmedPath)
+            .getDownloadURL()
+            .timeout(_getUrlTimeout);
       } catch (e) {
         if (!_isMissingObjectError(e)) {
           debugPrint(
@@ -611,13 +643,13 @@ class FirebaseImageUploadService {
   }) async {
     try {
       final folder = _storage.ref().child(_itemFolder(userId, itemUuid));
-      final list = await folder.listAll();
+      final list = await folder.listAll().timeout(_listAllTimeout);
       final refs = [...list.items]..sort(_compareStorageRefsBySlot);
 
       final urls = <String>[];
       for (final ref in refs) {
         try {
-          urls.add(await ref.getDownloadURL());
+          urls.add(await ref.getDownloadURL().timeout(_getUrlTimeout));
         } catch (e) {
           if (!_isMissingObjectError(e)) {
             debugPrint(

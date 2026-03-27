@@ -193,19 +193,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final syncResult =
             await ref.read(autoRestoreProvider.notifier).syncAfterSignIn();
         if (!mounted) return;
-        if (syncResult.isSuccess) {
-          _showInfo(
-            syncResult.partialFailure
-                ? 'Signed in. Cloud backup synced with some attachment issues'
-                : 'Signed in and cloud backup synced',
-          );
-        } else if (syncResult.isSyncing) {
+        if (syncResult.isSyncing) {
           _showInfo('Signed in. Your cloud backup is syncing now');
         } else {
-          _showInfo(
-            syncResult.errorMessage ??
-                'Signed in, but cloud backup sync failed',
-          );
+          _showInfo('Signed in. ${_syncResultMessage(syncResult)}');
         }
       }
     } catch (e, st) {
@@ -338,6 +329,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _runSync() async {
+    // Prevent double-sync if auto-sync after sign-in is already running.
+    final currentStatus = ref.read(syncStatusProvider);
+    if (currentStatus.isSyncing) {
+      _showInfo('A sync is already in progress');
+      return;
+    }
+
     final auth = ref.read(firebaseAuthProvider);
     if (auth.currentUser == null) {
       _showInfo('Sign in with Google to sync your cloud backup');
@@ -362,13 +360,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(allLocationsProvider);
     ref.invalidate(rootLocationsProvider);
     if (!mounted) return;
-    final message = result.isSuccess
-        ? (result.partialFailure
-            ? 'Sync completed — some attachments could not be uploaded'
-            : 'Sync completed')
-        : (result.errorMessage ?? 'Sync failed');
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+        .showSnackBar(SnackBar(content: Text(_syncResultMessage(result))));
+  }
+
+  String _syncResultMessage(SyncResult result) {
+    if (result.isTimedOut) {
+      return 'Sync timed out — ${result.syncedItems} of '
+          '${result.totalItems} items synced';
+    }
+    if (result.hasError) {
+      return result.errorMessage ?? 'Sync failed';
+    }
+    // Success path — show counts when there were items to sync.
+    if (result.totalItems == 0) {
+      return 'Everything is up to date';
+    }
+    final buffer = StringBuffer('Sync completed');
+    if (result.failedItems > 0) {
+      buffer.write(' — ${result.syncedItems}/${result.totalItems} items synced'
+          ', ${result.failedItems} failed');
+    } else if (result.partialFailure) {
+      buffer.write(' — some attachments could not be uploaded');
+    }
+    return buffer.toString();
   }
 
   Future<void> _exportData() async {
@@ -524,11 +539,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ? 'Sign In'
         : syncStatus.isSyncing
             ? 'Syncing...'
-            : syncStatus.hasError
-                ? 'Error'
-                : hasCloudConnection
-                    ? 'Connected'
-                    : 'Ready to Sync';
+            : syncStatus.isTimedOut
+                ? 'Timed Out'
+                : syncStatus.hasError
+                    ? 'Error'
+                    : hasCloudConnection
+                        ? 'Connected'
+                        : 'Ready to Sync';
     final lastSyncedText = authUser != null && !_canLoadRemoteSyncMetadata
         ? 'Loading...'
         : _formatLastSynced(lastSynced);
@@ -646,7 +663,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 isSyncing: syncStatus.isSyncing,
                                 progress: backupEnabled ? 0.85 : 0.4,
                                 lastSyncedText: lastSyncedText,
-                                onSyncTap: _runSync,
+                                onSyncTap: syncStatus.isSyncing
+                                    ? null
+                                    : _runSync,
                                 onManageFamily: () =>
                                     context.push(AppRoutes.manageFamily),
                               ),
@@ -1484,7 +1503,7 @@ class _CloudAndFamilyCard extends StatelessWidget {
   final bool isSyncing;
   final double progress;
   final String lastSyncedText;
-  final VoidCallback onSyncTap;
+  final VoidCallback? onSyncTap;
   final VoidCallback onManageFamily;
 
   @override
@@ -1520,7 +1539,7 @@ class _CloudAndFamilyCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          isSyncing ? 'Syncing...' : 'Online Backup',
+                          'Online Backup',
                           style: TextStyle(
                             color: _kTextPrimary,
                             fontWeight: FontWeight.w700,

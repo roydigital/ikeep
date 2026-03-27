@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -98,6 +100,19 @@ class FirebaseSyncService implements SyncService {
 
   DateTime? _lastSyncedAt;
 
+  /// Prevents concurrent fullSync calls (auto sign-in sync + manual tap).
+  bool _isFullSyncRunning = false;
+
+  /// Whether a full sync is currently in progress. Exposed so callers can
+  /// guard against double-sync.
+  bool get isFullSyncRunning => _isFullSyncRunning;
+
+  /// Hard timeout for the entire fullSync operation.
+  static const _fullSyncTimeout = Duration(minutes: 5);
+
+  /// Timeout for individual item sync (images + invoice + Firestore write).
+  static const _perItemTimeout = Duration(seconds: 120);
+
   static const _usersCollection = 'users';
   static const _itemsCollection = 'items';
   static const _locationsCollection = 'locations';
@@ -136,11 +151,37 @@ class FirebaseSyncService implements SyncService {
       return SyncResult.success();
     }
 
+    // Wrap the entire per-item sync in a timeout so a single stalled upload
+    // cannot block the whole fullSync indefinitely.
+    try {
+      return await _syncItemInternalGuarded(item, user, ensureUserDocument)
+          .timeout(_perItemTimeout, onTimeout: () {
+        debugPrint(
+          '[IkeepSync] TIMEOUT: item ${item.uuid} ("${item.name}") '
+          'exceeded ${_perItemTimeout.inSeconds}s — aborting this item',
+        );
+        return SyncResult.error(
+          'Sync timed out for "${item.name}" after '
+          '${_perItemTimeout.inSeconds}s',
+        );
+      });
+    } catch (e) {
+      debugPrint('[IkeepSync] syncItem unexpected error for ${item.uuid}: $e');
+      return SyncResult.error(e.toString());
+    }
+  }
+
+  Future<SyncResult> _syncItemInternalGuarded(
+    Item item,
+    User user,
+    bool ensureUserDocument,
+  ) async {
     try {
       await _ensureCloudQuotaForItem(item);
 
       final now = FieldValue.serverTimestamp();
       final syncedAt = DateTime.now();
+      final sw = Stopwatch()..start();
 
       debugPrint(
         '[IkeepSync] syncItem START: uuid=${item.uuid} name="${item.name}" '
@@ -149,28 +190,21 @@ class FirebaseSyncService implements SyncService {
       );
 
       // ── Step 1: Upload images to Firebase Storage ────────────────────────
-      // Run in its own try/catch so an upload failure does NOT abort the
-      // Firestore metadata write. The user will see a partialFailure warning
-      // and can retry. This prevents the "silent empty bucket" problem where
-      // uploads failed invisibly and Firestore was written with null
-      // attachment fields that appeared to succeed.
       ImageUploadResult imageResult;
       try {
+        debugPrint('[IkeepSync] [${sw.elapsedMilliseconds}ms] Image upload START for ${item.uuid}');
         imageResult = await _imageUploadService.uploadItemImages(
           userId: user.uid,
           itemUuid: item.uuid,
           imagePaths: item.imagePaths,
         );
         debugPrint(
-          '[IkeepSync] Image upload SUCCESS: '
-          '${imageResult.downloadUrls.length} URL(s) received, '
-          'storagePaths=${imageResult.storagePaths}',
+          '[IkeepSync] [${sw.elapsedMilliseconds}ms] Image upload END: '
+          '${imageResult.downloadUrls.length} URL(s)',
         );
       } catch (e) {
         debugPrint(
-          '[IkeepSync] IMAGE UPLOAD FAILED for ${item.uuid}: $e\n'
-          '  >>> Possible causes: Firebase Storage rules, bucket not set up, '
-          'network error. Check logcat for [IkeepUpload] lines above. <<<',
+          '[IkeepSync] [${sw.elapsedMilliseconds}ms] IMAGE UPLOAD FAILED for ${item.uuid}: $e',
         );
         imageResult = const ImageUploadResult(downloadUrls: [], storagePaths: []);
       }
@@ -178,6 +212,7 @@ class FirebaseSyncService implements SyncService {
       // ── Step 2: Upload invoice/PDF to Firebase Storage ───────────────────
       StoredInvoiceFile? uploadedInvoice;
       try {
+        debugPrint('[IkeepSync] [${sw.elapsedMilliseconds}ms] Invoice upload START for ${item.uuid}');
         uploadedInvoice = await _invoiceStorageService.uploadItemInvoice(
           userId: user.uid,
           itemUuid: item.uuid,
@@ -185,21 +220,13 @@ class FirebaseSyncService implements SyncService {
           invoiceFileName: item.invoiceFileName,
           invoiceFileSizeBytes: item.invoiceFileSizeBytes,
         );
-        if (uploadedInvoice != null) {
-          debugPrint(
-            '[IkeepSync] Invoice upload SUCCESS: '
-            'fileName=${uploadedInvoice.fileName} '
-            'size=${uploadedInvoice.sizeBytes} '
-            'storagePath=${uploadedInvoice.storagePath} '
-            'downloadUrl=${uploadedInvoice.path}',
-          );
-        } else {
-          debugPrint('[IkeepSync] No invoice to upload for ${item.uuid}');
-        }
+        debugPrint(
+          '[IkeepSync] [${sw.elapsedMilliseconds}ms] Invoice upload END: '
+          '${uploadedInvoice != null ? "uploaded" : "none"}',
+        );
       } catch (e) {
         debugPrint(
-          '[IkeepSync] INVOICE UPLOAD FAILED for ${item.uuid}: $e\n'
-          '  >>> Check Firebase Storage rules for the invoices subfolder. <<<',
+          '[IkeepSync] [${sw.elapsedMilliseconds}ms] INVOICE UPLOAD FAILED for ${item.uuid}: $e',
         );
         uploadedInvoice = null;
       }
@@ -219,23 +246,12 @@ class FirebaseSyncService implements SyncService {
       if (!fullyUploaded) {
         debugPrint(
           '[IkeepSync] Partial upload for ${item.uuid} — '
-          'imagesOk=$imagesOk (had=$hadImages uploaded=${imageResult.downloadUrls.length}) '
-          'invoiceOk=$invoiceOk (had=$hadInvoice uploaded=${uploadedInvoice != null})',
+          'imagesOk=$imagesOk invoiceOk=$invoiceOk',
         );
       }
 
       // ── Step 4: Write metadata + attachment URLs to Firestore ────────────
-      // Store both HTTPS download URLs (fast display on current device) and
-      // durable Storage paths (for refreshing URLs on reinstall/new device).
-      debugPrint(
-        '[IkeepSync] Writing to Firestore: uuid=${item.uuid} '
-        'imagePaths=${imageResult.downloadUrls} '
-        'imageStoragePaths=${imageResult.storagePaths} '
-        'invoicePath=${uploadedInvoice?.path} '
-        'invoiceStoragePath=${uploadedInvoice?.storagePath} '
-        'invoiceFileName=${uploadedInvoice?.fileName} '
-        'invoiceFileSizeBytes=${uploadedInvoice?.sizeBytes}',
-      );
+      debugPrint('[IkeepSync] [${sw.elapsedMilliseconds}ms] Firestore write START for ${item.uuid}');
 
       await _itemsRef.doc(item.uuid).set({
         ...item
@@ -256,12 +272,8 @@ class FirebaseSyncService implements SyncService {
         'updatedAt': _toIsoString(item.updatedAt ?? DateTime.now()),
         'createdAt': _toIsoString(item.savedAt),
         'lastSyncedAt': now,
-        // Durable Storage paths — absent in legacy backups; used during
-        // restore to get fresh download URLs without relying on the stored
-        // HTTPS token (which may expire or be invalidated after reinstall).
         'imageStoragePaths': imageResult.storagePaths,
         'invoiceStoragePath': uploadedInvoice?.storagePath,
-        // Enhanced invoice upload metadata for cost tracking / auditing.
         if (uploadedInvoice != null) ...{
           'invoiceOriginalFileName': uploadedInvoice.originalFileName,
           'invoiceOriginalFileSizeBytes': uploadedInvoice.originalFileSizeBytes,
@@ -272,7 +284,9 @@ class FirebaseSyncService implements SyncService {
         },
       }, SetOptions(merge: true));
 
-      debugPrint('[IkeepSync] Firestore write SUCCESS for ${item.uuid}');
+      debugPrint(
+        '[IkeepSync] [${sw.elapsedMilliseconds}ms] Firestore write END for ${item.uuid}',
+      );
 
       await _itemDao.updateItem(
         item.copyWith(
@@ -281,6 +295,13 @@ class FirebaseSyncService implements SyncService {
           isBackedUp: true,
         ),
       );
+
+      debugPrint(
+        '[IkeepSync] syncItem COMPLETE for ${item.uuid} '
+        'in ${sw.elapsedMilliseconds}ms (partial=${ !fullyUploaded})',
+      );
+      sw.stop();
+
       _lastSyncedAt = DateTime.now();
       return SyncResult.success(partialFailure: !fullyUploaded);
     } on SyncException catch (e) {
@@ -373,22 +394,58 @@ class FirebaseSyncService implements SyncService {
 
   @override
   Future<SyncResult> fullSync() async {
+    // ── Double-sync guard ──────────────────────────────────────────────────
+    if (_isFullSyncRunning) {
+      debugPrint('[IkeepSync] fullSync SKIPPED — already running');
+      return const SyncResult.syncing();
+    }
+
     final user = _user;
     if (user == null) {
       return const SyncResult.error(
           'Please sign in with Google before syncing');
     }
 
+    _isFullSyncRunning = true;
+    final syncSw = Stopwatch()..start();
+
     try {
+      return await _fullSyncGuarded(user, syncSw)
+          .timeout(_fullSyncTimeout, onTimeout: () {
+        debugPrint(
+          '[IkeepSync] fullSync TIMEOUT after ${syncSw.elapsedMilliseconds}ms',
+        );
+        return SyncResult.timedOut(
+          message: 'Full sync timed out after '
+              '${_fullSyncTimeout.inMinutes} minutes',
+        );
+      });
+    } catch (e) {
+      debugPrint(
+        '[IkeepSync] fullSync ERROR after ${syncSw.elapsedMilliseconds}ms: $e',
+      );
+      return SyncResult.error(e.toString());
+    } finally {
+      _isFullSyncRunning = false;
+      syncSw.stop();
+    }
+  }
+
+  Future<SyncResult> _fullSyncGuarded(User user, Stopwatch syncSw) async {
+    try {
+      debugPrint('[IkeepSync] fullSync START');
+
       // Kick off all independent fetches in parallel.
+      debugPrint('[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Fetching local + remote data...');
       final results = await Future.wait([
         _ensureUserDocument(user), // 0
         _locationDao.recalculateUsageCounts(), // 1
         _locationDao.getAllLocations(), // 2
-        _itemDao.getAllItems(includeArchived: true), // 3 — include archived so their state syncs
+        _itemDao.getAllItems(includeArchived: true), // 3
         _locationsRef.get(), // 4
         _itemsRef.get(), // 5
       ]);
+      debugPrint('[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Data fetch complete');
 
       final localLocations = results[2] as List<LocationModel>;
       final localItems = results[3] as List<Item>;
@@ -405,6 +462,7 @@ class FirebaseSyncService implements SyncService {
       };
 
       // ── Locations: batch writes to Firestore, parallel local inserts ──
+      debugPrint('[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Syncing locations...');
       final locationBatch = _firestore.batch();
       final localLocationUpserts = <LocationModel>[];
       final existingLocalLocationUuids =
@@ -439,7 +497,6 @@ class FirebaseSyncService implements SyncService {
         }
       }
 
-      // Commit Firestore batch and local inserts in parallel.
       await Future.wait([
         if (locationBatchCount > 0) locationBatch.commit(),
         _upsertLocationsLocally(
@@ -447,9 +504,9 @@ class FirebaseSyncService implements SyncService {
           existingLocationUuids: existingLocalLocationUuids,
         ),
       ]);
+      debugPrint('[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Locations synced');
 
-      // ── Items: process in parallel batches of _syncBatchSize ──
-      // Separate items into categories to avoid unnecessary sequential waits.
+      // ── Categorise items ──────────────────────────────────────────────
       final itemsToUpload = <Item>[];
       final itemsToDelete = <String>[];
       final itemsToImportLocally = <Map<String, dynamic>>[];
@@ -493,20 +550,23 @@ class FirebaseSyncService implements SyncService {
         }
       }
 
-      // Import remote-only items locally in controlled parallel batches.
-      // _itemFromFirestore makes Storage network calls (getDownloadURL,
-      // listAll) for each item's images and invoice. Unbounded concurrency on
-      // large libraries hits Firebase Storage rate limits and can OOM on
-      // lower-end devices. Using the same _syncBatchSize as uploads keeps
-      // total concurrent Storage requests predictable.
+      final totalItemOps = itemsToUpload.length +
+          itemsToImportLocally.length +
+          itemsToDelete.length;
+      debugPrint(
+        '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Item plan: '
+        'upload=${itemsToUpload.length} import=${itemsToImportLocally.length} '
+        'delete=${itemsToDelete.length} total=$totalItemOps',
+      );
+
+      // ── Import remote-only items locally ──────────────────────────────
+      var importedCount = 0;
       for (var i = 0; i < itemsToImportLocally.length; i += _syncBatchSize) {
         final batch = itemsToImportLocally.skip(i).take(_syncBatchSize);
         await Future.wait(
           batch.map((data) async {
             try {
               final restoredItem = await _itemFromFirestore(data);
-              // Upsert safely: a previous partial restore may have already
-              // written this item — update it rather than inserting a duplicate.
               final existing =
                   await _itemDao.getItemByUuid(restoredItem.uuid);
               if (existing != null) {
@@ -514,33 +574,77 @@ class FirebaseSyncService implements SyncService {
               } else {
                 await _itemDao.insertItem(restoredItem);
               }
+              importedCount++;
             } catch (e) {
               debugPrint(
-                'FirebaseSyncService: failed to import item '
-                '${data['uuid']}: $e',
+                '[IkeepSync] Failed to import item ${data['uuid']}: $e',
               );
-              // Continue importing other items even if one fails.
             }
           }),
         );
       }
-
-      // Delete un-backed-up items from remote (parallel).
-      if (itemsToDelete.isNotEmpty) {
-        await Future.wait(
-          itemsToDelete.map((uuid) => deleteRemoteItem(uuid)),
+      if (itemsToImportLocally.isNotEmpty) {
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] '
+          'Imported $importedCount/${itemsToImportLocally.length} items',
         );
       }
 
-      // Upload items in controlled parallel batches to avoid flooding the
-      // network. Each _syncItemInternal already parallelises its own image
-      // uploads, so _syncBatchSize keeps total concurrency reasonable.
-      for (var i = 0; i < itemsToUpload.length; i += _syncBatchSize) {
-        final batch = itemsToUpload.skip(i).take(_syncBatchSize);
-        await Future.wait(
-          batch.map(
-              (item) => _syncItemInternal(item, ensureUserDocument: false)),
+      // ── Delete un-backed-up items from remote ─────────────────────────
+      if (itemsToDelete.isNotEmpty) {
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] '
+          'Deleting ${itemsToDelete.length} remote items...',
         );
+        await Future.wait(
+          itemsToDelete.map((uuid) => deleteRemoteItem(uuid)),
+        );
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] Remote deletes done',
+        );
+      }
+
+      // ── Upload items with per-item tracking ───────────────────────────
+      final itemOutcomes = <ItemSyncOutcome>[];
+      var uploadedOk = 0;
+      var uploadedFail = 0;
+
+      for (var i = 0; i < itemsToUpload.length; i += _syncBatchSize) {
+        final batchItems = itemsToUpload.skip(i).take(_syncBatchSize).toList();
+        final batchStart = i + 1;
+        final batchEnd = (i + batchItems.length);
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] '
+          'Upload batch $batchStart–$batchEnd of ${itemsToUpload.length}',
+        );
+
+        final batchResults = await Future.wait(
+          batchItems.map(
+            (item) => _syncItemInternal(item, ensureUserDocument: false),
+          ),
+        );
+
+        for (var j = 0; j < batchItems.length; j++) {
+          final item = batchItems[j];
+          final result = batchResults[j];
+          final ok = result.isSuccess;
+          if (ok) {
+            uploadedOk++;
+          } else {
+            uploadedFail++;
+          }
+          itemOutcomes.add(ItemSyncOutcome(
+            itemUuid: item.uuid,
+            itemName: item.name,
+            success: ok,
+            partialFailure: result.partialFailure,
+            errorMessage: result.errorMessage,
+          ));
+          debugPrint(
+            '[IkeepSync]   item ${i + j + 1}/${itemsToUpload.length} '
+            '"${item.name}" → ${ok ? "OK" : "FAIL"}',
+          );
+        }
       }
 
       await _locationDao.recalculateUsageCounts();
@@ -554,9 +658,26 @@ class FirebaseSyncService implements SyncService {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      return SyncResult.success();
+      final hasPartialFailure =
+          itemOutcomes.any((o) => o.partialFailure || !o.success);
+
+      debugPrint(
+        '[IkeepSync] fullSync COMPLETE in ${syncSw.elapsedMilliseconds}ms — '
+        'uploaded=$uploadedOk failed=$uploadedFail '
+        'imported=$importedCount deleted=${itemsToDelete.length}',
+      );
+
+      return SyncResult.success(
+        partialFailure: hasPartialFailure,
+        totalItems: totalItemOps,
+        syncedItems: uploadedOk + importedCount,
+        failedItems: uploadedFail,
+        itemOutcomes: itemOutcomes,
+      );
     } catch (e) {
-      debugPrint('FirebaseSyncService.fullSync error: $e');
+      debugPrint(
+        '[IkeepSync] fullSync error at ${syncSw.elapsedMilliseconds}ms: $e',
+      );
       return SyncResult.error(e.toString());
     }
   }
