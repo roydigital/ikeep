@@ -60,7 +60,13 @@ class FirebaseImageUploadService {
     required String itemUuid,
     required List<String> imagePaths,
   }) async {
+    debugPrint(
+      '[IkeepUpload] uploadItemImages: itemUuid=$itemUuid '
+      'imageCount=${imagePaths.length}',
+    );
+
     if (imagePaths.isEmpty) {
+      debugPrint('[IkeepUpload] No images to upload — deleting any stale Storage files');
       await deleteItemImages(userId: userId, itemUuid: itemUuid);
       return const ImageUploadResult(downloadUrls: [], storagePaths: []);
     }
@@ -90,6 +96,12 @@ class FirebaseImageUploadService {
         keepStoragePaths.add(result.storagePath!);
       }
     }
+
+    debugPrint(
+      '[IkeepUpload] uploadItemImages complete: '
+      '${downloadUrls.length}/${imagePaths.length} uploaded, '
+      'storagePaths=$storagePaths',
+    );
 
     // Prune stale images in the background — no need to block the caller.
     _pruneUnexpectedImages(
@@ -202,6 +214,9 @@ class FirebaseImageUploadService {
       if (path.trim().toLowerCase().startsWith('gs://')) {
         try {
           final downloadUrl = await _storage.refFromURL(path).getDownloadURL();
+          debugPrint(
+            '[IkeepUpload] slot $index resolved gs:// → downloadUrl received',
+          );
           return _UploadSlotResult(
             downloadUrl: downloadUrl,
             storagePath: fullPath,
@@ -209,15 +224,18 @@ class FirebaseImageUploadService {
         } catch (e) {
           if (!_isMissingObjectError(e)) {
             debugPrint(
-              'FirebaseImageUploadService: failed to resolve gs:// URL $path: $e',
+              '[IkeepUpload] slot $index failed to resolve gs:// URL $path: $e',
             );
           }
           return const _UploadSlotResult();
         }
       }
       // HTTPS URL — return as-is with its storage path for future refresh.
+      debugPrint('[IkeepUpload] slot $index: already a remote URL, skipping upload');
       return _UploadSlotResult(downloadUrl: path, storagePath: fullPath);
     }
+
+    debugPrint('[IkeepUpload] slot $index: local file selected → $path');
 
     final storagePath = _storagePathFor(
       userId: userId,
@@ -228,6 +246,10 @@ class FirebaseImageUploadService {
     final ref = _storage.ref().child(storagePath);
     final localFileState = await _localFileState(path);
     if (localFileState == null) {
+      debugPrint(
+        '[IkeepUpload] slot $index: local file missing at $path — '
+        'trying to reuse previously-uploaded Storage file',
+      );
       final reusedRemote = await _tryReuseStoredSlotImage(
         userId: userId,
         itemUuid: itemUuid,
@@ -235,14 +257,22 @@ class FirebaseImageUploadService {
         preferredRef: ref,
       );
       if (reusedRemote != null) {
+        debugPrint('[IkeepUpload] slot $index: reused existing Storage file');
         return reusedRemote;
       }
 
       debugPrint(
-        'FirebaseImageUploadService: missing local image for slot $index, skipping $path',
+        '[IkeepUpload] slot $index: no local file and no existing Storage '
+        'file — skipping slot. Path was: $path',
       );
       return const _UploadSlotResult();
     }
+
+    debugPrint(
+      '[IkeepUpload] slot $index: local file found — '
+      '${localFileState.byteSize} bytes, '
+      'modified ${DateTime.fromMillisecondsSinceEpoch(localFileState.modifiedMs)}',
+    );
 
     final cacheKey = _cacheKeyFor(
       localPath: path,
@@ -254,6 +284,7 @@ class FirebaseImageUploadService {
     // 1. In-memory cache hit.
     final cached = _uploadCache[cacheKey];
     if (cached != null) {
+      debugPrint('[IkeepUpload] slot $index: in-memory cache hit, skipping upload');
       return _UploadSlotResult(
         downloadUrl: cached.downloadUrl,
         storagePath: cached.fullPath,
@@ -267,6 +298,7 @@ class FirebaseImageUploadService {
       localFileState: localFileState,
     );
     if (reused != null) {
+      debugPrint('[IkeepUpload] slot $index: reused existing Storage upload');
       return _UploadSlotResult(
         downloadUrl: reused.downloadUrl,
         storagePath: reused.fullPath,
@@ -274,7 +306,14 @@ class FirebaseImageUploadService {
     }
 
     // 3. Optimize and upload.
+    debugPrint(
+      '[IkeepUpload] slot $index: optimizing image for upload → $storagePath',
+    );
     final optimized = await _optimizer.optimizeForUpload(path);
+    debugPrint(
+      '[IkeepUpload] slot $index: optimized to ${optimized.byteSize} bytes '
+      '(${optimized.contentType}) — starting putFile',
+    );
     try {
       await ref.putFile(
         optimized.file,
@@ -289,8 +328,10 @@ class FirebaseImageUploadService {
           },
         ),
       );
+      debugPrint('[IkeepUpload] slot $index: putFile SUCCESS → fetching download URL');
 
       final downloadUrl = await ref.getDownloadURL();
+      debugPrint('[IkeepUpload] slot $index: download URL received ✓');
       _uploadCache[cacheKey] = _CachedUpload(
         fullPath: ref.fullPath,
         downloadUrl: downloadUrl,
@@ -300,11 +341,20 @@ class FirebaseImageUploadService {
         storagePath: ref.fullPath,
       );
     } catch (e) {
-      if (!_isMissingObjectError(e)) rethrow;
+      // Do NOT swallow putFile errors with _isMissingObjectError — that check
+      // matches any error containing "not-found", including
+      // [firebase_storage/bucket-not-found] when Storage is not set up.
+      // Silently returning empty here is the root cause of the "Storage always
+      // empty" bug: uploads fail invisibly and Firestore is written with null
+      // attachment fields instead. Always rethrow so the caller surfaces the
+      // real error.
       debugPrint(
-        'FirebaseImageUploadService: skipped image $index – $e',
+        '[IkeepUpload] slot $index: UPLOAD FAILED for $path\n'
+        '  storagePath=$storagePath\n'
+        '  error=$e\n'
+        '  >>> Check Firebase Storage security rules and bucket configuration <<<',
       );
-      return const _UploadSlotResult();
+      rethrow;
     } finally {
       await _safeDelete(optimized.file);
     }

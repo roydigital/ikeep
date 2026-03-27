@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/constants/feature_limits.dart';
 import '../../core/utils/path_utils.dart';
+import '../../services/invoice_service.dart';
 import '../../domain/models/firestore_borrow_request.dart';
 import '../../domain/models/household_member.dart';
 import '../../domain/models/item.dart';
@@ -1440,6 +1441,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           SnackBar(
             content: Text('Attached ${picked.fileName}'),
             backgroundColor: AppColors.success,
+          ),
+        );
+      } on InvoiceTooLargeException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.error,
+            duration: const Duration(seconds: 5),
           ),
         );
       } catch (_) {

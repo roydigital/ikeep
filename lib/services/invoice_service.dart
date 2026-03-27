@@ -7,8 +7,21 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/constants/feature_limits.dart';
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
+
+/// Thrown when the user selects a PDF that exceeds the hard size limit.
+class InvoiceTooLargeException implements Exception {
+  const InvoiceTooLargeException(this.message, {required this.fileSizeBytes});
+
+  final String message;
+  final int fileSizeBytes;
+
+  @override
+  String toString() =>
+      'InvoiceTooLargeException: $message ($fileSizeBytes bytes)';
+}
 
 class PickedInvoiceFile {
   const PickedInvoiceFile({
@@ -107,10 +120,26 @@ class InvoiceService {
 
       final savedFile = File(targetPath);
       final stat = await savedFile.stat();
+      final sizeBytes = stat.size;
+
+      // Reject PDFs that exceed the hard size limit immediately so the user
+      // gets fast feedback instead of discovering the problem at sync time.
+      if (_isPdf(originalName) && sizeBytes > pdfHardLimitBytes) {
+        debugPrint(
+          '[IkeepInvoice] REJECTED at pick: $originalName is $sizeBytes bytes, '
+          'exceeds hard limit ($pdfHardLimitLabel)',
+        );
+        await _safeDelete(savedFile);
+        throw InvoiceTooLargeException(
+          pdfHardLimitExceededError(),
+          fileSizeBytes: sizeBytes,
+        );
+      }
+
       return PickedInvoiceFile(
         path: targetPath,
         fileName: originalName,
-        sizeBytes: stat.size,
+        sizeBytes: sizeBytes,
       );
     } on MissingPluginException {
       return _pickInvoiceWithNativeAndroidFallback();
@@ -200,6 +229,20 @@ class InvoiceService {
       fileName: returnedName.isNotEmpty ? returnedName : p.basename(targetPath),
       sizeBytes: (result['sizeBytes'] as num?)?.toInt() ?? stat.size,
     );
+  }
+
+  bool _isPdf(String fileName) {
+    return p.extension(fileName).toLowerCase() == '.pdf';
+  }
+
+  Future<void> _safeDelete(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // Best-effort cleanup.
+    }
   }
 
   bool _shouldUseNativeAndroidFallback(PlatformException error) {

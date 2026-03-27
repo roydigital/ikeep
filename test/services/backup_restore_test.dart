@@ -13,6 +13,7 @@ import 'package:ikeep/services/firebase_image_upload_service.dart';
 import 'package:ikeep/services/firebase_invoice_storage_service.dart';
 import 'package:ikeep/services/firebase_sync_service.dart';
 import 'package:ikeep/services/image_optimizer_service.dart';
+import 'package:ikeep/services/pdf_optimizer_service.dart';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ class MockFirebaseFirestore extends Mock implements FirebaseFirestore {}
 class MockFirebaseStorage extends Mock implements FirebaseStorage {}
 
 class MockImageOptimizerService extends Mock implements ImageOptimizerService {}
+
+class MockPdfOptimizerService extends Mock implements PdfOptimizerService {}
 
 class MockItemDao extends Mock implements ItemDao {}
 
@@ -282,7 +285,7 @@ void main() {
       when(() => mockMetadata.customMetadata).thenReturn(null);
       when(() => mockMetadata.size).thenReturn(null);
 
-      service = FirebaseInvoiceStorageService(storage: mockStorage);
+      service = FirebaseInvoiceStorageService(storage: mockStorage, pdfOptimizer: MockPdfOptimizerService());
     });
 
     // ── Test 6: open restored PDF ─────────────────────────────────────────────
@@ -417,7 +420,7 @@ void main() {
         optimizer: mockOptimizer,
       );
       invoiceService =
-          FirebaseInvoiceStorageService(storage: mockStorage);
+          FirebaseInvoiceStorageService(storage: mockStorage, pdfOptimizer: MockPdfOptimizerService());
 
       syncService = FirebaseSyncService(
         auth: mockAuth,

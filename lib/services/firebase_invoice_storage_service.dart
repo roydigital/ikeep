@@ -1,10 +1,12 @@
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/constants/storage_constants.dart';
 import '../core/utils/path_utils.dart';
+import 'pdf_optimizer_service.dart';
 
 /// Represents an invoice/PDF file that has been saved to Firebase Storage.
 ///
@@ -18,6 +20,10 @@ class StoredInvoiceFile {
     required this.fileName,
     this.sizeBytes,
     this.storagePath,
+    this.originalFileName,
+    this.originalFileSizeBytes,
+    this.mimeType,
+    this.compressionApplied = false,
   });
 
   /// HTTPS download URL — fast to open, may become stale over time.
@@ -26,20 +32,36 @@ class StoredInvoiceFile {
   /// Human-readable file name (e.g. "receipt.pdf").
   final String fileName;
 
-  /// File size in bytes, if known.
+  /// File size in bytes, if known. After optimization this is the
+  /// *uploaded* size, not the original.
   final int? sizeBytes;
 
   /// Firebase Storage object path — durable, never expires.
   /// Use to call [getDownloadURL()] when [path] is stale.
   final String? storagePath;
+
+  /// Name of the file the user originally selected (before optimization).
+  final String? originalFileName;
+
+  /// Size of the original file before any compression, in bytes.
+  final int? originalFileSizeBytes;
+
+  /// MIME type of the uploaded file (e.g. "application/pdf").
+  final String? mimeType;
+
+  /// Whether the file was compressed/optimized before upload.
+  final bool compressionApplied;
 }
 
 class FirebaseInvoiceStorageService {
   FirebaseInvoiceStorageService({
     required FirebaseStorage storage,
-  }) : _storage = storage;
+    required PdfOptimizerService pdfOptimizer,
+  })  : _storage = storage,
+       _pdfOptimizer = pdfOptimizer;
 
   final FirebaseStorage _storage;
+  final PdfOptimizerService _pdfOptimizer;
 
   /// Uploads [invoicePath] (a local file path) to Firebase Storage and
   /// returns a [StoredInvoiceFile] with both the HTTPS download URL and the
@@ -57,13 +79,23 @@ class FirebaseInvoiceStorageService {
     int? invoiceFileSizeBytes,
   }) async {
     final trimmedPath = invoicePath?.trim() ?? '';
+
+    debugPrint(
+      '[IkeepInvoice] uploadItemInvoice: itemUuid=$itemUuid '
+      'hasPath=${trimmedPath.isNotEmpty} '
+      'fileName=$invoiceFileName '
+      'sizeBytes=$invoiceFileSizeBytes',
+    );
+
     if (trimmedPath.isEmpty) {
+      debugPrint('[IkeepInvoice] No invoice path — deleting any stale Storage files');
       await deleteItemInvoice(userId: userId, itemUuid: itemUuid);
       return null;
     }
 
     if (PathUtils.isRemotePath(trimmedPath)) {
       // Already a remote URL — resolve its Storage path for durability.
+      debugPrint('[IkeepInvoice] Invoice is already a remote URL — skipping upload');
       final storagePath = _tryResolveStoragePath(trimmedPath);
       return StoredInvoiceFile(
         path: trimmedPath,
@@ -73,10 +105,16 @@ class FirebaseInvoiceStorageService {
       );
     }
 
+    debugPrint('[IkeepInvoice] Local invoice file selected: $trimmedPath');
+
     final localFile = File(trimmedPath);
     if (!await localFile.exists()) {
       // Local file is missing (e.g. after reinstall) — try to reuse the
       // previously-uploaded file from Storage.
+      debugPrint(
+        '[IkeepInvoice] Local invoice file missing at $trimmedPath — '
+        'trying to reuse previously-uploaded Storage file',
+      );
       return _getStoredInvoice(
         userId: userId,
         itemUuid: itemUuid,
@@ -87,23 +125,61 @@ class FirebaseInvoiceStorageService {
 
     final resolvedFileName =
         _resolvedFileName(trimmedPath, fallback: invoiceFileName);
+
+    // ── PDF optimization: validate size + attempt compression ────────────
+    File fileToUpload = localFile;
+    int fileSize = invoiceFileSizeBytes ?? await localFile.length();
+    String originalFileNameResolved = resolvedFileName;
+    int originalFileSizeBytesResolved = fileSize;
+    String mimeType = _contentTypeFor(resolvedFileName);
+    bool compressionApplied = false;
+
+    if (_pdfOptimizer.isPdf(resolvedFileName)) {
+      debugPrint('[IkeepInvoice] PDF detected — running optimizer...');
+      // Throws PdfTooLargeException if file exceeds hard limit.
+      final pdfResult = await _pdfOptimizer.optimizeForUpload(
+        trimmedPath,
+        originalFileName: resolvedFileName,
+      );
+      fileToUpload = pdfResult.file;
+      fileSize = pdfResult.optimizedFileSizeBytes;
+      originalFileNameResolved = pdfResult.originalFileName;
+      originalFileSizeBytesResolved = pdfResult.originalFileSizeBytes;
+      mimeType = pdfResult.mimeType;
+      compressionApplied = pdfResult.compressionApplied;
+
+      debugPrint(
+        '[IkeepInvoice] PDF optimizer done: '
+        'original=${pdfResult.originalFileSizeBytes} bytes '
+        'final=$fileSize bytes '
+        'compressed=$compressionApplied',
+      );
+    }
+
     final extension = p.extension(resolvedFileName);
     final storageObjectPath =
         '${_invoiceFolder(userId, itemUuid)}/invoice${extension.isEmpty ? '' : extension}';
     final ref = _storage.ref().child(storageObjectPath);
-    final fileSize = invoiceFileSizeBytes ?? await localFile.length();
+
+    debugPrint(
+      '[IkeepInvoice] Uploading invoice: fileName=$resolvedFileName '
+      'size=$fileSize bytes → $storageObjectPath',
+    );
 
     await ref.putFile(
-      localFile,
+      fileToUpload,
       SettableMetadata(
-        contentType: _contentTypeFor(resolvedFileName),
+        contentType: mimeType,
         cacheControl: 'public,max-age=31536000',
         customMetadata: {
-          'originalFileName': resolvedFileName,
-          'sourceBytes': fileSize.toString(),
+          'originalFileName': originalFileNameResolved,
+          'sourceBytes': originalFileSizeBytesResolved.toString(),
+          'uploadedBytes': fileSize.toString(),
+          'compressionApplied': compressionApplied.toString(),
         },
       ),
     );
+    debugPrint('[IkeepInvoice] Invoice putFile SUCCESS → fetching download URL');
 
     await _pruneUnexpectedInvoices(
       userId: userId,
@@ -111,11 +187,18 @@ class FirebaseInvoiceStorageService {
       keepStoragePath: ref.fullPath,
     );
 
+    final downloadUrl = await ref.getDownloadURL();
+    debugPrint('[IkeepInvoice] Invoice download URL received');
+
     return StoredInvoiceFile(
-      path: await ref.getDownloadURL(),
+      path: downloadUrl,
       fileName: resolvedFileName,
       sizeBytes: fileSize,
-      storagePath: ref.fullPath, // ← durable canonical reference
+      storagePath: ref.fullPath,
+      originalFileName: originalFileNameResolved,
+      originalFileSizeBytes: originalFileSizeBytesResolved,
+      mimeType: mimeType,
+      compressionApplied: compressionApplied,
     );
   }
 

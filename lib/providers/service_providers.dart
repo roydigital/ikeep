@@ -15,6 +15,7 @@ import '../services/household_sync_service.dart';
 import '../services/image_optimizer_service.dart';
 import '../services/image_service.dart';
 import '../services/invoice_service.dart';
+import '../services/pdf_optimizer_service.dart';
 import '../services/location_service.dart';
 import '../services/ml_label_service.dart';
 import '../services/nearby_cloud_service.dart';
@@ -60,10 +61,15 @@ final firebaseImageUploadServiceProvider = Provider<FirebaseImageUploadService>(
   ),
 );
 
+final pdfOptimizerServiceProvider = Provider<PdfOptimizerService>(
+  (ref) => PdfOptimizerService(),
+);
+
 final firebaseInvoiceStorageServiceProvider =
     Provider<FirebaseInvoiceStorageService>(
   (ref) => FirebaseInvoiceStorageService(
     storage: ref.watch(firebaseStorageProvider),
+    pdfOptimizer: ref.watch(pdfOptimizerServiceProvider),
   ),
 );
 

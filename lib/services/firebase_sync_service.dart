@@ -142,29 +142,74 @@ class FirebaseSyncService implements SyncService {
       final now = FieldValue.serverTimestamp();
       final syncedAt = DateTime.now();
 
-      // Run image uploads and user-doc check in parallel — they are
-      // independent network calls.
-      final results = await Future.wait<Object?>([
-        _imageUploadService.uploadItemImages(
+      debugPrint(
+        '[IkeepSync] syncItem START: uuid=${item.uuid} name="${item.name}" '
+        'images=${item.imagePaths.length} '
+        'hasInvoice=${item.invoicePath?.isNotEmpty ?? false}',
+      );
+
+      // ── Step 1: Upload images to Firebase Storage ────────────────────────
+      // Run in its own try/catch so an upload failure does NOT abort the
+      // Firestore metadata write. The user will see a partialFailure warning
+      // and can retry. This prevents the "silent empty bucket" problem where
+      // uploads failed invisibly and Firestore was written with null
+      // attachment fields that appeared to succeed.
+      ImageUploadResult imageResult;
+      try {
+        imageResult = await _imageUploadService.uploadItemImages(
           userId: user.uid,
           itemUuid: item.uuid,
           imagePaths: item.imagePaths,
-        ),
-        _invoiceStorageService.uploadItemInvoice(
+        );
+        debugPrint(
+          '[IkeepSync] Image upload SUCCESS: '
+          '${imageResult.downloadUrls.length} URL(s) received, '
+          'storagePaths=${imageResult.storagePaths}',
+        );
+      } catch (e) {
+        debugPrint(
+          '[IkeepSync] IMAGE UPLOAD FAILED for ${item.uuid}: $e\n'
+          '  >>> Possible causes: Firebase Storage rules, bucket not set up, '
+          'network error. Check logcat for [IkeepUpload] lines above. <<<',
+        );
+        imageResult = const ImageUploadResult(downloadUrls: [], storagePaths: []);
+      }
+
+      // ── Step 2: Upload invoice/PDF to Firebase Storage ───────────────────
+      StoredInvoiceFile? uploadedInvoice;
+      try {
+        uploadedInvoice = await _invoiceStorageService.uploadItemInvoice(
           userId: user.uid,
           itemUuid: item.uuid,
           invoicePath: item.invoicePath,
           invoiceFileName: item.invoiceFileName,
           invoiceFileSizeBytes: item.invoiceFileSizeBytes,
-        ),
-        if (ensureUserDocument) _ensureUserDocument(user),
-      ]);
+        );
+        if (uploadedInvoice != null) {
+          debugPrint(
+            '[IkeepSync] Invoice upload SUCCESS: '
+            'fileName=${uploadedInvoice.fileName} '
+            'size=${uploadedInvoice.sizeBytes} '
+            'storagePath=${uploadedInvoice.storagePath} '
+            'downloadUrl=${uploadedInvoice.path}',
+          );
+        } else {
+          debugPrint('[IkeepSync] No invoice to upload for ${item.uuid}');
+        }
+      } catch (e) {
+        debugPrint(
+          '[IkeepSync] INVOICE UPLOAD FAILED for ${item.uuid}: $e\n'
+          '  >>> Check Firebase Storage rules for the invoices subfolder. <<<',
+        );
+        uploadedInvoice = null;
+      }
 
-      final imageResult = results[0] as ImageUploadResult;
-      final uploadedInvoice = results[1] as StoredInvoiceFile?;
+      // ── Step 3: Ensure user document exists (independent) ───────────────
+      if (ensureUserDocument) {
+        await _ensureUserDocument(user);
+      }
 
-      // Determine partial-failure state: if the item had images/invoice but
-      // none uploaded successfully, flag it so the UI can surface the issue.
+      // ── Determine partial-failure state ──────────────────────────────────
       final hadImages = item.imagePaths.isNotEmpty;
       final hadInvoice = item.invoicePath?.trim().isNotEmpty ?? false;
       final imagesOk = !hadImages || imageResult.hasImages;
@@ -173,16 +218,25 @@ class FirebaseSyncService implements SyncService {
 
       if (!fullyUploaded) {
         debugPrint(
-          'FirebaseSyncService: partial upload for ${item.uuid} — '
-          'imagesOk=$imagesOk invoiceOk=$invoiceOk',
+          '[IkeepSync] Partial upload for ${item.uuid} — '
+          'imagesOk=$imagesOk (had=$hadImages uploaded=${imageResult.downloadUrls.length}) '
+          'invoiceOk=$invoiceOk (had=$hadInvoice uploaded=${uploadedInvoice != null})',
         );
       }
 
-      // Store in Firestore:
-      //   imagePaths          → HTTPS download URLs (fast display)
-      //   imageStoragePaths   → durable Storage object paths (for refresh on reinstall)
-      //   invoicePath         → HTTPS download URL
-      //   invoiceStoragePath  → durable Storage object path
+      // ── Step 4: Write metadata + attachment URLs to Firestore ────────────
+      // Store both HTTPS download URLs (fast display on current device) and
+      // durable Storage paths (for refreshing URLs on reinstall/new device).
+      debugPrint(
+        '[IkeepSync] Writing to Firestore: uuid=${item.uuid} '
+        'imagePaths=${imageResult.downloadUrls} '
+        'imageStoragePaths=${imageResult.storagePaths} '
+        'invoicePath=${uploadedInvoice?.path} '
+        'invoiceStoragePath=${uploadedInvoice?.storagePath} '
+        'invoiceFileName=${uploadedInvoice?.fileName} '
+        'invoiceFileSizeBytes=${uploadedInvoice?.sizeBytes}',
+      );
+
       await _itemsRef.doc(item.uuid).set({
         ...item
             .copyWith(
@@ -202,12 +256,23 @@ class FirebaseSyncService implements SyncService {
         'updatedAt': _toIsoString(item.updatedAt ?? DateTime.now()),
         'createdAt': _toIsoString(item.savedAt),
         'lastSyncedAt': now,
-        // Durable Storage paths — new fields, absent in legacy backups.
-        // Used during restore to get fresh download URLs without depending on
-        // the stored HTTPS token (which may expire or be invalidated).
+        // Durable Storage paths — absent in legacy backups; used during
+        // restore to get fresh download URLs without relying on the stored
+        // HTTPS token (which may expire or be invalidated after reinstall).
         'imageStoragePaths': imageResult.storagePaths,
         'invoiceStoragePath': uploadedInvoice?.storagePath,
+        // Enhanced invoice upload metadata for cost tracking / auditing.
+        if (uploadedInvoice != null) ...{
+          'invoiceOriginalFileName': uploadedInvoice.originalFileName,
+          'invoiceOriginalFileSizeBytes': uploadedInvoice.originalFileSizeBytes,
+          'invoiceUploadedFileSizeBytes': uploadedInvoice.sizeBytes,
+          'invoiceMimeType': uploadedInvoice.mimeType,
+          'invoiceCompressionApplied': uploadedInvoice.compressionApplied,
+          'invoiceUploadedAt': FieldValue.serverTimestamp(),
+        },
       }, SetOptions(merge: true));
+
+      debugPrint('[IkeepSync] Firestore write SUCCESS for ${item.uuid}');
 
       await _itemDao.updateItem(
         item.copyWith(
@@ -219,10 +284,10 @@ class FirebaseSyncService implements SyncService {
       _lastSyncedAt = DateTime.now();
       return SyncResult.success(partialFailure: !fullyUploaded);
     } on SyncException catch (e) {
-      debugPrint('FirebaseSyncService.syncItem quota error: $e');
+      debugPrint('[IkeepSync] syncItem quota error for ${item.uuid}: $e');
       return SyncResult.error(e.message);
     } catch (e) {
-      debugPrint('FirebaseSyncService.syncItem error: $e');
+      debugPrint('[IkeepSync] syncItem error for ${item.uuid}: $e');
       return SyncResult.error(e.toString());
     }
   }
@@ -598,6 +663,14 @@ class FirebaseSyncService implements SyncService {
         List<String>.from((data['imageStoragePaths'] as List?) ?? const []);
     final invoiceStoragePath = (data['invoiceStoragePath'] as String?)?.trim();
 
+    debugPrint(
+      '[IkeepRestore] _itemFromFirestore: uuid=$itemUuid '
+      'rawImages=${rawImagePaths.length} '
+      'storagePaths=${imageStoragePaths.length} '
+      'invoiceStoragePath=${invoiceStoragePath?.isNotEmpty == true ? "present" : "null"} '
+      'rawInvoicePath=${(data["invoicePath"] as String?)?.isNotEmpty == true ? "present" : "null"}',
+    );
+
     // Resolve storage user ID — prefer the value stored in the document;
     // fall back to the currently-authenticated user's UID.
     final remoteUserId = (data['userId'] as String?)?.trim();
@@ -611,6 +684,9 @@ class FirebaseSyncService implements SyncService {
     if (storageUserId == null || storageUserId.isEmpty || itemUuid.isEmpty) {
       // Cannot resolve Storage paths without a valid user/item reference.
       // Use raw values as-is and let the UI deal with any failures.
+      debugPrint(
+        '[IkeepRestore] $itemUuid: missing userId or uuid — using raw values',
+      );
       resolvedImagePaths = rawImagePaths;
       final rawInvoicePath = (data['invoicePath'] as String?)?.trim();
       resolvedInvoice = rawInvoicePath?.isNotEmpty == true
@@ -623,11 +699,20 @@ class FirebaseSyncService implements SyncService {
           : null;
     } else {
       // Resolve image URLs — prefer durable storage paths for fresh URLs.
+      debugPrint(
+        '[IkeepRestore] $itemUuid: resolving images from Storage '
+        '(storagePaths=${imageStoragePaths.length}, '
+        'downloadUrls=${rawImagePaths.length})',
+      );
       resolvedImagePaths = await _imageUploadService.resolveItemImageUrls(
         userId: storageUserId,
         itemUuid: itemUuid,
         downloadUrls: rawImagePaths,
         storagePaths: imageStoragePaths,
+      );
+      debugPrint(
+        '[IkeepRestore] $itemUuid: resolved ${resolvedImagePaths.length} '
+        'image URL(s)',
       );
 
       // Resolve invoice only when the Firestore doc records one. Without this
@@ -639,6 +724,10 @@ class FirebaseSyncService implements SyncService {
           (rawInvoicePath?.isNotEmpty ?? false);
 
       if (hasInvoiceRecord) {
+        debugPrint(
+          '[IkeepRestore] $itemUuid: resolving invoice from Storage '
+          '(storagePath=$invoiceStoragePath, rawPath=$rawInvoicePath)',
+        );
         try {
           resolvedInvoice = await _invoiceStorageService.resolveCloudInvoice(
             userId: storageUserId,
@@ -649,15 +738,30 @@ class FirebaseSyncService implements SyncService {
                 (data['invoiceFileSizeBytes'] as num?)?.toInt(),
             storagePath: invoiceStoragePath,
           );
+          if (resolvedInvoice != null) {
+            debugPrint(
+              '[IkeepRestore] $itemUuid: invoice resolved ✓ '
+              'fileName=${resolvedInvoice.fileName} '
+              'size=${resolvedInvoice.sizeBytes} '
+              'storagePath=${resolvedInvoice.storagePath}',
+            );
+          } else {
+            debugPrint(
+              '[IkeepRestore] $itemUuid: invoice record found in Firestore '
+              'but file not found in Storage',
+            );
+          }
         } catch (e) {
           // An unexpected Storage error (e.g. permission-denied, network
           // timeout) must not abort the entire item import. Restore the
           // item without its invoice — the user can re-attach it manually.
           debugPrint(
-            'FirebaseSyncService: could not resolve invoice for '
-            '$itemUuid — importing item without invoice. Error: $e',
+            '[IkeepRestore] $itemUuid: INVOICE RESTORE FAILED — '
+            'importing item without invoice. Error: $e',
           );
         }
+      } else {
+        debugPrint('[IkeepRestore] $itemUuid: no invoice record in Firestore');
       }
     }
 
