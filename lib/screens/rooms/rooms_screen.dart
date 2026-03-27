@@ -9,6 +9,7 @@ import '../../domain/models/location_model.dart';
 import '../../providers/item_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/location_usage_providers.dart';
+import '../../providers/repository_providers.dart';
 import '../../providers/service_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
@@ -254,6 +255,11 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     await _createAreaQuick(areaName);
   }
 
+  /// Normalize a name for duplicate comparison: trim, collapse whitespace,
+  /// lowercase.
+  static String _normalize(String name) =>
+      name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
   Future<void> _createAreaQuick(String name) async {
     if (_isBusy) return;
 
@@ -262,9 +268,10 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
 
     final locations = ref.read(allLocationsProvider).valueOrNull ?? const [];
     LocationModel? existingArea;
+    final normalizedName = _normalize(trimmed);
     for (final location in locations) {
       if (location.type == LocationType.area &&
-          location.name.trim().toLowerCase() == trimmed.toLowerCase()) {
+          _normalize(location.name) == normalizedName) {
         existingArea = location;
         break;
       }
@@ -273,7 +280,7 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     if (existingArea != null) {
       final area = existingArea;
       setState(() => _expandedAreas.add(area.uuid));
-      _showInfo('${area.name} already exists');
+      _showInfo('An area with this name already exists.');
       return;
     }
 
@@ -310,57 +317,111 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = TextEditingController(text: location.name);
+    final errorNotifier = ValueNotifier<String?>(null);
+
     final updatedName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor:
-            isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        title: Text(
-          'Edit $label',
-          style: TextStyle(
-            color:
-                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: TextStyle(
-            color:
-                isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
-          ),
-          decoration: InputDecoration(
-            hintText: '$label name',
-            filled: true,
-            fillColor:
-                isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text(
-              'Save',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => ValueListenableBuilder<String?>(
+          valueListenable: errorNotifier,
+          builder: (ctx, errorText, _) => AlertDialog(
+            backgroundColor:
+                isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+            title: Text(
+              'Edit $label',
               style: TextStyle(
-                color: AppColors.primary,
+                color: isDark
+                    ? AppColors.textPrimaryDark
+                    : AppColors.textPrimaryLight,
                 fontWeight: FontWeight.w700,
               ),
             ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.textPrimaryDark
+                        : AppColors.textPrimaryLight,
+                  ),
+                  onChanged: (_) {
+                    if (errorNotifier.value != null) {
+                      errorNotifier.value = null;
+                    }
+                  },
+                  decoration: InputDecoration(
+                    hintText: '$label name',
+                    filled: true,
+                    fillColor: isDark
+                        ? AppColors.backgroundDark
+                        : AppColors.backgroundLight,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.primary),
+                    ),
+                  ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    errorText,
+                    style: TextStyle(
+                      color: AppColors.error,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final name = controller.text.trim();
+                  if (name.isEmpty) return;
+                  if (name == location.name) {
+                    Navigator.pop(ctx);
+                    return;
+                  }
+
+                  // Check for duplicate sibling name.
+                  final duplicate = await ref
+                      .read(locationRepositoryProvider)
+                      .hasSiblingWithName(
+                        name: name,
+                        locationType: location.type.value,
+                        parentUuid: location.parentUuid,
+                        excludeUuid: location.uuid,
+                      );
+                  if (duplicate) {
+                    errorNotifier.value =
+                        _duplicateMessage(location.type, label);
+                    return;
+                  }
+
+                  if (ctx.mounted) Navigator.pop(ctx, name);
+                },
+                child: const Text(
+                  'Save',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -380,6 +441,18 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
       return;
     }
     _showInfo('$label updated');
+  }
+
+  /// Returns a user-friendly duplicate message for UI display.
+  static String _duplicateMessage(LocationType type, String label) {
+    switch (type) {
+      case LocationType.area:
+        return 'An area with this name already exists.';
+      case LocationType.room:
+        return 'A room with this name already exists in this area.';
+      case LocationType.zone:
+        return 'A zone with this name already exists in this room.';
+    }
   }
 
   Future<void> _deleteLocation(
@@ -534,14 +607,13 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     for (final location in locations) {
       if (location.parentUuid == parent.uuid &&
           location.type == LocationType.zone &&
-          location.name.trim().toLowerCase() == trimmed.toLowerCase()) {
+          _normalize(location.name) == _normalize(trimmed)) {
         existingZone = location;
         break;
       }
     }
 
     if (existingZone != null) {
-      final zone = existingZone;
       setState(() {
         if (parent.type == LocationType.room) {
           if (parent.parentUuid != null) {
@@ -552,7 +624,7 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
           _expandedAreas.add(parent.uuid);
         }
       });
-      _showInfo('${zone.name} already exists in ${parent.name}');
+      _showInfo('A zone with this name already exists in ${parent.name}.');
       return;
     }
 
@@ -662,7 +734,7 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
     for (final location in locations) {
       if (location.parentUuid == area.uuid &&
           location.type == LocationType.room &&
-          location.name.trim().toLowerCase() == trimmed.toLowerCase()) {
+          _normalize(location.name) == _normalize(trimmed)) {
         existingRoom = location;
         break;
       }
@@ -674,7 +746,7 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
         _expandedAreas.add(area.uuid);
         _expandedRooms.add(room.uuid);
       });
-      _showInfo('${room.name} already exists in ${area.name}');
+      _showInfo('A room with this name already exists in ${area.name}.');
       return;
     }
 

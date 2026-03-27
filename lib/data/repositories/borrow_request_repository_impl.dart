@@ -111,6 +111,7 @@ class BorrowRequestRepositoryImpl implements BorrowRequestRepository {
           lentOn: now,
           expectedReturnDate: request.requestedReturnDate,
           updatedAt: now,
+          lastUpdatedAt: now,
         ),
       );
 

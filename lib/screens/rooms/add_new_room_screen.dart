@@ -256,6 +256,11 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
     });
   }
 
+  /// Normalize a name for duplicate comparison: trim, collapse whitespace,
+  /// lowercase.
+  static String _normalize(String name) =>
+      name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
   // Opens the searchable area picker bottom sheet.
   Future<void> _showAreaPicker(List<LocationModel> roots) async {
     if (_isBusy) return;
@@ -281,7 +286,7 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
 
     // Check if an area with this name already exists.
     final existing = roots.firstWhere(
-      (r) => r.name.trim().toLowerCase() == areaName.toLowerCase(),
+      (r) => _normalize(r.name) == _normalize(areaName),
       orElse: () => LocationModel(
         uuid: '',
         name: '',

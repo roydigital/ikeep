@@ -79,6 +79,7 @@ final syncServiceProvider = Provider<SyncService>(
     firestore: ref.watch(firebaseFirestoreProvider),
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
+    historyDao: ref.watch(historyDaoProvider),
     imageUploadService: ref.watch(firebaseImageUploadServiceProvider),
     invoiceStorageService: ref.watch(firebaseInvoiceStorageServiceProvider),
   ),

@@ -13,6 +13,16 @@ abstract class LocationRepository {
   Future<List<LocationModel>> getRootLocations();
   Future<List<LocationModel>> getChildLocations(String parentUuid);
 
+  /// Returns true if a sibling with the same normalized name already exists.
+  ///
+  /// [excludeUuid] should be set when editing so the current record is skipped.
+  Future<bool> hasSiblingWithName({
+    required String name,
+    required String locationType,
+    String? parentUuid,
+    String? excludeUuid,
+  });
+
   /// Rebuilds the [fullPath] for [uuid] by walking ancestors in DB.
   Future<String> buildFullPath(String uuid);
 }

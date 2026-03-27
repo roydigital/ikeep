@@ -32,13 +32,13 @@ class ItemRepositoryImpl implements ItemRepository {
     String? movedByName,
   }) async {
     try {
-      final normalized = await _normalizeHouseholdItem(item);
+      final normalized = await _normalizeHouseholdItem(_applyCreateTimestamps(item));
       await itemDao.insertItem(normalized);
 
-      if (normalized.locationUuid != null) {
+      if (_hasAssignedLocation(normalized)) {
         final history = await _buildHistoryEntry(
           item: normalized,
-          movedAt: normalized.savedAt,
+          movedAt: normalized.lastMovedAt ?? normalized.savedAt,
           movedByMemberUuid: movedByMemberUuid,
           movedByName: movedByName,
         );
@@ -66,18 +66,22 @@ class ItemRepositoryImpl implements ItemRepository {
   }) async {
     try {
       final existing = await itemDao.getItemByUuid(item.uuid);
+      final locationChanged = _didLocationChange(existing, item);
       final normalized = await _normalizeHouseholdItem(
-        item.copyWith(updatedAt: DateTime.now()),
+        _applyUpdateTimestamps(
+          item,
+          existing: existing,
+          locationChanged: locationChanged,
+        ),
       );
-      final locationChanged = existing?.locationUuid != normalized.locationUuid;
       final wasShared = existing?.visibility.isHousehold ?? false;
 
       await itemDao.updateItem(normalized);
 
-      if (locationChanged && normalized.locationUuid != null) {
+      if (locationChanged && _hasAssignedLocation(normalized)) {
         final history = await _buildHistoryEntry(
           item: normalized,
-          movedAt: normalized.updatedAt ?? DateTime.now(),
+          movedAt: normalized.lastMovedAt ?? normalized.updatedAt ?? DateTime.now(),
           movedByMemberUuid: movedByMemberUuid,
           movedByName: movedByName,
         );
@@ -108,8 +112,11 @@ class ItemRepositoryImpl implements ItemRepository {
       final item = await itemDao.getItemByUuid(uuid);
       if (item == null) return Failure('Item not found: $uuid');
 
-      final archived =
-          item.copyWith(isArchived: true, updatedAt: DateTime.now());
+      final archived = _applyUpdateTimestamps(
+        item.copyWith(isArchived: true),
+        existing: item,
+        locationChanged: false,
+      );
       await itemDao.updateItem(archived);
       await locationDao.recalculateUsageCounts();
       await _syncItemVisibility(
@@ -283,5 +290,46 @@ class ItemRepositoryImpl implements ItemRepository {
     final email = user?.email?.trim();
     if (email != null && email.isNotEmpty) return email;
     return 'You';
+  }
+
+  Item _applyCreateTimestamps(Item item) {
+    final createdAt = item.savedAt;
+    final hasLocation = _hasAssignedLocation(item);
+    return item.copyWith(
+      updatedAt: item.updatedAt ?? createdAt,
+      lastUpdatedAt: item.lastUpdatedAt,
+      lastMovedAt: hasLocation ? (item.lastMovedAt ?? createdAt) : item.lastMovedAt,
+    );
+  }
+
+  Item _applyUpdateTimestamps(
+    Item item, {
+    required Item? existing,
+    required bool locationChanged,
+  }) {
+    final now = DateTime.now();
+    return item.copyWith(
+      updatedAt: now,
+      lastUpdatedAt:
+          locationChanged ? (existing?.lastUpdatedAt ?? item.lastUpdatedAt) : now,
+      lastMovedAt:
+          locationChanged ? now : (existing?.lastMovedAt ?? item.lastMovedAt),
+    );
+  }
+
+  bool _didLocationChange(Item? existing, Item next) {
+    if (existing == null) {
+      return _hasAssignedLocation(next);
+    }
+
+    return existing.locationUuid != next.locationUuid ||
+        existing.areaUuid != next.areaUuid ||
+        existing.roomUuid != next.roomUuid ||
+        existing.zoneUuid != next.zoneUuid;
+  }
+
+  bool _hasAssignedLocation(Item item) {
+    return (item.zoneUuid?.isNotEmpty ?? false) ||
+        (item.locationUuid?.isNotEmpty ?? false);
   }
 }

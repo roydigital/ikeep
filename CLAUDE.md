@@ -47,6 +47,7 @@ flutter clean                            # Clean build artifacts
 | Location | **Geolocator** (`geolocator`) + **Geocoding** (`geocoding`) — GPS → locality string |
 | Permissions | `permission_handler` — location permission requests |
 | Cloud Sync | Firebase Storage for images (wired via `FirebaseImageUploadService` + `ImageOptimizerService`) + `FirebaseSyncService` for item/location backup |
+| File Picking | `file_picker` — invoice/PDF file selection |
 | Background Tasks | **Workmanager** (`workmanager`) — weekly stale-item checks, monthly seasonal checks |
 | In-App Tours | **ShowCaseView** (`showcaseview`) — guided product tours for Home, Item Listing, Rooms, Settings |
 | Animations | `flutter_animate` — UI animations (save screen, etc.) |
@@ -61,7 +62,7 @@ flutter clean                            # Clean build artifacts
 ```
 lib/
 ├── main.dart                     # Entry: Firebase.initializeApp, BackgroundScheduler, loadStoredAppSettings, ProviderScope
-├── app.dart                      # IkeepApp (ConsumerWidget): router + theme + settings wiring + location hierarchy migration bootstrap
+├── app.dart                      # IkeepApp (ConsumerWidget): router + theme + settings wiring + location hierarchy migration bootstrap + auto-restore flow
 │
 ├── core/
 │   ├── constants/                # app_constants, db_constants, storage_constants, notification_constants, feature_limits
@@ -70,7 +71,7 @@ lib/
 │
 ├── domain/
 │   └── models/
-│       ├── item.dart             # Item (with lending + visibility + isBackedUp + hierarchical location FK fields: areaUuid, roomUuid, zoneUuid)
+│       ├── item.dart             # Item (with lending + visibility + isBackedUp + hierarchical location FKs + invoice fields + expiry/warranty dates)
 │       ├── location_model.dart   # LocationModel (hierarchical, with LocationType enum: area, room, zone)
 │       ├── area.dart             # Area model (top-level location type)
 │       ├── room.dart             # Room model (intermediate location type, child of Area)
@@ -86,11 +87,11 @@ lib/
 │       ├── nearby_item.dart      # NearbyItem (Firestore model — geo-based public catalog)
 │       ├── firestore_borrow_request.dart # FirestoreBorrowRequest (Firestore model)
 │       ├── ml_label.dart         # MlLabel (stub)
-│       └── sync_status.dart      # SyncStatus
+│       └── sync_status.dart      # SyncStatus, SyncResult (with per-item outcomes via ItemSyncOutcome)
 │
 ├── data/
 │   ├── database/
-│   │   ├── database_helper.dart  # SQLite singleton (v13), creates all 7 tables
+│   │   ├── database_helper.dart  # SQLite singleton (v14), creates all 7 tables
 │   │   ├── item_dao.dart         # CRUD for items table (with hierarchical location joins)
 │   │   ├── location_dao.dart     # CRUD for locations table
 │   │   ├── history_dao.dart      # CRUD for item_location_history (with member attribution)
@@ -110,25 +111,30 @@ lib/
 │   ├── database_provider.dart    # Riverpod providers for DAOs and DatabaseHelper
 │   ├── repository_providers.dart # Riverpod providers for repositories
 │   ├── auth_providers.dart       # authStateProvider, authSessionBootstrapProvider, isSignedInProvider, signInFirebaseWithGoogleAccount helper
-│   ├── item_providers.dart       # allItemsProvider, archivedItemsProvider, lentItemsProvider, lendableItemsProvider, forgottenItemsProvider, ItemsNotifier
+│   ├── item_providers.dart       # allItemsProvider, archivedItemsProvider, lentItemsProvider, lendableItemsProvider, forgottenItemsProvider, expiringSoonItemsProvider, warrantyEndingSoonItemsProvider, ItemsNotifier
 │   ├── location_providers.dart   # Flat location Riverpod providers (legacy, used during transition)
 │   ├── location_hierarchy_providers.dart # Hierarchical location providers: areasProvider, roomsForAreaProvider, zonesForRoomProvider, LocationSelectionController
 │   ├── location_usage_providers.dart # locationsWithDerivedUsageProvider — derived usage counts for locations
 │   ├── history_providers.dart    # History Riverpod providers
 │   ├── settings_provider.dart    # AppSettings + SettingsNotifier (SharedPreferences-backed; premium/billing state removed)
-│   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, locationHierarchyMigrationServiceProvider, etc.
+│   ├── service_providers.dart    # imageOptimizerServiceProvider, firebaseImageUploadServiceProvider, invoiceServiceProvider, pdfOptimizerServiceProvider, firebaseInvoiceStorageServiceProvider, locationHierarchyMigrationServiceProvider, etc.
 │   ├── household_providers.dart  # Household members, shared items, borrow requests
 │   ├── home_tour_provider.dart   # HomeTourController, ItemListingTourController, RoomsTourController, SettingsTourController — showcaseview tour state
 │   ├── sync_providers.dart       # SyncService providers
+│   ├── restore_provider.dart     # AutoRestoreNotifier, AutoRestoreStatus — auto-detect and restore cloud backups on fresh install
+│   ├── main_tab_provider.dart    # mainTabProvider — tracks active bottom nav tab index
 │   └── ml_label_providers.dart   # ML label providers
 │
 ├── services/
 │   ├── notification_service.dart # flutter_local_notifications: expiry + "still there" + lent reminders
 │   ├── image_service.dart        # Image pick + compress + local save
 │   ├── image_optimizer_service.dart # OptimizedImageResult + optimizeForUpload() — platform-specific format handling for cloud uploads
-│   ├── sync_service.dart         # Cloud sync orchestration (interface)
-│   ├── firebase_sync_service.dart# Firebase backup/sync for items & locations (unified limits from feature_limits.dart)
+│   ├── sync_service.dart         # Cloud sync orchestration (interface; includes hasRemoteBackup() for restore detection)
+│   ├── firebase_sync_service.dart# Firebase backup/sync for items, locations & invoices (unified limits from feature_limits.dart; per-item outcome tracking)
 │   ├── firebase_image_upload_service.dart # Firebase Storage uploads with ImageOptimizerService + upload caching (_CachedUpload)
+│   ├── firebase_invoice_storage_service.dart # Firebase Storage uploads for PDF/invoices with PdfOptimizerService + metadata tracking
+│   ├── invoice_service.dart      # Invoice file picking via FilePicker + native Android opening
+│   ├── pdf_optimizer_service.dart # PDF size validation + optimization (soft limit 2MB, hard limit 10MB)
 │   ├── background_scheduler_service.dart  # Workmanager-based: weeklyStaleCheckTask, monthlySeasonalCheckTask; ikeepWorkmanagerDispatcher entry point
 │   ├── household_cloud_service.dart # Firestore ops for household sharing & borrow requests
 │   ├── household_sync_service.dart  # Real-time Firestore listener sync for household items + history; uses PendingSyncDao for offline queue
@@ -144,24 +150,29 @@ lib/
 │   └── app_theme.dart            # AppTheme.lightTheme / AppTheme.darkTheme
 │
 ├── routing/
-│   ├── app_routes.dart           # AppRoutes class with static path constants (incl. /settings/manage-family)
+│   ├── app_routes.dart           # AppRoutes class with static path constants (incl. /settings/manage-family, /dashboard/*)
 │   └── app_router.dart           # routerProvider (GoRouter) with onboarding redirect logic
 │
 ├── screens/
-│   ├── home/home_screen.dart
+│   ├── main_screen.dart                           # Root shell: 4-tab PageView (Items, Rooms, Search, Settings) with AppNavBar
+│   ├── home/home_screen.dart                      # Home with dashboard cards (Lent Out, Expiring Soon, Warranty Ending)
+│   ├── home/dashboard_items_screen.dart           # Filtered item list by DashboardItemsMode (lentOut, expiringSoon, warrantyEndingSoon)
 │   ├── save/save_screen.dart
-│   ├── search/search_screen.dart
-│   ├── detail/item_detail_screen.dart
+│   ├── search/search_screen.dart                  # Enhanced with results showcase anchor + improved loading states
+│   ├── detail/item_detail_screen.dart             # Now supports invoice file picking and display
 │   ├── rooms/rooms_screen.dart
 │   ├── rooms/add_new_room_screen.dart
+│   ├── rooms/rooms_loading_overlay.dart           # Semi-transparent loading overlay for room operations
 │   ├── onboarding/onboarding_screen.dart
-│   ├── settings/settings_screen.dart              # Settings (premium/paywall UI removed)
+│   ├── settings/settings_screen.dart              # Settings (premium/paywall UI removed; auto-sync after sign-in)
 │   └── settings/household_settings_screen.dart  # Manage household: create/view, add members via email lookup (route: /settings/manage-family)
 │
 └── widgets/
-    ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings
-    ├── adaptive_image.dart           # Loads both local File and remote Network images with fallback handling
+    ├── app_nav_bar.dart              # 4 tabs: Items, Locations, Search, Settings (syncs with mainTabProvider)
+    ├── adaptive_image.dart           # Loads both local File and remote Network images with fallback handling + loading indicators
     ├── app_showcase.dart             # Showcase/tour config with TooltipActionConfig + built-in TooltipDefaultActionType buttons for showcaseview
+    ├── app_info_tooltip.dart         # Info icon button → bottom sheet with contextual help (title + description)
+    ├── swipe_back_wrapper.dart       # iOS-style left-edge swipe-to-go-back gesture for Android (24dp edge, 30% threshold)
     ├── item_activity_timeline.dart   # Timeline widget showing item location history (used in ItemDetailScreen)
     └── location_picker_sheet.dart    # Cascading location picker (Area → optional Room → Zone)
 
@@ -180,11 +191,13 @@ test/
 ├── domain/models/item_test.dart
 ├── providers/
 │   ├── item_providers_test.dart
+│   ├── restore_provider_test.dart
 │   └── settings_provider_test.dart
 ├── screens/
 │   ├── save_screen_test.dart
 │   └── settings_screen_test.dart
 └── services/
+    ├── backup_restore_test.dart
     ├── firebase_image_upload_service_test.dart
     └── firebase_sync_service_test.dart
 ```
@@ -208,10 +221,10 @@ Screens / Widgets
 - **Repositories** (`data/repositories/`) implement abstract interfaces; injected via Riverpod providers in `repository_providers.dart`. Some repositories (e.g., `HouseholdRepositoryImpl`) combine local SQLite + Firestore cloud services.
 - **Cloud services** (`services/`) handle Firestore reads/writes directly. `HouseholdCloudService` and `NearbyCloudService` are not wrapped by DAOs — they talk to Firestore, not SQLite. `HouseholdSyncService` bridges both layers: it listens to Firestore real-time snapshots and writes changes into local SQLite via DAOs; failed writes are queued in `pending_sync_operations` and replayed on reconnect.
 - **Providers** expose `FutureProvider`, `StateNotifierProvider`, etc. Mutations go through `*Notifier` classes which call `ref.invalidate(...)` to refresh derived providers.
-- **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths). Current named routes: `/`, `/onboarding`, `/home`, `/save`, `/item/:uuid`, `/rooms`, `/settings`, `/settings/manage-family`, `/search`.
+- **Routing** is GoRouter with a `redirect` guard: if onboarding is incomplete, redirect to `/onboarding`; otherwise go to `/home`. Routes are defined in `AppRoutes` (use `AppRoutes.itemDetailPath(uuid)` for parameterized paths). Current named routes: `/`, `/onboarding`, `/home`, `/dashboard/lent-out`, `/dashboard/expiring-soon`, `/dashboard/warranty-ending`, `/save`, `/item/:uuid`, `/rooms`, `/settings`, `/settings/manage-family`, `/search`.
 
-### SQLite Schema (7 tables, v13)
-- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes `is_backed_up` (per-item cloud backup opt-in), lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`), `visibility` (private/household), and hierarchical location FKs (`area_uuid`, `room_uuid`, `zone_uuid` — added in v13)
+### SQLite Schema (7 tables, v14)
+- `items` — core item data; `image_paths` and `tags` stored as JSON strings; includes `is_backed_up` (per-item cloud backup opt-in), lending fields (`is_lent`, `lent_to`, `lent_on`, `expected_return_date`, `lent_reminder_after_days`, `is_available_for_lending`), `visibility` (private/household), hierarchical location FKs (`area_uuid`, `room_uuid`, `zone_uuid` — added in v13), invoice fields (`invoice_path`, `invoice_file_name`, `invoice_file_size_bytes` — added in v14), and lifecycle fields (`expiry_date`, `warranty_end_date` — added in v14)
 - `locations` — hierarchical (self-referencing `parent_uuid`), tree via `full_path`; has `location_type` column (area/room/zone)
 - `item_location_history` — log of location changes per item; includes `moved_by_member_uuid` and `moved_by_name` for household attribution
 - `pending_sync_operations` — offline-first cloud sync queue; managed by `PendingSyncDao` (enqueue, getAll, deleteById); `HouseholdSyncService` flushes on reconnect
@@ -228,7 +241,7 @@ Screens / Widgets
 - `household_invites/{docId}` — Pending invitations
 - `nearby_items/{itemUuid}` — Public item listings (geo-based, top-level)
 - `nearby_borrow_requests/{requestId}` — Nearby borrow requests
-- `users/{uid}/items/{itemUuid}` — Backed-up items (sync)
+- `users/{uid}/items/{itemUuid}` — Backed-up items (sync; includes invoice metadata fields when invoice attached)
 - `users/{uid}/locations/{locationUuid}` — Backed-up locations (sync)
 
 ### Key Providers to Know
@@ -241,6 +254,8 @@ Screens / Widgets
 | `lentItemsProvider` | `FutureProvider<List<Item>>` | Items currently lent out |
 | `lendableItemsProvider` | `FutureProvider<List<Item>>` | Items available for lending |
 | `forgottenItemsProvider` | `FutureProvider<List<Item>>` | Items not used in 8+ months (weekly shuffle) |
+| `expiringSoonItemsProvider` | `FutureProvider<List<Item>>` | Items expiring within 30 days |
+| `warrantyEndingSoonItemsProvider` | `FutureProvider<List<Item>>` | Items with warranty ending within 30 days |
 | `itemSearchQueryProvider` | `StateProvider<String>` | Current search query |
 | `itemsNotifierProvider` | `StateNotifierProvider<ItemsNotifier, bool>` | save / update / archive / delete mutations |
 | `routerProvider` | `Provider<GoRouter>` | App router; watches `settingsProvider` for redirect |
@@ -261,6 +276,11 @@ Screens / Widgets
 | `householdMemberLookupProvider` | `StateNotifierProvider<HouseholdMemberLookupController, HouseholdMemberLookupState>` | Email-based user search for adding household members |
 | `imageOptimizerServiceProvider` | `Provider<ImageOptimizerService>` | Image optimization for cloud uploads |
 | `firebaseImageUploadServiceProvider` | `Provider<FirebaseImageUploadService>` | Firebase Storage uploads with caching + optimization |
+| `invoiceServiceProvider` | `Provider<InvoiceService>` | Invoice file picking + native opening |
+| `pdfOptimizerServiceProvider` | `Provider<PdfOptimizerService>` | PDF size validation + optimization |
+| `firebaseInvoiceStorageServiceProvider` | `Provider<FirebaseInvoiceStorageService>` | Firebase Storage uploads for invoices/PDFs |
+| `mainTabProvider` | `StateProvider<int>` | Active bottom nav tab index (0=Items, 1=Rooms, 2=Search, 3=Settings) |
+| `autoRestoreProvider` | `StateNotifierProvider<AutoRestoreNotifier, AutoRestoreState>` | Auto-detect and restore cloud backups on fresh install |
 | `homeTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Home screen showcase tour state |
 | `itemListingTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Item listing tour state |
 | `roomsTourControllerProvider` | `AsyncNotifierProvider.autoDispose` | Controls Rooms screen tour state |
@@ -307,13 +327,15 @@ Never hardcode colors — use `app_colors.dart` constants, then reference via `A
 
 | Screen | Status |
 |--------|--------|
+| Main Shell | Built — 4-tab PageView root (`MainScreen`) with AppNavBar |
 | Onboarding | Built |
-| Home | Built |
+| Home | Built — includes dashboard cards (Lent Out, Expiring Soon, Warranty Ending) |
+| Dashboard Items | Built — filtered item list by mode (`/dashboard/*` routes) |
 | Save | Built |
-| Search | Built |
-| Item Detail | Built |
-| Rooms / Add Room | Built |
-| Settings | Built (includes Online Backup section; premium/paywall UI removed) |
+| Search | Built — enhanced with results showcase anchor + improved loading states |
+| Item Detail | Built — supports invoice/PDF attachment |
+| Rooms / Add Room | Built — with loading overlay |
+| Settings | Built (includes Online Backup section + auto-sync after sign-in; premium/paywall UI removed) |
 | Household Settings | Built (`/settings/manage-family`) — create household, add members via email lookup, view members list |
 | Network | Future aspect only for now; detailed notes retained below for later implementation |
 | Login / Auth | Built (currently used for account/backup flows; previous Network-related notes remain below for future reference) |
@@ -404,12 +426,22 @@ Shows a sign-in prompt if the user is not authenticated.
 - `sharedWithMemberUuids` — list of member UUIDs this item is explicitly shared with (empty = all household members); cleared when item goes private
 - **Computed getters:** `isShared` → always `false`, `isNearby` → always `false` (social sharing disabled)
 
+### Item Invoice Fields (on Item model)
+- `invoicePath` — local file path to attached invoice/PDF (nullable)
+- `invoiceFileName` — original display name of the invoice file (nullable)
+- `invoiceFileSizeBytes` — original file size in bytes (nullable)
+
+### Item Lifecycle Fields (on Item model)
+- `expiryDate` — when the item expires (nullable; used for "Expiring Soon" dashboard)
+- `warrantyEndDate` — when warranty ends (nullable; used for "Warranty Ending Soon" dashboard)
+
 ### Feature Limits (Unified — No Premium Tiers)
 > Premium/billing system was fully removed for closed testing. All monetization code (Google Play Billing, PaywallScreen, AppPlan enum, isPremium state) has been deleted. Legacy SharedPreferences keys (`is_premium`, `app_plan`) are auto-migrated and cleared on first app load. Archived at `refs/archive/premium-pre-detach-20260324-145524` for future restoration.
 
 - **`feature_limits.dart`** — single source of truth for all limits (replaces removed `subscription_constants.dart`)
 - **Cloud backup limit:** `cloudBackupLimit = 1000` items; warning at `cloudBackupWarningThreshold = 900`
 - **Photo limit:** `itemPhotoLimit = 3` per item
+- **PDF size policy:** soft limit `pdfSoftLimitBytes = 2 MB` (triggers optimization), hard limit `pdfHardLimitBytes = 10 MB` (rejected outright)
 - **`isBackupEnabled`** — user must explicitly enable backup (stored as `backup_enabled` in SharedPreferences)
 - **`FirebaseSyncService`** — uses `feature_limits.dart` directly; `_ensureCloudQuotaForItem()` throws `SyncException('Cloud quota exceeded')` when limit is reached
 - **`backedUpItemsCountProvider`** — tracks how many items are currently backed up; used to render quota UI in settings
@@ -434,10 +466,34 @@ Shows a sign-in prompt if the user is not authenticated.
 - `ImageOptimizerService` — Optimizes images before cloud upload with platform-specific format selection (`optimizeForUpload()` → `OptimizedImageResult`)
 - `FirebaseImageUploadService` — Uploads to Firebase Storage; uses `ImageOptimizerService` + internal `_CachedUpload` cache to avoid re-uploading unchanged images
 
+### Invoice/PDF Upload Pipeline
+- User picks PDF via `InvoiceService` (uses `file_picker`) → `PickedInvoiceFile`
+- File validated against soft/hard limits by `PdfOptimizerService` (soft: 2MB → attempt optimization, hard: 10MB → `PdfTooLargeException`)
+- Uploaded to Firebase Storage by `FirebaseInvoiceStorageService` → `StoredInvoiceFile` (contains both HTTPS URL and durable storage path)
+- Firestore item doc stores invoice metadata: `invoiceStoragePath`, `invoiceOriginalFileName`, `invoiceOriginalFileSizeBytes`, `invoiceMimeType`, `invoiceCompressionApplied`, `invoiceUploadedAt`
+- On restore: resolved via storage path for fresh download URL
+- `InvoiceService.openInvoice()` opens invoices locally or via remote URL (platform-aware, native Android channel)
+
+### Auto-Restore Flow (Fresh Install Detection)
+- On app startup, `app.dart` checks if user is signed in but local DB is empty
+- `AutoRestoreNotifier.checkAndRestore()` calls `SyncService.hasRemoteBackup()` to detect cloud data
+- If backup found: status flows through `idle → detecting → restoring → complete/error`
+- Runs full sync (items, locations, images, invoices) from Firestore + Firebase Storage
+- `syncAfterSignIn()` provides interactive sync after Google sign-in from settings
+- On sign-out, restore state resets
+
+### Dashboard Cards (Home Screen)
+- Home screen displays 3 dashboard cards: Lent Out, Expiring Soon, Warranty Ending Soon
+- Each card shows count and navigates to `DashboardItemsScreen` with corresponding `DashboardItemsMode`
+- Routes: `/dashboard/lent-out`, `/dashboard/expiring-soon`, `/dashboard/warranty-ending`
+- Uses `lentItemsProvider`, `expiringSoonItemsProvider`, `warrantyEndingSoonItemsProvider`
+- "Expiring Soon" / "Warranty Ending" threshold: 30 days
+
 ### Hierarchical Location System (Area → Room → Zone)
 - **LocationType enum** (`location_model.dart`) — `area`, `room`, `zone`; each has `value` (storage string), `label` (display), `canContainChildren` (false for zones), `canBeItemLocation` (true only for zones), and `fromStorage()` factory for migration
 - **Hierarchy:** Area (top-level, e.g., "Kitchen") → Room (optional intermediate, e.g., "Pantry") → Zone (leaf, e.g., "Top Shelf") — Zone is the canonical item location
 - **DB migration (v13):** Added `area_uuid`, `room_uuid`, `zone_uuid` FK columns to `items` table with indexes; seeds `zone_uuid` from legacy `location_uuid` during upgrade
+- **DB migration (v14):** Added `invoice_path`, `invoice_file_name`, `invoice_file_size_bytes`, `expiry_date`, `warranty_end_date` columns to `items` table with index on `warranty_end_date`
 - **Migration service:** `LocationHierarchyMigrationService` runs at app startup via `locationHierarchyMigrationProvider`; backfills `areaUuid`/`roomUuid` for items that only have `zoneUuid`
 - **Location picker:** `LocationPickerSheet` widget provides cascading Area → optional Room → Zone selection UI
 - **Non-destructive:** Legacy `locationUuid` remains on Item until Phase 5 removes it; all queries support both old and new fields

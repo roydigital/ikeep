@@ -248,6 +248,7 @@ class HouseholdSyncService {
           clearHouseholdId: true,
           sharedWithMemberUuids: const [],
           updatedAt: DateTime.now(),
+          lastUpdatedAt: DateTime.now(),
         ),
       );
       _notifyLocalChange();
@@ -318,6 +319,10 @@ class HouseholdSyncService {
           _parseDateTime(data['createdAt']) ??
           DateTime.now(),
       updatedAt: _parseDateTime(data['updatedAt']),
+      lastUpdatedAt:
+          _parseDateTime(data['lastUpdatedAt']) ??
+          _parseDateTime(data['updatedAt']),
+      lastMovedAt: _parseDateTime(data['lastMovedAt']),
       latitude: (data['latitude'] as num?)?.toDouble(),
       longitude: (data['longitude'] as num?)?.toDouble(),
       expiryDate: _parseDateTime(data['expiryDate']),

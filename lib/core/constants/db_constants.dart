@@ -4,9 +4,10 @@ class DbConstants {
 
   static const String dbName = 'ikeep.db';
 
-  /// v13 — adds area_uuid, room_uuid, zone_uuid columns to items
-  /// (Phase 1 of the hierarchical location refactor).
-  static const int dbVersion = 14;
+  /// v15 — adds explicit item event timestamps:
+  /// - last_updated_at for non-location edits
+  /// - last_moved_at for actual location changes
+  static const int dbVersion = 15;
 
   // households
   static const String tableHouseholds = 'households';
@@ -27,6 +28,8 @@ class DbConstants {
   static const String colItemImagePaths = 'image_paths'; // JSON array string
   static const String colItemSavedAt = 'saved_at'; // Unix ms
   static const String colItemUpdatedAt = 'updated_at'; // Unix ms
+  static const String colItemLastUpdatedAt = 'last_updated_at'; // Unix ms
+  static const String colItemLastMovedAt = 'last_moved_at'; // Unix ms
   static const String colItemLatitude = 'latitude';
   static const String colItemLongitude = 'longitude';
   static const String colItemExpiryDate = 'expiry_date'; // Unix ms

@@ -500,6 +500,8 @@ class HouseholdCloudService {
           : null,
       'createdAt': item.savedAt.toIso8601String(),
       'updatedAt': FieldValue.serverTimestamp(),
+      'lastUpdatedAt': item.lastUpdatedAt?.toIso8601String(),
+      'lastMovedAt': item.lastMovedAt?.toIso8601String(),
     }, SetOptions(merge: true));
   }
 

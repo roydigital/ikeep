@@ -245,12 +245,16 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).saveItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncNotificationsForItem(preparedItem);
-    final syncError = await _preflightCloudSync(item: preparedItem);
+    final storedItem =
+        await _ref.read(itemRepositoryProvider).getItem(preparedItem.uuid) ??
+            preparedItem;
+
+    await _syncNotificationsForItem(storedItem);
+    final syncError = await _preflightCloudSync(item: storedItem);
 
     _invalidateItemLists();
     if (syncError == null) {
-      _scheduleCloudSync(item: preparedItem);
+      _scheduleCloudSync(item: storedItem);
     }
     return syncError;
   }
@@ -266,10 +270,13 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).updateItem(preparedItem);
     if (failure != null) return failure.message;
 
-    await _syncNotificationsForItem(preparedItem);
-    final syncItem = preparedItem.copyWith(updatedAt: DateTime.now());
+    final storedItem =
+        await _ref.read(itemRepositoryProvider).getItem(preparedItem.uuid) ??
+            preparedItem;
+
+    await _syncNotificationsForItem(storedItem);
     final syncError = await _preflightCloudSync(
-      item: syncItem,
+      item: storedItem,
       hadRemoteBackup: _hasRemoteBackup(existingItem),
     );
 
@@ -277,7 +284,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
     if (syncError == null) {
       _scheduleCloudSync(
-        item: syncItem,
+        item: storedItem,
         hadRemoteBackup: _hasRemoteBackup(existingItem),
       );
     }
@@ -297,12 +304,16 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    await _syncNotificationsForItem(preparedItem);
-    final syncError = await _preflightCloudSync(item: preparedItem);
+    final storedItem =
+        await _ref.read(itemRepositoryProvider).getItem(preparedItem.uuid) ??
+            preparedItem;
+
+    await _syncNotificationsForItem(storedItem);
+    final syncError = await _preflightCloudSync(item: storedItem);
 
     _invalidateItemLists();
     if (syncError == null) {
-      _scheduleCloudSync(item: preparedItem);
+      _scheduleCloudSync(item: storedItem);
     }
     return syncError;
   }
@@ -325,10 +336,13 @@ class ItemsNotifier extends StateNotifier<bool> {
         );
     if (failure != null) return failure.message;
 
-    await _syncNotificationsForItem(preparedItem);
-    final syncItem = preparedItem.copyWith(updatedAt: DateTime.now());
+    final storedItem =
+        await _ref.read(itemRepositoryProvider).getItem(preparedItem.uuid) ??
+            preparedItem;
+
+    await _syncNotificationsForItem(storedItem);
     final syncError = await _preflightCloudSync(
-      item: syncItem,
+      item: storedItem,
       hadRemoteBackup: _hasRemoteBackup(existingItem),
     );
 
@@ -336,7 +350,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     _ref.invalidate(singleItemProvider(preparedItem.uuid));
     if (syncError == null) {
       _scheduleCloudSync(
-        item: syncItem,
+        item: storedItem,
         hadRemoteBackup: _hasRemoteBackup(existingItem),
       );
     }
@@ -416,11 +430,14 @@ class ItemsNotifier extends StateNotifier<bool> {
         await _ref.read(itemRepositoryProvider).updateItem(syncItem);
     if (failure != null) return failure.message;
 
+    final storedItem =
+        await _ref.read(itemRepositoryProvider).getItem(item.uuid) ?? syncItem;
+
     final previousStatus = _ref.read(syncStatusProvider);
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
 
     final syncError =
-        await _syncItemToCloud(syncItem, fallbackStatus: previousStatus);
+        await _syncItemToCloud(storedItem, fallbackStatus: previousStatus);
 
     _invalidateItemLists();
     _ref.invalidate(singleItemProvider(item.uuid));

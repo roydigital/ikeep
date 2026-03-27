@@ -446,16 +446,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                                     const SizedBox(height: 24),
                                     historyAsync.when(
                                       data: (h) => _meta(
-                                          context,
-                                          isDark,
-                                          item.savedAt,
-                                          h.isEmpty
-                                              ? item.updatedAt
-                                              : h.last.movedAt),
-                                      loading: () => _meta(context, isDark,
-                                          item.savedAt, item.updatedAt),
-                                      error: (_, __) => _meta(context, isDark,
-                                          item.savedAt, item.updatedAt),
+                                        context,
+                                        isDark,
+                                        item,
+                                        latestHistory:
+                                            h.isEmpty ? null : h.last,
+                                      ),
+                                      loading: () =>
+                                          _meta(context, isDark, item),
+                                      error: (_, __) =>
+                                          _meta(context, isDark, item),
                                     ),
 
                                     const SizedBox(height: 24),
@@ -2657,9 +2657,17 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   }
 
   Widget _meta(
-      BuildContext context, bool isDark, DateTime savedAt, DateTime? movedAt) {
+    BuildContext context,
+    bool isDark,
+    Item item, {
+    ItemLocationHistory? latestHistory,
+  }) {
     final textPrimary =
         isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final secondaryMeta = _resolveLatestMetadataEvent(
+      item,
+      latestHistory: latestHistory,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
@@ -2669,7 +2677,9 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         ),
       ),
       child: Row(children: [
-        Expanded(child: _metaCell(isDark, 'SAVED', _ago(savedAt), textPrimary)),
+        Expanded(
+          child: _metaCell(isDark, 'SAVED', _ago(item.savedAt), textPrimary),
+        ),
         Container(
             width: 1,
             height: 52,
@@ -2677,9 +2687,38 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         Expanded(
             child: Padding(
                 padding: const EdgeInsets.only(left: 22),
-                child: _metaCell(isDark, 'LAST MOVED',
-                    movedAt == null ? '-' : _ago(movedAt), textPrimary))),
+                child: _metaCell(
+                  isDark,
+                  secondaryMeta?.label ?? 'LAST UPDATED',
+                  secondaryMeta == null ? '-' : _ago(secondaryMeta.timestamp),
+                  textPrimary,
+                ))),
       ]),
+    );
+  }
+
+  _DetailMetadataEvent? _resolveLatestMetadataEvent(
+    Item item, {
+    ItemLocationHistory? latestHistory,
+  }) {
+    final lastMovedAt = item.lastMovedAt ?? latestHistory?.movedAt;
+    final lastUpdatedAt = item.lastUpdatedAt ?? item.updatedAt;
+
+    if (lastMovedAt == null && lastUpdatedAt == null) {
+      return null;
+    }
+
+    if (lastMovedAt != null &&
+        (lastUpdatedAt == null || !lastUpdatedAt.isAfter(lastMovedAt))) {
+      return _DetailMetadataEvent(
+        label: 'LAST MOVED',
+        timestamp: lastMovedAt,
+      );
+    }
+
+    return _DetailMetadataEvent(
+      label: 'LAST UPDATED',
+      timestamp: lastUpdatedAt!,
     );
   }
 
@@ -3184,6 +3223,16 @@ class _VisibilityOptionTile extends StatelessWidget {
 }
 
 enum ImageSourceOption { camera, gallery }
+
+class _DetailMetadataEvent {
+  const _DetailMetadataEvent({
+    required this.label,
+    required this.timestamp,
+  });
+
+  final String label;
+  final DateTime timestamp;
+}
 
 class _BorrowRequestTile extends StatelessWidget {
   const _BorrowRequestTile({

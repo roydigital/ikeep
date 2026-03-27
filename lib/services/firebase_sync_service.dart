@@ -6,9 +6,11 @@ import 'package:flutter/foundation.dart';
 
 import '../core/constants/feature_limits.dart';
 import '../core/errors/app_exception.dart';
+import '../data/database/history_dao.dart';
 import '../data/database/item_dao.dart';
 import '../data/database/location_dao.dart';
 import '../domain/models/item.dart';
+import '../domain/models/item_location_history.dart';
 import '../domain/models/item_visibility.dart';
 import '../domain/models/location_model.dart';
 import '../domain/models/sync_status.dart';
@@ -82,12 +84,14 @@ class FirebaseSyncService implements SyncService {
     required FirebaseFirestore firestore,
     required ItemDao itemDao,
     required LocationDao locationDao,
+    required HistoryDao historyDao,
     required FirebaseImageUploadService imageUploadService,
     required FirebaseInvoiceStorageService invoiceStorageService,
   })  : _auth = auth,
         _firestore = firestore,
         _itemDao = itemDao,
         _locationDao = locationDao,
+        _historyDao = historyDao,
         _imageUploadService = imageUploadService,
         _invoiceStorageService = invoiceStorageService;
 
@@ -95,6 +99,7 @@ class FirebaseSyncService implements SyncService {
   final FirebaseFirestore _firestore;
   final ItemDao _itemDao;
   final LocationDao _locationDao;
+  final HistoryDao _historyDao;
   final FirebaseImageUploadService _imageUploadService;
   final FirebaseInvoiceStorageService _invoiceStorageService;
 
@@ -116,6 +121,7 @@ class FirebaseSyncService implements SyncService {
   static const _usersCollection = 'users';
   static const _itemsCollection = 'items';
   static const _locationsCollection = 'locations';
+  static const _historyCollection = 'history';
 
   User? get _user => _auth.currentUser;
 
@@ -296,6 +302,17 @@ class FirebaseSyncService implements SyncService {
         ),
       );
 
+      // ── Step 5: Sync location history to Firestore subcollection ──────
+      try {
+        await _syncItemHistory(item.uuid);
+      } catch (e) {
+        debugPrint(
+          '[IkeepSync] [${sw.elapsedMilliseconds}ms] HISTORY SYNC FAILED '
+          'for ${item.uuid}: $e — item metadata was saved successfully',
+        );
+        // History sync failure does not downgrade overall item sync status.
+      }
+
       debugPrint(
         '[IkeepSync] syncItem COMPLETE for ${item.uuid} '
         'in ${sw.elapsedMilliseconds}ms (partial=${ !fullyUploaded})',
@@ -361,6 +378,7 @@ class FirebaseSyncService implements SyncService {
           userId: _user!.uid,
           itemUuid: uuid,
         ),
+        _deleteRemoteItemHistory(uuid),
       ]);
       await _itemsRef.doc(uuid).delete();
       _lastSyncedAt = DateTime.now();
@@ -561,6 +579,7 @@ class FirebaseSyncService implements SyncService {
 
       // ── Import remote-only items locally ──────────────────────────────
       var importedCount = 0;
+      final importedItemUuids = <String>[];
       for (var i = 0; i < itemsToImportLocally.length; i += _syncBatchSize) {
         final batch = itemsToImportLocally.skip(i).take(_syncBatchSize);
         await Future.wait(
@@ -574,6 +593,7 @@ class FirebaseSyncService implements SyncService {
               } else {
                 await _itemDao.insertItem(restoredItem);
               }
+              importedItemUuids.add(restoredItem.uuid);
               importedCount++;
             } catch (e) {
               debugPrint(
@@ -587,6 +607,26 @@ class FirebaseSyncService implements SyncService {
         debugPrint(
           '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] '
           'Imported $importedCount/${itemsToImportLocally.length} items',
+        );
+      }
+
+      // ── Restore location history for imported items ────────────────
+      if (importedItemUuids.isNotEmpty) {
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] '
+          'Restoring history for ${importedItemUuids.length} imported item(s)...',
+        );
+        for (final itemUuid in importedItemUuids) {
+          try {
+            await _restoreItemHistory(itemUuid);
+          } catch (e) {
+            debugPrint(
+              '[IkeepSync] History restore failed for $itemUuid: $e',
+            );
+          }
+        }
+        debugPrint(
+          '[IkeepSync] [${syncSw.elapsedMilliseconds}ms] History restore complete',
         );
       }
 
@@ -897,8 +937,14 @@ class FirebaseSyncService implements SyncService {
       zoneUuid: data['zoneUuid'] as String?,
       imagePaths: resolvedImagePaths,
       tags: List<String>.from((data['tags'] as List?) ?? const []),
-      savedAt: _parseDateTime(data['savedAt']) ?? DateTime.now(),
+      savedAt: _parseDateTime(data['savedAt']) ??
+          _parseDateTime(data['createdAt']) ??
+          DateTime.now(),
       updatedAt: _parseDateTime(data['updatedAt']),
+      lastUpdatedAt:
+          _parseDateTime(data['lastUpdatedAt']) ??
+          _parseDateTime(data['updatedAt']),
+      lastMovedAt: _parseDateTime(data['lastMovedAt']),
       latitude: (data['latitude'] as num?)?.toDouble(),
       longitude: (data['longitude'] as num?)?.toDouble(),
       expiryDate: _parseDateTime(data['expiryDate']),
@@ -1015,5 +1061,94 @@ class FirebaseSyncService implements SyncService {
           message.contains('no object exists at the desired reference');
     }
     return false;
+  }
+
+  /// Returns the history subcollection reference for a given item.
+  /// Path: users/{uid}/items/{itemUuid}/history
+  CollectionReference<Map<String, dynamic>> _historyRef(String itemUuid) =>
+      _itemsRef.doc(itemUuid).collection(_historyCollection);
+
+  /// Uploads all local history records for an item to its Firestore
+  /// subcollection. Uses batched writes for efficiency. Existing records
+  /// are merged so re-syncing the same item is idempotent.
+  Future<void> _syncItemHistory(String itemUuid) async {
+    final localHistory = await _historyDao.getHistoryForItem(itemUuid);
+    if (localHistory.isEmpty) {
+      debugPrint('[IkeepSync] History sync: no local history for $itemUuid');
+      return;
+    }
+
+    debugPrint(
+      '[IkeepSync] History sync: uploading ${localHistory.length} '
+      'record(s) for item $itemUuid',
+    );
+
+    final ref = _historyRef(itemUuid);
+    final batch = _firestore.batch();
+    for (final entry in localHistory) {
+      batch.set(
+        ref.doc(entry.uuid),
+        entry.toJson(),
+        SetOptions(merge: true),
+      );
+    }
+    await batch.commit();
+
+    debugPrint(
+      '[IkeepSync] History sync: uploaded ${localHistory.length} '
+      'record(s) for item $itemUuid',
+    );
+  }
+
+  /// Downloads all history records for an item from Firestore and upserts
+  /// them into local SQLite. Uses the history UUID as a dedup key so
+  /// duplicate records are safely skipped.
+  Future<void> _restoreItemHistory(String itemUuid) async {
+    final snapshot = await _historyRef(itemUuid).get();
+    if (snapshot.docs.isEmpty) {
+      debugPrint('[IkeepSync] History restore: no remote history for $itemUuid');
+      return;
+    }
+
+    debugPrint(
+      '[IkeepSync] History restore: merging ${snapshot.docs.length} '
+      'record(s) for item $itemUuid',
+    );
+
+    var merged = 0;
+    for (final doc in snapshot.docs) {
+      try {
+        final history = ItemLocationHistory.fromJson(doc.data());
+        await _historyDao.upsertHistory(history);
+        merged++;
+      } catch (e) {
+        debugPrint(
+          '[IkeepSync] History restore: failed to merge ${doc.id} '
+          'for item $itemUuid: $e',
+        );
+      }
+    }
+
+    debugPrint(
+      '[IkeepSync] History restore: merged $merged/${snapshot.docs.length} '
+      'record(s) for item $itemUuid',
+    );
+  }
+
+  /// Deletes the entire history subcollection for an item from Firestore.
+  Future<void> _deleteRemoteItemHistory(String itemUuid) async {
+    final snapshot = await _historyRef(itemUuid).get();
+    if (snapshot.docs.isEmpty) return;
+
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+
+    debugPrint(
+      '[IkeepSync] Deleted ${snapshot.docs.length} remote history '
+      'record(s) for item $itemUuid',
+    );
   }
 }

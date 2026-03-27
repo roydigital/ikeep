@@ -149,6 +149,53 @@ class LocationDao {
     });
   }
 
+  /// Returns true if a sibling location with the same normalized name exists.
+  ///
+  /// "Sibling" means same [parentUuid] (null for root/areas) and same
+  /// [locationType]. Normalization: trim, collapse whitespace, lowercase.
+  /// When [excludeUuid] is provided the check ignores that record (for edits).
+  Future<bool> hasSiblingWithName({
+    required String name,
+    required String locationType,
+    String? parentUuid,
+    String? excludeUuid,
+  }) async {
+    final db = await _db;
+    final normalized = _normalizeName(name);
+
+    // Build WHERE clause dynamically.
+    final whereParts = <String>[
+      '${DbConstants.colLocType} = ?',
+    ];
+    final whereArgs = <Object>[locationType];
+
+    if (parentUuid == null) {
+      whereParts.add('${DbConstants.colLocParentUuid} IS NULL');
+    } else {
+      whereParts.add('${DbConstants.colLocParentUuid} = ?');
+      whereArgs.add(parentUuid);
+    }
+
+    if (excludeUuid != null) {
+      whereParts.add('${DbConstants.colLocUuid} != ?');
+      whereArgs.add(excludeUuid);
+    }
+
+    final rows = await db.query(
+      DbConstants.tableLocations,
+      columns: [DbConstants.colLocName],
+      where: whereParts.join(' AND '),
+      whereArgs: whereArgs,
+    );
+
+    return rows.any((row) => _normalizeName(row[DbConstants.colLocName] as String) == normalized);
+  }
+
+  /// Normalize a name for duplicate comparison: trim, collapse inner
+  /// whitespace, and lowercase.
+  static String _normalizeName(String name) =>
+      name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
   /// Returns the ordered ancestor chain for a location (from root to parent).
   Future<List<LocationModel>> getAncestors(String uuid) async {
     final ancestors = <LocationModel>[];

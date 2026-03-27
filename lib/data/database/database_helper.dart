@@ -74,6 +74,8 @@ class DatabaseHelper {
         ${DbConstants.colItemTags} TEXT NOT NULL DEFAULT '[]',
         ${DbConstants.colItemSavedAt} INTEGER NOT NULL,
         ${DbConstants.colItemUpdatedAt} INTEGER,
+        ${DbConstants.colItemLastUpdatedAt} INTEGER,
+        ${DbConstants.colItemLastMovedAt} INTEGER,
         ${DbConstants.colItemLatitude} REAL,
         ${DbConstants.colItemLongitude} REAL,
         ${DbConstants.colItemExpiryDate} INTEGER,
@@ -597,6 +599,42 @@ class DatabaseHelper {
         'CREATE INDEX IF NOT EXISTS idx_items_warranty_end_date '
         'ON ${DbConstants.tableItems}(${DbConstants.colItemWarrantyEndDate})',
       );
+    }
+
+    if (oldVersion < 15) {
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemLastUpdatedAt,
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        DbConstants.tableItems,
+        DbConstants.colItemLastMovedAt,
+        'INTEGER',
+      );
+
+      // Backfill the dedicated timestamps for older installs.
+      // `updated_at` historically mixed general edits and moves, so we only
+      // trust it for `last_updated_at`. Real moves are recovered from the
+      // location history table when possible.
+      await db.execute('''
+        UPDATE ${DbConstants.tableItems}
+        SET ${DbConstants.colItemLastUpdatedAt} = ${DbConstants.colItemUpdatedAt}
+        WHERE ${DbConstants.colItemLastUpdatedAt} IS NULL
+          AND ${DbConstants.colItemUpdatedAt} IS NOT NULL
+      ''');
+
+      await db.execute('''
+        UPDATE ${DbConstants.tableItems} AS items
+        SET ${DbConstants.colItemLastMovedAt} = (
+          SELECT MAX(${DbConstants.colHistMovedAt})
+          FROM ${DbConstants.tableHistory} history
+          WHERE history.${DbConstants.colHistItemUuid} = items.${DbConstants.colItemUuid}
+        )
+        WHERE ${DbConstants.colItemLastMovedAt} IS NULL
+      ''');
     }
   }
 

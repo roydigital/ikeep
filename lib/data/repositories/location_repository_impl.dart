@@ -32,6 +32,16 @@ class LocationRepositoryImpl implements LocationRepository {
   @override
   Future<Failure?> saveLocation(LocationModel location) async {
     try {
+      // Duplicate-name guard.
+      final duplicate = await hasSiblingWithName(
+        name: location.name,
+        locationType: location.type.value,
+        parentUuid: location.parentUuid,
+      );
+      if (duplicate) {
+        return Failure(_duplicateMessage(location.type), null);
+      }
+
       final fullPath = await _buildFullPathForLocation(location);
       await locationDao.insertLocation(location.copyWith(fullPath: fullPath));
       return null;
@@ -43,12 +53,49 @@ class LocationRepositoryImpl implements LocationRepository {
   @override
   Future<Failure?> updateLocation(LocationModel location) async {
     try {
+      // Duplicate-name guard (exclude self).
+      final duplicate = await hasSiblingWithName(
+        name: location.name,
+        locationType: location.type.value,
+        parentUuid: location.parentUuid,
+        excludeUuid: location.uuid,
+      );
+      if (duplicate) {
+        return Failure(_duplicateMessage(location.type), null);
+      }
+
       final fullPath = await _buildFullPathForLocation(location);
       await locationDao.updateLocation(location.copyWith(fullPath: fullPath));
       await _refreshDescendantPaths(location.uuid);
       return null;
     } catch (e) {
       return Failure('Failed to update location: $e', e);
+    }
+  }
+
+  @override
+  Future<bool> hasSiblingWithName({
+    required String name,
+    required String locationType,
+    String? parentUuid,
+    String? excludeUuid,
+  }) =>
+      locationDao.hasSiblingWithName(
+        name: name,
+        locationType: locationType,
+        parentUuid: parentUuid,
+        excludeUuid: excludeUuid,
+      );
+
+  /// Builds a user-friendly duplicate-name error message.
+  static String _duplicateMessage(LocationType type) {
+    switch (type) {
+      case LocationType.area:
+        return 'An area with this name already exists.';
+      case LocationType.room:
+        return 'A room with this name already exists in this area.';
+      case LocationType.zone:
+        return 'A zone with this name already exists in this room.';
     }
   }
 

@@ -21,6 +21,8 @@ class Item {
     this.imagePaths = const [],
     this.tags = const [],
     this.updatedAt,
+    this.lastUpdatedAt,
+    this.lastMovedAt,
     this.latitude,
     this.longitude,
     this.expiryDate,
@@ -77,6 +79,8 @@ class Item {
   final List<String> tags;
   final DateTime savedAt;
   final DateTime? updatedAt;
+  final DateTime? lastUpdatedAt;
+  final DateTime? lastMovedAt;
   final double? latitude;
   final double? longitude;
   final DateTime? expiryDate;
@@ -130,6 +134,8 @@ class Item {
     List<String>? tags,
     DateTime? savedAt,
     DateTime? updatedAt,
+    DateTime? lastUpdatedAt,
+    DateTime? lastMovedAt,
     double? latitude,
     double? longitude,
     DateTime? expiryDate,
@@ -190,6 +196,8 @@ class Item {
       tags: tags ?? this.tags,
       savedAt: savedAt ?? this.savedAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
+      lastMovedAt: lastMovedAt ?? this.lastMovedAt,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       expiryDate: clearExpiryDate ? null : (expiryDate ?? this.expiryDate),
@@ -248,6 +256,8 @@ class Item {
       'tags': jsonEncode(tags),
       'saved_at': savedAt.millisecondsSinceEpoch,
       'updated_at': updatedAt?.millisecondsSinceEpoch,
+      'last_updated_at': lastUpdatedAt?.millisecondsSinceEpoch,
+      'last_moved_at': lastMovedAt?.millisecondsSinceEpoch,
       'latitude': latitude,
       'longitude': longitude,
       'expiry_date': expiryDate?.millisecondsSinceEpoch,
@@ -287,6 +297,14 @@ class Item {
       savedAt: DateTime.fromMillisecondsSinceEpoch(map['saved_at'] as int),
       updatedAt: map['updated_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['updated_at'] as int)
+          : null,
+      lastUpdatedAt: map['last_updated_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['last_updated_at'] as int)
+          : (map['updated_at'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(map['updated_at'] as int)
+              : null),
+      lastMovedAt: map['last_moved_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['last_moved_at'] as int)
           : null,
       latitude: map['latitude'] as double?,
       longitude: map['longitude'] as double?,
@@ -360,6 +378,8 @@ class Item {
       'tags': tags,
       'savedAt': savedAt.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
+      'lastUpdatedAt': lastUpdatedAt?.toIso8601String(),
+      'lastMovedAt': lastMovedAt?.toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
       'expiryDate': expiryDate?.toIso8601String(),
@@ -398,6 +418,10 @@ class Item {
       ),
       savedAt: DateTime.parse(json['savedAt'] as String),
       updatedAt: _dateTimeFromJson(json['updatedAt']),
+      lastUpdatedAt:
+          _dateTimeFromJson(json['lastUpdatedAt']) ??
+          _dateTimeFromJson(json['updatedAt']),
+      lastMovedAt: _dateTimeFromJson(json['lastMovedAt']),
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       expiryDate: _dateTimeFromJson(json['expiryDate']),
