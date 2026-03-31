@@ -1,7 +1,7 @@
 name: ikeep
 description: "Where Did I Keep It? — A smart item location tracker"
 publish_to: 'none'
-version: 1.0.2+3
+version: 1.0.3+4
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

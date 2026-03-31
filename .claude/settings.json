@@ -7,7 +7,9 @@
       "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/lib/data/repositories/**)",
       "Bash(flutter test:*)",
       "Read(//c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev/**)",
-      "Bash(grep -h \"^final.*Provider\\\\|^const.*Provider\" lib/providers/*.dart)"
+      "Bash(grep -h \"^final.*Provider\\\\|^const.*Provider\" lib/providers/*.dart)",
+      "Bash(flutter clean:*)",
+      "Bash(flutter build:*)"
     ]
   }
 }
