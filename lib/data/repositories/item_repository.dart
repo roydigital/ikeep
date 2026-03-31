@@ -11,6 +11,13 @@ abstract class ItemRepository {
     String? movedByName,
   });
 
+  /// Saves multiple brand new items in one local transaction.
+  Future<SaveItemsBatchResult> saveItemsBatch(
+    List<Item> items, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  });
+
   /// Updates an existing item. If location changed, records it in history
   /// and updates the old location's usage count.
   Future<Failure?> updateItem(
@@ -41,4 +48,16 @@ abstract class ItemRepository {
   Future<List<Item>> searchItems(String query);
 
   Future<List<Item>> getArchivedItems();
+}
+
+class SaveItemsBatchResult {
+  const SaveItemsBatchResult({
+    required this.savedItems,
+    this.failure,
+  });
+
+  final List<Item> savedItems;
+  final Failure? failure;
+
+  bool get hasFailure => failure != null;
 }

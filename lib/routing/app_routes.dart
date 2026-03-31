@@ -15,7 +15,11 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String manageFamily = '/settings/manage-family';
   static const String search = '/search';
+  static const String zoneQuickAdd = '/zones/:zoneUuid/quick-add-multiple';
 
   /// Constructs the [itemDetail] path with the given [uuid].
   static String itemDetailPath(String uuid) => '/item/$uuid';
+
+  static String zoneQuickAddPath(String zoneUuid) =>
+      '/zones/$zoneUuid/quick-add-multiple';
 }

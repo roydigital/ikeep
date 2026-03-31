@@ -24,7 +24,12 @@ import '../../theme/app_dimensions.dart';
 import '../../widgets/location_picker_sheet.dart';
 
 class SaveScreen extends ConsumerStatefulWidget {
-  const SaveScreen({super.key});
+  const SaveScreen({
+    super.key,
+    this.initialZoneUuid,
+  });
+
+  final String? initialZoneUuid;
 
   @override
   ConsumerState<SaveScreen> createState() => _SaveScreenState();
@@ -53,7 +58,15 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _capturePhoto());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final initialZoneUuid = widget.initialZoneUuid;
+      if (initialZoneUuid != null && initialZoneUuid.trim().isNotEmpty) {
+        await _resolveAndSetZone(initialZoneUuid);
+      }
+      if (mounted) {
+        await _capturePhoto();
+      }
+    });
   }
 
   @override

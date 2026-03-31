@@ -12,12 +12,14 @@ import '../database/history_dao.dart';
 import '../database/item_dao.dart';
 import '../database/location_dao.dart';
 import '../database/pending_sync_dao.dart';
+import '../database/database_helper.dart';
 import '../../services/household_cloud_service.dart';
 import '../../services/item_cloud_media_service.dart';
 import 'item_repository.dart';
 
 class ItemRepositoryImpl implements ItemRepository {
   ItemRepositoryImpl({
+    required this.databaseHelper,
     required this.itemDao,
     required this.locationDao,
     required this.historyDao,
@@ -26,6 +28,7 @@ class ItemRepositoryImpl implements ItemRepository {
     required this.itemCloudMediaService,
   });
 
+  final DatabaseHelper databaseHelper;
   final ItemDao itemDao;
   final LocationDao locationDao;
   final HistoryDao historyDao;
@@ -72,6 +75,88 @@ class ItemRepositoryImpl implements ItemRepository {
       return Failure(e.message, e);
     } catch (e) {
       return Failure('Failed to save item', e);
+    }
+  }
+
+  @override
+  Future<SaveItemsBatchResult> saveItemsBatch(
+    List<Item> items, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  }) async {
+    if (items.isEmpty) {
+      return const SaveItemsBatchResult(savedItems: []);
+    }
+
+    try {
+      final normalizedItems = <Item>[];
+      for (final item in items) {
+        normalizedItems.add(
+          await _normalizeHouseholdItem(_applyCreateTimestamps(item)),
+        );
+      }
+
+      final locationNamesByUuid = <String, String>{};
+      final histories = <ItemLocationHistory>[];
+      for (final item in normalizedItems) {
+        if (!_hasAssignedLocation(item)) continue;
+        histories.add(
+          await _buildHistoryEntryForBatch(
+            item: item,
+            movedAt: item.lastMovedAt ?? item.savedAt,
+            movedByMemberUuid: movedByMemberUuid,
+            movedByName: movedByName,
+            locationNamesByUuid: locationNamesByUuid,
+          ),
+        );
+      }
+
+      final pendingRequests = normalizedItems
+          .where((item) => item.isBackedUp)
+          .map(
+            (item) => PendingSyncEnqueueRequest(
+              operationType: 'upsert',
+              entityType: _personalPendingSyncEntityType,
+              entityUuid: item.uuid,
+              payload: _personalUpsertPayload(item, reason: 'save_batch'),
+            ),
+          )
+          .toList(growable: false);
+
+      await databaseHelper.transaction((txn) async {
+        await itemDao.insertItemsInTransaction(txn, normalizedItems);
+        if (histories.isNotEmpty) {
+          await historyDao.insertHistoriesInTransaction(txn, histories);
+        }
+        if (pendingRequests.isNotEmpty) {
+          await pendingSyncDao.enqueueAllInTransaction(txn, pendingRequests);
+        }
+        await locationDao.recalculateUsageCountsInTransaction(txn);
+      });
+
+      for (final history in histories) {
+        _trySyncHistory(history);
+      }
+      for (final item in normalizedItems) {
+        _trySyncVisibility(item: item);
+      }
+
+      return SaveItemsBatchResult(savedItems: normalizedItems);
+    } on DatabaseException catch (e) {
+      return SaveItemsBatchResult(
+        savedItems: const [],
+        failure: Failure('Failed to save items', e),
+      );
+    } on StateError catch (e) {
+      return SaveItemsBatchResult(
+        savedItems: const [],
+        failure: Failure(e.message, e),
+      );
+    } catch (e) {
+      return SaveItemsBatchResult(
+        savedItems: const [],
+        failure: Failure('Failed to save items', e),
+      );
     }
   }
 
@@ -333,6 +418,34 @@ class ItemRepositoryImpl implements ItemRepository {
     );
   }
 
+  Future<ItemLocationHistory> _buildHistoryEntryForBatch({
+    required Item item,
+    required DateTime movedAt,
+    required Map<String, String> locationNamesByUuid,
+    String? movedByMemberUuid,
+    String? movedByName,
+  }) async {
+    final locationUuid = item.locationUuid;
+    final locationName = await _resolveLocationNameForHistory(
+      locationUuid,
+      cache: locationNamesByUuid,
+    );
+
+    return ItemLocationHistory(
+      uuid: generateUuid(),
+      itemUuid: item.uuid,
+      locationUuid: locationUuid,
+      locationName: locationName,
+      movedAt: movedAt,
+      movedByMemberUuid:
+          movedByMemberUuid ?? householdCloudService.currentUser?.uid,
+      movedByName: movedByName ?? _currentUserDisplayName(),
+      userEmail: householdCloudService.currentUser?.email,
+      householdId: item.householdId,
+      actionDescription: 'Moved to $locationName',
+    );
+  }
+
   /// Fire-and-forget cloud sync for shared history. Errors are logged but
   /// never propagate — the local SQLite write is the source of truth.
   void _trySyncHistory(ItemLocationHistory history) {
@@ -458,16 +571,7 @@ class ItemRepositoryImpl implements ItemRepository {
         operationType: 'upsert',
         entityType: _personalPendingSyncEntityType,
         entityUuid: item.uuid,
-        payload: {
-          'itemUuid': item.uuid,
-          'itemName': item.name,
-          'reason': reason,
-          'isBackedUp': item.isBackedUp,
-          'hasRemoteIdentity': _hasRemoteIdentity(item),
-          'updatedAt': item.updatedAt?.toIso8601String(),
-          'lastMovedAt': item.lastMovedAt?.toIso8601String(),
-          'lastSyncedAt': item.lastSyncedAt?.toIso8601String(),
-        },
+        payload: _personalUpsertPayload(item, reason: reason),
       );
       debugPrint(
         'ItemRepository: queued personal upsert ${item.uuid} reason=$reason',
@@ -477,6 +581,22 @@ class ItemRepositoryImpl implements ItemRepository {
         'ItemRepository: failed to queue personal upsert ${item.uuid}: $error',
       );
     }
+  }
+
+  Map<String, dynamic> _personalUpsertPayload(
+    Item item, {
+    required String reason,
+  }) {
+    return {
+      'itemUuid': item.uuid,
+      'itemName': item.name,
+      'reason': reason,
+      'isBackedUp': item.isBackedUp,
+      'hasRemoteIdentity': _hasRemoteIdentity(item),
+      'updatedAt': item.updatedAt?.toIso8601String(),
+      'lastMovedAt': item.lastMovedAt?.toIso8601String(),
+      'lastSyncedAt': item.lastSyncedAt?.toIso8601String(),
+    };
   }
 
   Future<void> _queuePersonalDelete({
@@ -628,5 +748,24 @@ class ItemRepositoryImpl implements ItemRepository {
         '$itemUuid: $error',
       );
     }
+  }
+
+  Future<String> _resolveLocationNameForHistory(
+    String? locationUuid, {
+    required Map<String, String> cache,
+  }) async {
+    if (locationUuid == null || locationUuid.isEmpty) {
+      return 'Unknown';
+    }
+    final cached = cache[locationUuid];
+    if (cached != null) {
+      return cached;
+    }
+
+    final location = await locationDao.getLocationByUuid(locationUuid);
+    final resolvedName =
+        location?.fullPath ?? location?.name ?? locationUuid;
+    cache[locationUuid] = resolvedName;
+    return resolvedName;
   }
 }

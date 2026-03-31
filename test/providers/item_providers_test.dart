@@ -106,6 +106,95 @@ void main() {
       expect(result.cloudWarning, 'Cloud update failed');
       expect(container.read(syncStatusProvider).status, SyncStatus.success);
     });
+
+    test('batch save schedules one syncAll run for backed-up items', () async {
+      when(
+        () => mockMlLabelService.classifySeasonCategory(
+          itemName: any(named: 'itemName'),
+          tags: any(named: 'tags'),
+          imagePaths: any(named: 'imagePaths'),
+        ),
+      ).thenAnswer((_) async => 'all_year');
+      when(
+        () => mockItemRepository.saveItemsBatch(
+          any(),
+          movedByMemberUuid: any(named: 'movedByMemberUuid'),
+          movedByName: any(named: 'movedByName'),
+        ),
+      ).thenAnswer((invocation) async {
+        final items = List<Item>.from(invocation.positionalArguments.first as List);
+        return SaveItemsBatchResult(savedItems: items);
+      });
+      when(() => mockSyncService.syncAll())
+          .thenAnswer((_) async => SyncResult.success());
+
+      final result = await container
+          .read(itemsNotifierProvider.notifier)
+          .saveItemsBatchWithMover([
+        Item(
+          uuid: 'item-1',
+          name: 'Lipstick Red',
+          savedAt: DateTime(2026, 3, 27, 10),
+          isBackedUp: true,
+        ),
+        Item(
+          uuid: 'item-2',
+          name: 'Compact Powder',
+          savedAt: DateTime(2026, 3, 27, 10, 1),
+          isBackedUp: true,
+        ),
+      ], movedByName: 'You');
+
+      expect(result.hasFailure, isFalse);
+      expect(result.savedItems, hasLength(2));
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      verify(() => mockItemRepository.saveItemsBatch(
+            any(),
+            movedByMemberUuid: any(named: 'movedByMemberUuid'),
+            movedByName: any(named: 'movedByName'),
+          )).called(1);
+      verify(() => mockSyncService.syncAll()).called(1);
+    });
+
+    test('batch save skips syncAll for local-only items', () async {
+      when(
+        () => mockMlLabelService.classifySeasonCategory(
+          itemName: any(named: 'itemName'),
+          tags: any(named: 'tags'),
+          imagePaths: any(named: 'imagePaths'),
+        ),
+      ).thenAnswer((_) async => 'all_year');
+      when(
+        () => mockItemRepository.saveItemsBatch(
+          any(),
+          movedByMemberUuid: any(named: 'movedByMemberUuid'),
+          movedByName: any(named: 'movedByName'),
+        ),
+      ).thenAnswer((invocation) async {
+        final items = List<Item>.from(invocation.positionalArguments.first as List);
+        return SaveItemsBatchResult(savedItems: items);
+      });
+
+      final result = await container
+          .read(itemsNotifierProvider.notifier)
+          .saveItemsBatchWithMover([
+        Item(
+          uuid: 'item-3',
+          name: 'Hair Clips',
+          savedAt: DateTime(2026, 3, 27, 10, 2),
+          isBackedUp: false,
+        ),
+      ], movedByName: 'You');
+
+      expect(result.hasFailure, isFalse);
+      expect(result.savedItems.single.uuid, 'item-3');
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      verifyNever(() => mockSyncService.syncAll());
+    });
   });
 
   group('dashboard item providers', () {

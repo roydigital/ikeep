@@ -321,6 +321,45 @@ class ItemsNotifier extends StateNotifier<bool> {
     return syncError;
   }
 
+  Future<BatchLocalSaveResult> saveItemsBatchWithMover(
+    List<Item> items, {
+    String? movedByMemberUuid,
+    String? movedByName,
+  }) async {
+    if (items.isEmpty) {
+      return const BatchLocalSaveResult(savedItems: []);
+    }
+
+    final preparedItems = <Item>[];
+    for (final item in items) {
+      preparedItems.add(await _prepareItem(item));
+    }
+
+    final result = await _ref.read(itemRepositoryProvider).saveItemsBatch(
+          preparedItems,
+          movedByMemberUuid: movedByMemberUuid,
+          movedByName: movedByName,
+        );
+    if (result.hasFailure) {
+      return BatchLocalSaveResult(
+        savedItems: const [],
+        failureMessage: result.failure!.message,
+      );
+    }
+
+    for (final item in result.savedItems) {
+      await _syncNotificationsForItem(item);
+    }
+
+    _invalidateItemLists();
+    for (final item in result.savedItems) {
+      _ref.invalidate(singleItemProvider(item.uuid));
+    }
+    _scheduleBatchCloudSync(result.savedItems);
+
+    return BatchLocalSaveResult(savedItems: result.savedItems);
+  }
+
   Future<String?> updateItemWithMover(
     Item item, {
     String? movedByMemberUuid,
@@ -589,6 +628,29 @@ class ItemsNotifier extends StateNotifier<bool> {
     }());
   }
 
+  void _scheduleBatchCloudSync(List<Item> items) {
+    final itemsRequiringSync = items.where((item) => item.isBackedUp).toList();
+    if (itemsRequiringSync.isEmpty) {
+      return;
+    }
+
+    final previousStatus = _ref.read(syncStatusProvider);
+    _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
+    unawaited(() async {
+      final result = await _ref.read(syncServiceProvider).syncAll();
+      publishSyncResult(
+        _ref,
+        result,
+        publishErrors: true,
+        fallbackStatus: previousStatus,
+      );
+      _invalidateItemLists();
+      for (final item in itemsRequiringSync) {
+        _ref.invalidate(singleItemProvider(item.uuid));
+      }
+    }());
+  }
+
   Future<void> _syncNotificationsForItem(Item item) async {
     final notificationService = _ref.read(notificationServiceProvider);
     final settings = _ref.read(settingsProvider);
@@ -675,6 +737,18 @@ class ItemsNotifier extends StateNotifier<bool> {
     return (item.cloudId?.trim().isNotEmpty ?? false) ||
         item.lastSyncedAt != null;
   }
+}
+
+class BatchLocalSaveResult {
+  const BatchLocalSaveResult({
+    required this.savedItems,
+    this.failureMessage,
+  });
+
+  final List<Item> savedItems;
+  final String? failureMessage;
+
+  bool get hasFailure => failureMessage != null;
 }
 
 class ArchiveItemResult {

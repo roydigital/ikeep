@@ -7,17 +7,20 @@ import 'package:showcaseview/showcaseview.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/location_model.dart';
 import '../../domain/models/shared_item.dart';
+import '../../domain/models/zone.dart';
 import '../../providers/history_providers.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/household_providers.dart';
 import '../../providers/main_tab_provider.dart';
 import '../../providers/item_providers.dart';
+import '../../providers/location_hierarchy_providers.dart';
 import '../../providers/location_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/adaptive_image.dart';
+import '../../widgets/app_action_button.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
 
@@ -186,6 +189,28 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
+  Future<void> _openNormalSaveForZone(String zoneUuid) async {
+    await context.push(
+      AppRoutes.save,
+      extra: {'initialZoneUuid': zoneUuid},
+    );
+  }
+
+  Future<void> _openQuickAddForZone(String zoneUuid) async {
+    final message = await context.push<String>(
+      AppRoutes.zoneQuickAddPath(zoneUuid),
+    );
+    if (!mounted || message == null || message.trim().isEmpty) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.success,
+      ),
+    );
+  }
+
   void _startItemListingTour(BuildContext context) {
     if (_itemListingTourQueued) return;
     _itemListingTourQueued = true;
@@ -279,6 +304,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       orElse: () => const <String>[],
     );
     final shouldAutofocusSearch = hasSeenItemListingTour.valueOrNull == true;
+    final selectedLocationModel = _selectedLocationUuid == null
+        ? null
+        : _cachedLocationModels
+            .where((location) => location.uuid == _selectedLocationUuid)
+            .firstOrNull;
+    final selectedZoneUuid =
+        selectedLocationModel?.type == LocationType.zone
+            ? selectedLocationModel!.uuid
+            : null;
+    final selectedZoneAsync = selectedZoneUuid == null
+        ? const AsyncValue<Zone?>.data(null)
+        : ref.watch(resolvedZoneProvider(selectedZoneUuid));
 
     return ShowCaseWidget(
       blurValue: 1.5,
@@ -320,6 +357,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 onModeChanged: (_) {},
                 showBackButton: !widget.isEmbedded,
               ),
+              if (selectedZoneUuid != null)
+                _ZoneContextBanner(
+                  isDark: isDark,
+                  zoneAsync: selectedZoneAsync,
+                  onAddItemHere: () => _openNormalSaveForZone(selectedZoneUuid),
+                  onQuickAddMultiple: () => _openQuickAddForZone(
+                    selectedZoneUuid,
+                  ),
+                ),
               Expanded(
                 child: _ResultsList(
                   isDark: isDark,
@@ -328,13 +374,168 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   resultsShowcaseKey: _resultsShowcaseKey,
                   bottomPadding: widget.isEmbedded
                       ? AppNavBar.contentBottomSpacing(context)
-                      : 0,
+                      : MediaQuery.paddingOf(context).bottom,
                 ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _ZoneContextBanner extends StatelessWidget {
+  const _ZoneContextBanner({
+    required this.isDark,
+    required this.zoneAsync,
+    required this.onAddItemHere,
+    required this.onQuickAddMultiple,
+  });
+
+  final bool isDark;
+  final AsyncValue<Zone?> zoneAsync;
+  final VoidCallback onAddItemHere;
+  final VoidCallback onQuickAddMultiple;
+
+  @override
+  Widget build(BuildContext context) {
+    final textPrimary =
+        isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final background = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+
+    return zoneAsync.when(
+      data: (zone) {
+        if (zone == null) {
+          return const SizedBox.shrink();
+        }
+        final locationLine = <String>[
+          if (zone.areaName?.trim().isNotEmpty == true) zone.areaName!.trim(),
+          if (zone.roomName?.trim().isNotEmpty == true) zone.roomName!.trim(),
+          zone.name,
+        ].join(' > ');
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(
+            AppDimensions.spacingMd,
+            0,
+            AppDimensions.spacingMd,
+            AppDimensions.spacingMd,
+          ),
+          padding: const EdgeInsets.all(AppDimensions.spacingMd),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+            border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.18),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                zone.name,
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: AppDimensions.spacingXs),
+              Text(
+                locationLine,
+                style: TextStyle(
+                  color: textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: AppDimensions.spacingSm),
+              Text(
+                'All items added here will be saved in this zone automatically.',
+                style: TextStyle(
+                  color: textSecondary,
+                  fontSize: 12.5,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: AppDimensions.spacingMd),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? AppColors.surfaceVariantDark.withValues(alpha: 0.50)
+                      : AppColors.primary.withValues(alpha: 0.045),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusXl),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(
+                      alpha: isDark ? 0.22 : 0.10,
+                    ),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppActionButton(
+                        isDark: isDark,
+                        isPrimary: true,
+                        icon: Icons.add_rounded,
+                        label: 'Add Item Here',
+                        onPressed: onAddItemHere,
+                        trailing: Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 16,
+                          color: AppColors.onPrimary.withValues(alpha: 0.94),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppDimensions.spacingSm),
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppActionButton(
+                        isDark: isDark,
+                        isPrimary: false,
+                        icon: Icons.playlist_add_rounded,
+                        label: 'Quick Add Multiple',
+                        onPressed: onQuickAddMultiple,
+                        trailing: Icon(
+                          Icons.north_east_rounded,
+                          size: 16,
+                          color: (isDark
+                                  ? AppColors.primaryLight
+                                  : AppColors.primary)
+                              .withValues(alpha: 0.78),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(
+          AppDimensions.spacingMd,
+          0,
+          AppDimensions.spacingMd,
+          AppDimensions.spacingMd,
+        ),
+        padding: const EdgeInsets.all(AppDimensions.spacingMd),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+        ),
+        child: const LinearProgressIndicator(color: AppColors.primary),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }

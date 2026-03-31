@@ -21,6 +21,21 @@ class HistoryDao {
     );
   }
 
+  Future<void> insertHistoriesInTransaction(
+    Transaction executor,
+    Iterable<ItemLocationHistory> entries,
+  ) async {
+    final batch = executor.batch();
+    for (final entry in entries) {
+      batch.insert(
+        DbConstants.tableHistory,
+        entry.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<void> upsertHistory(ItemLocationHistory entry) async {
     final db = await _db;
     await db.insert(

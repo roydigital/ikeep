@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../screens/detail/item_detail_screen.dart';
 import '../screens/home/dashboard_items_screen.dart';
 import '../screens/main_screen.dart';
+import '../screens/save/quick_add_multiple_screen.dart';
 import '../screens/onboarding/onboarding_screen.dart';
 import '../screens/save/save_screen.dart';
 import '../screens/search/search_screen.dart';
@@ -83,9 +84,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       // ── Sub-routes (slide-from-right + swipe-back) ─────────────────
       GoRoute(
         path: AppRoutes.save,
+        pageBuilder: (context, state) {
+          final extra = state.extra;
+          final initialZoneUuid = extra is Map<String, dynamic>
+              ? extra['initialZoneUuid'] as String?
+              : null;
+          return _swipeBackPage(
+            key: state.pageKey,
+            child: SaveScreen(initialZoneUuid: initialZoneUuid),
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.zoneQuickAdd,
         pageBuilder: (context, state) => _swipeBackPage(
           key: state.pageKey,
-          child: const SaveScreen(),
+          child: QuickAddMultipleScreen(
+            zoneUuid: state.pathParameters['zoneUuid']!,
+          ),
         ),
       ),
       GoRoute(

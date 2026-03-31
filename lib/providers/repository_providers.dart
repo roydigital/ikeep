@@ -17,6 +17,7 @@ import 'service_providers.dart';
 
 final itemRepositoryProvider = Provider<ItemRepository>(
   (ref) => ItemRepositoryImpl(
+    databaseHelper: ref.watch(databaseHelperProvider),
     itemDao: ref.watch(itemDaoProvider),
     locationDao: ref.watch(locationDaoProvider),
     historyDao: ref.watch(historyDaoProvider),

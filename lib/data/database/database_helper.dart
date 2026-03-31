@@ -25,6 +25,11 @@ class DatabaseHelper {
     return _db!;
   }
 
+  Future<T> transaction<T>(Future<T> Function(Transaction txn) action) async {
+    final database = await db;
+    return database.transaction(action);
+  }
+
   Future<Database> _open() async {
     // Desktop platforms need the FFI factory.
     if (!kIsWeb &&

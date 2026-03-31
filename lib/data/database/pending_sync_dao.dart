@@ -39,6 +39,20 @@ class PendingSyncOperation {
   }
 }
 
+class PendingSyncEnqueueRequest {
+  const PendingSyncEnqueueRequest({
+    required this.operationType,
+    required this.entityType,
+    required this.entityUuid,
+    required this.payload,
+  });
+
+  final String operationType;
+  final String entityType;
+  final String entityUuid;
+  final Map<String, dynamic> payload;
+}
+
 class PendingSyncDao {
   const PendingSyncDao(this._helper);
 
@@ -73,6 +87,35 @@ class PendingSyncDao {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });
+  }
+
+  Future<void> enqueueAllInTransaction(
+    Transaction executor,
+    Iterable<PendingSyncEnqueueRequest> requests,
+  ) async {
+    final batch = executor.batch();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    for (final request in requests) {
+      batch.delete(
+        DbConstants.tablePendingSync,
+        where:
+            '${DbConstants.colSyncEntityType} = ? AND '
+            '${DbConstants.colSyncEntityUuid} = ?',
+        whereArgs: [request.entityType, request.entityUuid],
+      );
+      batch.insert(
+        DbConstants.tablePendingSync,
+        {
+          DbConstants.colSyncOperationType: request.operationType,
+          DbConstants.colSyncEntityType: request.entityType,
+          DbConstants.colSyncEntityUuid: request.entityUuid,
+          DbConstants.colSyncPayload: jsonEncode(request.payload),
+          DbConstants.colSyncFailedAt: nowMs,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
   }
 
   Future<List<PendingSyncOperation>> getAll() async {

@@ -23,6 +23,21 @@ class ItemDao {
     );
   }
 
+  Future<void> insertItemsInTransaction(
+    Transaction executor,
+    Iterable<Item> items,
+  ) async {
+    final batch = executor.batch();
+    for (final item in items) {
+      batch.insert(
+        DbConstants.tableItems,
+        item.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<void> updateItem(Item item) async {
     final db = await _db;
     await db.update(
