@@ -66,18 +66,29 @@ class _AdaptiveImageState extends ConsumerState<AdaptiveImage> {
     }
   }
 
+  static const _resolveTimeout = Duration(seconds: 10);
+
   Future<String?> _resolvePath() async {
     final trimmedPath = widget.path.trim();
     if (!_shouldUseCloudLookup(trimmedPath)) {
       return trimmedPath;
     }
 
-    return ref.read(itemCloudMediaServiceProvider).resolveImagePath(
-          itemUuid: widget.itemUuid!.trim(),
-          imageIndex: widget.imageIndex,
-          preferThumbnail: widget.variant == AdaptiveImageVariant.thumbnail,
-          fallbackPath: trimmedPath,
-        );
+    try {
+      return await ref
+          .read(itemCloudMediaServiceProvider)
+          .resolveImagePath(
+            itemUuid: widget.itemUuid!.trim(),
+            imageIndex: widget.imageIndex,
+            preferThumbnail: widget.variant == AdaptiveImageVariant.thumbnail,
+            fallbackPath: trimmedPath,
+          )
+          .timeout(_resolveTimeout);
+    } catch (_) {
+      // Timeout or resolution failure — return the raw path as fallback so
+      // the image widget can attempt a direct load or show the error state.
+      return trimmedPath;
+    }
   }
 
   @override
@@ -96,6 +107,10 @@ class _AdaptiveImageState extends ConsumerState<AdaptiveImage> {
     return FutureBuilder<String?>(
       future: _resolvedPathFuture,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return errorWidget;
+        }
+
         if (snapshot.connectionState != ConnectionState.done &&
             !snapshot.hasData) {
           return SizedBox(

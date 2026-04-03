@@ -172,14 +172,19 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       visibility: ItemVisibility.private_,
     );
 
-    final failure =
-        await ref.read(itemsNotifierProvider.notifier).saveItemWithMover(
-              item,
-              movedByName: 'You',
-            );
+    String? failure;
+    try {
+      failure = await ref.read(itemsNotifierProvider.notifier).saveItemWithMover(
+            item,
+            movedByName: 'You',
+          );
+    } catch (e) {
+      failure = 'Save failed: $e';
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
 
     if (!mounted) return;
-    setState(() => _isSaving = false);
 
     if (failure != null) {
       ScaffoldMessenger.of(context).showSnackBar(

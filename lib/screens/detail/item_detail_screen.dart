@@ -105,19 +105,25 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (!enabled) {
       final wasSharedWithHousehold =
           item.visibility == ItemVisibility.household;
-      final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
-            item.copyWith(
-              isBackedUp: false,
-              clearCloudId: true,
-              clearLastSyncedAt: true,
-              visibility: ItemVisibility.private_,
-              clearHouseholdId: true,
-              sharedWithMemberUuids: const [],
-              updatedAt: DateTime.now(),
-            ),
-          );
+      String? error;
+      try {
+        error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+              item.copyWith(
+                isBackedUp: false,
+                clearCloudId: true,
+                clearLastSyncedAt: true,
+                visibility: ItemVisibility.private_,
+                clearHouseholdId: true,
+                sharedWithMemberUuids: const [],
+                updatedAt: DateTime.now(),
+              ),
+            );
+      } catch (e) {
+        error = 'Failed: $e';
+      } finally {
+        if (mounted) _endOp();
+      }
       if (!mounted) return;
-      _endOp();
       if (error != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error), backgroundColor: AppColors.error),
@@ -151,10 +157,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
     // backupItem awaits the full Firebase sync (including image uploads) so
     // the user gets accurate feedback — not just "DB saved" but "images uploaded".
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).backupItem(item);
+    String? error;
+    try {
+      error =
+          await ref.read(itemsNotifierProvider.notifier).backupItem(item);
+    } catch (e) {
+      error = 'Backup failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
     if (!mounted) return;
-    _endOp();
 
     if (error != null) {
       if (error.contains('Cloud quota exceeded')) {
@@ -1303,15 +1315,23 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           : 'Updating expiry date...';
     });
 
-    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
-          item.copyWith(expiryDate: picked, updatedAt: DateTime.now()),
-        );
-    if (!mounted) return;
+    String? error;
+    try {
+      error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+            item.copyWith(expiryDate: picked, updatedAt: DateTime.now()),
+          );
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) {
+        setState(() {
+          _expiryLoading = false;
+          _expiryStatusText = '';
+        });
+      }
+    }
 
-    setState(() {
-      _expiryLoading = false;
-      _expiryStatusText = '';
-    });
+    if (!mounted) return;
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1358,15 +1378,23 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       _expiryStatusText = 'Removing expiry date...';
     });
 
-    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
-          item.copyWith(clearExpiryDate: true, updatedAt: DateTime.now()),
-        );
-    if (!mounted) return;
+    String? error;
+    try {
+      error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+            item.copyWith(clearExpiryDate: true, updatedAt: DateTime.now()),
+          );
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) {
+        setState(() {
+          _expiryLoading = false;
+          _expiryStatusText = '';
+        });
+      }
+    }
 
-    setState(() {
-      _expiryLoading = false;
-      _expiryStatusText = '';
-    });
+    if (!mounted) return;
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1810,10 +1838,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       updatedAt: DateTime.now(),
     );
 
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
+    String? error;
+    try {
+      error =
+          await ref.read(itemsNotifierProvider.notifier).updateItem(updatedItem);
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
     if (!mounted) return;
-    _endOp();
 
     if (error != null) {
       await _deleteDraftInvoiceIfNeeded(originalInvoicePath, nextInvoicePath);
@@ -2022,15 +2056,21 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (updatedName == item.name) return;
 
     _startOp('Updating item name...');
-    final error = await ref.read(itemsNotifierProvider.notifier).updateItem(
-          item.copyWith(
-            name: updatedName,
-            updatedAt: DateTime.now(),
-          ),
-        );
+    String? error;
+    try {
+      error = await ref.read(itemsNotifierProvider.notifier).updateItem(
+            item.copyWith(
+              name: updatedName,
+              updatedAt: DateTime.now(),
+            ),
+          );
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
 
     if (!mounted) return;
-    _endOp();
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2165,10 +2205,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       lentOn: DateTime.now(),
       expectedReturnDate: expectedReturn,
     );
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    String? error;
+    try {
+      error =
+          await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
     if (!mounted) return;
-    _endOp();
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2225,10 +2271,16 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
       clearExpectedReturnDate: true,
       clearLentReminderAfterDays: true,
     );
-    final error =
-        await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    String? error;
+    try {
+      error =
+          await ref.read(itemsNotifierProvider.notifier).updateItem(updated);
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
     if (!mounted) return;
-    _endOp();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -2271,10 +2323,22 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
         false;
     if (!ok) return;
     _startOp('Archiving item...');
-    final result =
-        await ref.read(itemsNotifierProvider.notifier).archiveItem(item.uuid);
+    ArchiveItemResult result;
+    try {
+      result = await ref
+          .read(itemsNotifierProvider.notifier)
+          .archiveItem(item.uuid);
+    } catch (e) {
+      if (mounted) _endOp();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error),
+        );
+      }
+      return;
+    }
+    if (mounted) _endOp();
     if (!mounted) return;
-    _endOp();
     if (result.hasFailure) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2349,9 +2413,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     if (!mounted) return;
     setState(() => _activeOpText = 'Saving photo...');
     final updated = item.copyWith(imagePaths: [...item.imagePaths, picked]);
-    final error = await _persistItemImageChange(updated);
+    String? error;
+    try {
+      error = await _persistItemImageChange(updated);
+    } catch (e) {
+      error = 'Failed: $e';
+    } finally {
+      if (mounted) _endOp();
+    }
     if (!mounted) return;
-    _endOp();
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error), backgroundColor: AppColors.error),
@@ -2396,20 +2466,31 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
     _startOp('Deleting photo...');
     final updatedPaths = [...item.imagePaths]..remove(imagePath);
     final updated = item.copyWith(imagePaths: updatedPaths);
-    final error = await _persistItemImageChange(updated);
-    if (!mounted) return;
+    String? error;
+    try {
+      error = await _persistItemImageChange(updated);
+    } catch (e) {
+      error = 'Failed: $e';
+    }
 
     if (error != null) {
-      _endOp();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: AppColors.error),
-      );
+      if (mounted) _endOp();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: AppColors.error),
+        );
+      }
       return;
     }
 
-    if (!imagePath.startsWith('http')) {
-      await ref.read(imageServiceProvider).deleteImage(imagePath);
+    try {
+      if (!imagePath.startsWith('http')) {
+        await ref.read(imageServiceProvider).deleteImage(imagePath);
+      }
+    } catch (_) {
+      // Best-effort local file cleanup.
     }
+
     if (!mounted) return;
 
     setState(() {

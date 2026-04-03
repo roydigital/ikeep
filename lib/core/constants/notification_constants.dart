@@ -22,6 +22,11 @@ class NotificationConstants {
   static const String syncChannelName = 'Sync Status';
   static const String syncChannelDesc = 'Cloud sync status notifications';
 
+  static const String updatesChannelId = 'ikeep_updates';
+  static const String updatesChannelName = 'App Updates';
+  static const String updatesChannelDesc =
+      'Optional reminders when a Google Play update is available';
+
   // Notification ID strategy:
   // Expiry notifications use hash of itemUuid truncated to int range.
   // Reminder notifications use a fixed ID offset + index.
@@ -32,4 +37,5 @@ class NotificationConstants {
   static const int reminderNotificationIdBase = 20000;
   static const int lentNotificationIdBase = 30000;
   static const int lentFollowUpNotificationIdBase = 40000;
+  static const int updateReminderNotificationId = 50001;
 }

@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'database_provider.dart';
 import '../services/background_scheduler_service.dart';
+import '../services/app_info_service.dart';
 import '../services/cloud_diagnostics_service.dart';
 import '../services/cloud_observation_service.dart';
 import '../services/cloud_quota_service.dart';
@@ -30,6 +31,14 @@ import '../domain/models/cloud_entitlement.dart';
 
 final imageServiceProvider = Provider<ImageService>(
   (ref) => ImageService(),
+);
+
+final appInfoServiceProvider = Provider<AppInfoService>(
+  (ref) => AppInfoService(),
+);
+
+final appStoreVersionLabelProvider = FutureProvider.autoDispose<String>(
+  (ref) => ref.watch(appInfoServiceProvider).getStoreVersionLabel(),
 );
 
 final mlLabelServiceProvider = Provider<MlLabelService>(
@@ -91,6 +100,7 @@ final cloudQuotaServiceProvider = Provider<CloudQuotaService>(
 
 final cloudDiagnosticsServiceProvider = Provider<CloudDiagnosticsService>(
   (ref) => CloudDiagnosticsService(
+    appInfoService: ref.watch(appInfoServiceProvider),
     planMode: ref.watch(cloudEntitlementModeProvider),
     cloudQuotaService: ref.watch(cloudQuotaServiceProvider),
     cloudObservationService: ref.watch(cloudObservationServiceProvider),

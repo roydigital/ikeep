@@ -408,12 +408,11 @@ class ItemsNotifier extends StateNotifier<bool> {
     final archivedItem = await _ref.read(itemRepositoryProvider).getItem(uuid);
     String? cloudWarning;
     if (archivedItem != null) {
-      final previousStatus = _ref.read(syncStatusProvider);
-      cloudWarning = await _syncItemToCloud(
-        archivedItem,
-        fallbackStatus: previousStatus,
-        publishErrorsToStatus: false,
-      );
+      try {
+        cloudWarning = await _syncItemToCloud(archivedItem);
+      } catch (e) {
+        cloudWarning = 'Sync failed: $e';
+      }
     }
 
     await _ref.read(notificationServiceProvider).cancelExpiryReminder(uuid);
@@ -477,23 +476,28 @@ class ItemsNotifier extends StateNotifier<bool> {
     final storedItem =
         await _ref.read(itemRepositoryProvider).getItem(item.uuid) ?? syncItem;
 
-    final previousStatus = _ref.read(syncStatusProvider);
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
 
-    final syncError =
-        await _syncItemToCloud(storedItem, fallbackStatus: previousStatus);
-
-    _invalidateItemLists();
-    _ref.invalidate(singleItemProvider(item.uuid));
+    String? syncError;
+    try {
+      syncError = await _syncItemToCloud(storedItem);
+    } catch (e) {
+      syncError = 'Sync failed: $e';
+    } finally {
+      // Ensure status is never left stuck at .syncing().
+      final currentStatus = _ref.read(syncStatusProvider);
+      if (currentStatus.isSyncing) {
+        _ref.read(syncStatusProvider.notifier).state =
+            const SyncResult.idle();
+      }
+      _invalidateItemLists();
+      _ref.invalidate(singleItemProvider(item.uuid));
+    }
 
     return syncError;
   }
 
-  Future<String?> _syncItemToCloud(
-    Item item, {
-    SyncResult? fallbackStatus,
-    bool publishErrorsToStatus = true,
-  }) async {
+  Future<String?> _syncItemToCloud(Item item) async {
     if (!item.isBackedUp) {
       final hadRemoteBackup = (item.cloudId?.trim().isNotEmpty ?? false) ||
           item.lastSyncedAt != null;
@@ -501,8 +505,6 @@ class ItemsNotifier extends StateNotifier<bool> {
         final deleteResult = await _syncDeleteItem(
           item.uuid,
           reason: _deleteReasonBackupDisabled,
-          fallbackStatus: fallbackStatus,
-          publishErrorsToStatus: publishErrorsToStatus,
         );
         if (deleteResult.status == SyncStatus.error) {
           return deleteResult.errorMessage ?? 'Sync failed';
@@ -518,12 +520,7 @@ class ItemsNotifier extends StateNotifier<bool> {
     }
 
     final result = await _ref.read(syncServiceProvider).syncItem(item);
-    publishSyncResult(
-      _ref,
-      result,
-      publishErrors: publishErrorsToStatus,
-      fallbackStatus: fallbackStatus,
-    );
+    publishSyncResult(_ref, result, publishErrors: true);
 
     // Photos failed to upload but item metadata was saved — warn the user
     // so they know to retry rather than assuming everything was backed up.
@@ -554,19 +551,12 @@ class ItemsNotifier extends StateNotifier<bool> {
   Future<SyncResult> _syncDeleteItem(
     String uuid, {
     String reason = _deleteReasonDeleted,
-    SyncResult? fallbackStatus,
-    bool publishErrorsToStatus = true,
   }) async {
     final result = await _ref.read(syncServiceProvider).deleteRemoteItem(
           uuid,
           reason: reason,
         );
-    publishSyncResult(
-      _ref,
-      result,
-      publishErrors: publishErrorsToStatus,
-      fallbackStatus: fallbackStatus,
-    );
+    publishSyncResult(_ref, result, publishErrors: true);
     return result;
   }
 
@@ -601,6 +591,8 @@ class ItemsNotifier extends StateNotifier<bool> {
     return evaluation.message;
   }
 
+  static const _backgroundSyncTimeout = Duration(seconds: 30);
+
   void _scheduleCloudSync({
     required Item item,
     bool hadRemoteBackup = false,
@@ -611,20 +603,28 @@ class ItemsNotifier extends StateNotifier<bool> {
       return;
     }
 
-    final previousStatus = _ref.read(syncStatusProvider);
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     unawaited(() async {
-      if (needsDelete) {
-        await _syncDeleteItem(
-          item.uuid,
-          reason: _deleteReasonBackupDisabled,
-          fallbackStatus: previousStatus,
-        );
-      } else {
-        await _syncItemToCloud(item, fallbackStatus: previousStatus);
+      try {
+        if (needsDelete) {
+          await _syncDeleteItem(
+            item.uuid,
+            reason: _deleteReasonBackupDisabled,
+          ).timeout(_backgroundSyncTimeout);
+        } else {
+          await _syncItemToCloud(item).timeout(_backgroundSyncTimeout);
+        }
+      } on TimeoutException {
+        _ref.read(syncStatusProvider.notifier).state =
+            const SyncResult.idle();
+      } catch (e) {
+        // Ensure sync status never stays stuck on .syncing().
+        _ref.read(syncStatusProvider.notifier).state =
+            const SyncResult.idle();
+      } finally {
+        _invalidateItemLists();
+        _ref.invalidate(singleItemProvider(item.uuid));
       }
-      _invalidateItemLists();
-      _ref.invalidate(singleItemProvider(item.uuid));
     }());
   }
 
@@ -634,19 +634,23 @@ class ItemsNotifier extends StateNotifier<bool> {
       return;
     }
 
-    final previousStatus = _ref.read(syncStatusProvider);
     _ref.read(syncStatusProvider.notifier).state = const SyncResult.syncing();
     unawaited(() async {
-      final result = await _ref.read(syncServiceProvider).syncAll();
-      publishSyncResult(
-        _ref,
-        result,
-        publishErrors: true,
-        fallbackStatus: previousStatus,
-      );
-      _invalidateItemLists();
-      for (final item in itemsRequiringSync) {
-        _ref.invalidate(singleItemProvider(item.uuid));
+      try {
+        final result = await _ref.read(syncServiceProvider).syncAll();
+        publishSyncResult(
+          _ref,
+          result,
+          publishErrors: true,
+        );
+      } catch (e) {
+        _ref.read(syncStatusProvider.notifier).state =
+            const SyncResult.idle();
+      } finally {
+        _invalidateItemLists();
+        for (final item in itemsRequiringSync) {
+          _ref.invalidate(singleItemProvider(item.uuid));
+        }
       }
     }());
   }

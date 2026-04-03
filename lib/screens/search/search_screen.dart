@@ -264,6 +264,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final hasSeenItemListingTour = ref.watch(itemListingTourControllerProvider);
     // Only start the tour when the Search tab (index 2) is actually visible.
     final activeTab = ref.watch(mainTabProvider);
+
+    // Handle "View All" from Home → switch to Recent filter and show items.
+    ref.listen<bool>(viewAllRecentRequestedProvider, (prev, next) {
+      if (next) {
+        ref.read(viewAllRecentRequestedProvider.notifier).state = false;
+        _controller.clear();
+        ref.read(itemSearchQueryProvider.notifier).state = '';
+        setState(() {
+          _activeFilter = _FilterType.recent;
+          _selectedLocationPath = null;
+          _selectedLocationUuid = null;
+          _selectedTag = null;
+        });
+      }
+    });
+
     final locationOptions = locationOptionsAsync.maybeWhen(
       data: (locations) {
         // Cache the raw models for UUID reverse-lookup and initial-filter apply.
@@ -2181,7 +2197,7 @@ class _EmptyState extends StatelessWidget {
             query.isEmpty
                 ? (isHouseholdMode
                     ? 'No shared items from household members yet'
-                    : 'Start typing to search')
+                    : 'No items saved yet')
                 : 'No results for "$query"',
             style: TextStyle(
               fontSize: 16,

@@ -362,7 +362,11 @@ class _MainContent extends ConsumerWidget {
                 ),
               ),
               TextButton(
-                onPressed: () => ref.read(mainTabProvider.notifier).state = 2,
+                onPressed: () {
+                  ref.read(viewAllRecentRequestedProvider.notifier).state =
+                      true;
+                  ref.read(mainTabProvider.notifier).state = 2;
+                },
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   padding: EdgeInsets.zero,

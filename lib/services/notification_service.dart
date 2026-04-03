@@ -60,6 +60,14 @@ class NotificationService {
           importance: Importance.high,
         ),
       );
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          NotificationConstants.updatesChannelId,
+          NotificationConstants.updatesChannelName,
+          description: NotificationConstants.updatesChannelDesc,
+          importance: Importance.defaultImportance,
+        ),
+      );
     }
 
     _initialized = true;
@@ -239,8 +247,7 @@ class NotificationService {
     final intro = switch (month) {
       DateTime.december => 'Winter is here!',
       DateTime.january || DateTime.february => 'Cold weather reminder!',
-      DateTime.june || DateTime.july || DateTime.august =>
-        'Summer is here!',
+      DateTime.june || DateTime.july || DateTime.august => 'Summer is here!',
       _ => 'Seasonal reminder!',
     };
 
@@ -271,6 +278,35 @@ class NotificationService {
     for (final item in items) {
       await scheduleLentReminder(item);
     }
+  }
+
+  Future<void> scheduleUpdateReminder({
+    required String title,
+    required String body,
+    required Duration after,
+  }) async {
+    await initialize();
+
+    final safeDelay =
+        after < const Duration(minutes: 1) ? const Duration(minutes: 1) : after;
+    final scheduleAt = DateTime.now().add(safeDelay);
+    final scheduleMode = await _resolveAndroidScheduleMode();
+
+    await _plugin.zonedSchedule(
+      NotificationConstants.updateReminderNotificationId,
+      title,
+      body,
+      tz.TZDateTime.from(scheduleAt, tz.local),
+      _updateNotificationDetails(),
+      androidScheduleMode: scheduleMode,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+  }
+
+  Future<void> cancelUpdateReminder() async {
+    await initialize();
+    await _plugin.cancel(NotificationConstants.updateReminderNotificationId);
   }
 
   Future<void> cancelAll() => _plugin.cancelAll();
@@ -318,6 +354,16 @@ class NotificationService {
       android: AndroidNotificationDetails(
         NotificationConstants.reminderChannelId,
         NotificationConstants.reminderChannelName,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+  }
+
+  NotificationDetails _updateNotificationDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        NotificationConstants.updatesChannelId,
+        NotificationConstants.updatesChannelName,
       ),
       iOS: DarwinNotificationDetails(),
     );

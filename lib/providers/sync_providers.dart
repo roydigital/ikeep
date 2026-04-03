@@ -18,9 +18,10 @@ void publishSyncResult(
   SyncResult? fallbackStatus,
 }) {
   if (result.status == SyncStatus.error && !publishErrors) {
-    if (fallbackStatus != null) {
-      ref.read(syncStatusProvider.notifier).state = fallbackStatus;
-    }
+    // Suppressed error — reset to idle so the UI never stays stuck on
+    // "syncing". Previously this reverted to fallbackStatus which was often
+    // .syncing() itself, causing an infinite spinner.
+    ref.read(syncStatusProvider.notifier).state = const SyncResult.idle();
     return;
   }
 

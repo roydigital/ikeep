@@ -15,6 +15,7 @@ import '../../core/constants/feature_limits.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/cloud_entitlement.dart';
 import '../../domain/models/sync_status.dart';
+import '../../providers/app_update_providers.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/home_tour_provider.dart';
 import '../../providers/item_providers.dart';
@@ -26,6 +27,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/sync_providers.dart';
 import '../../routing/app_routes.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/app_dimensions.dart';
+import '../../widgets/app_version_tile.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/app_showcase.dart';
 import 'cloud_diagnostics_screen.dart';
@@ -506,6 +509,94 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _showInfo('Unable to open support page');
   }
 
+  Future<void> _checkForUpdates() async {
+    await ref.read(appUpdateControllerProvider.notifier).checkForUpdates(
+          reason: AppUpdateCheckReason.manual,
+          forceRemoteFetch: true,
+        );
+    if (!mounted) return;
+
+    final decision = ref.read(effectiveAppUpdateDecisionProvider);
+    if (decision.isNoUpdate) {
+      _showInfo('You are on the latest version');
+      return;
+    }
+    if (decision.isOptionalUpdate) {
+      _showInfo('A new update is available');
+      return;
+    }
+    if (decision.isForceUpdate) {
+      _showInfo('An update is required to continue');
+      return;
+    }
+    if (decision.isDownloadedPendingInstall) {
+      _showInfo('Update downloaded. Tap "Update now" to install');
+      return;
+    }
+    if (decision.isDownloading) {
+      _showInfo('Update download in progress');
+      return;
+    }
+    _showInfo('Unable to check updates right now');
+  }
+
+  Future<void> _handleUpdateNowFromSettings() async {
+    final result = await ref
+        .read(appUpdateControllerProvider.notifier)
+        .runPrimaryUpdateAction();
+    if (!mounted) return;
+
+    if (result.shouldOpenStore) {
+      await _openPlayStoreForUpdate();
+      return;
+    }
+
+    switch (result.action) {
+      case UpdateNowActionKind.startedFlexible:
+        _showInfo('Downloading update in background...');
+        break;
+      case UpdateNowActionKind.startedImmediate:
+        break;
+      case UpdateNowActionKind.completedFlexibleInstall:
+        _showInfo('Installing update...');
+        break;
+      case UpdateNowActionKind.failed:
+      case UpdateNowActionKind.userDenied:
+        _showInfo(result.message ?? 'Unable to start update');
+        break;
+      case UpdateNowActionKind.openStoreFallback:
+        await _openPlayStoreForUpdate();
+        break;
+      case UpdateNowActionKind.none:
+        break;
+    }
+  }
+
+  Future<void> _openPlayStoreForUpdate() async {
+    final playStoreUrl =
+        ref.read(effectiveAppUpdateDecisionProvider).playStoreUrl.trim();
+    final uri = Uri.tryParse(playStoreUrl);
+    if (uri == null) {
+      _showInfo('Play Store link is invalid');
+      return;
+    }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted || opened) return;
+    _showInfo('Unable to open Google Play');
+  }
+
+  String _buildUpdateStatusLabel(AppUpdateControllerState updateState) {
+    if (updateState.isChecking) return 'Checking...';
+
+    final decision = updateState.decision;
+    if (decision.isOptionalUpdate) return 'Update available';
+    if (decision.isForceUpdate) return 'Update required';
+    if (decision.isDownloading) return 'Downloading';
+    if (decision.isDownloadedPendingInstall) return 'Install ready';
+    if (decision.isError) return 'Check failed';
+    return 'Up to date';
+  }
+
   String _formatLastSynced(DateTime? dateTime) {
     if (dateTime == null) return 'Never';
     final now = DateTime.now();
@@ -523,6 +614,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final settings = ref.watch(settingsProvider);
     _initFromSettings(settings);
     _activeColors = _darkMode ? _darkColors : _lightColors;
+    final appVersionLabel = ref.watch(appStoreVersionLabelProvider).maybeWhen(
+          data: (label) => label,
+          orElse: () => '${AppConstants.appName} Version',
+        );
+    final updateState = ref.watch(appUpdateControllerProvider);
+    final updateDecision = updateState.decision;
+    final installedVersionInfo = updateState.installedVersion;
+    final versionTileLabel = installedVersionInfo.versionName.trim().isNotEmpty
+        ? installedVersionInfo.fullLabel
+        : appVersionLabel;
+    final updateStatusLabel = _buildUpdateStatusLabel(updateState);
+    final hasActionableUpdate = updateDecision.isOptionalUpdate ||
+        updateDecision.isForceUpdate ||
+        updateDecision.isDownloadedPendingInstall;
     final authUser = ref.watch(authStateProvider).valueOrNull;
     final authUid = authUser?.uid;
     if (authUid != _lastObservedAuthUid) {
@@ -608,7 +713,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           if (context.canPop()) {
                             context.pop();
                           } else {
-                            context.go(AppRoutes.home);
+                            final previousTab = ref.read(previousTabProvider);
+                            ref.read(mainTabProvider.notifier).state =
+                                previousTab;
                           }
                         },
                         onSave: () => _save(settings),
@@ -686,9 +793,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 isSyncing: syncStatus.isSyncing,
                                 progress: backupEnabled ? 0.85 : 0.4,
                                 lastSyncedText: lastSyncedText,
-                                onSyncTap: syncStatus.isSyncing
-                                    ? null
-                                    : _runSync,
+                                onSyncTap:
+                                    syncStatus.isSyncing ? null : _runSync,
                                 onManageFamily: () =>
                                     context.push(AppRoutes.manageFamily),
                               ),
@@ -703,12 +809,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               onDeleteAccount: () =>
                                   _openSupportPage(_accountDeletionUri),
                             ),
-                            const SizedBox(height: 52),
+                            const SizedBox(height: 36),
+                            _SectionLabel('APP UPDATE'),
+                            const SizedBox(height: 14),
+                            AppVersionTile(
+                              versionLabel: versionTileLabel,
+                              statusLabel: updateStatusLabel,
+                              isChecking: updateState.isChecking,
+                              hasUpdate: hasActionableUpdate,
+                              isForceUpdate: updateDecision.isForceUpdate,
+                              isActionInProgress:
+                                  updateState.isUpdateActionInProgress,
+                              onCheckForUpdates: _checkForUpdates,
+                              onUpdateNow: _handleUpdateNowFromSettings,
+                            ),
+                            const SizedBox(height: AppDimensions.spacingLg),
                             Center(
                               child: GestureDetector(
                                 onLongPress: _openCloudDiagnostics,
                                 child: Text(
-                                  AppConstants.buildLabel,
+                                  versionTileLabel,
                                   style: TextStyle(
                                     color: _kTextMuted,
                                     fontSize: 12,

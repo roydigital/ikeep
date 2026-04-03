@@ -6,7 +6,6 @@ class AppConstants {
 
   static const String appName = 'Ikeep';
   static const String appTagline = 'Where did I keep it?';
-  static const String buildLabel = 'Ikeep Version 2.4.0 (b892)';
 
   // Item limits
   static const int maxImagesPerItem = 3;

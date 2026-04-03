@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import '../core/constants/app_constants.dart';
 import '../core/constants/feature_limits.dart';
 import '../data/database/cloud_usage_snapshot_dao.dart';
 import '../data/database/household_member_dao.dart';
@@ -13,12 +12,14 @@ import '../domain/models/cloud_guardrail_observation.dart';
 import '../domain/models/cloud_usage_snapshot.dart';
 import '../domain/models/item.dart';
 import '../domain/models/sync_checkpoint_state.dart';
+import '../services/app_info_service.dart';
 import '../services/cloud_observation_service.dart';
 import '../services/cloud_quota_service.dart';
 import '../services/media_cache_service.dart';
 
 class CloudDiagnosticsService {
   CloudDiagnosticsService({
+    required AppInfoService appInfoService,
     required CloudEntitlementMode planMode,
     required CloudQuotaService cloudQuotaService,
     required CloudObservationService cloudObservationService,
@@ -28,7 +29,8 @@ class CloudDiagnosticsService {
     required MediaCacheService mediaCacheService,
     required ItemDao itemDao,
     required HouseholdMemberDao householdMemberDao,
-  })  : _planMode = planMode,
+  })  : _appInfoService = appInfoService,
+        _planMode = planMode,
         _cloudQuotaService = cloudQuotaService,
         _cloudObservationService = cloudObservationService,
         _usageSnapshotDao = usageSnapshotDao,
@@ -38,6 +40,7 @@ class CloudDiagnosticsService {
         _itemDao = itemDao,
         _householdMemberDao = householdMemberDao;
 
+  final AppInfoService _appInfoService;
   final CloudEntitlementMode _planMode;
   final CloudQuotaService _cloudQuotaService;
   final CloudObservationService _cloudObservationService;
@@ -50,6 +53,7 @@ class CloudDiagnosticsService {
 
   Future<CloudDiagnosticsSnapshot> loadSnapshot() async {
     await _refreshUsageSnapshots();
+    final buildLabel = await _appInfoService.getBuildLabel();
 
     final usageSnapshots = await _usageSnapshotDao.getAll();
     final observationMetrics = await _cloudObservationService.getMetrics();
@@ -78,7 +82,7 @@ class CloudDiagnosticsService {
     }
 
     return CloudDiagnosticsSnapshot(
-      buildLabel: AppConstants.buildLabel,
+      buildLabel: buildLabel,
       planMode: _planMode,
       paywallActive: false,
       quotaTrackingActive: true,
