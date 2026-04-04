@@ -130,6 +130,7 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
   }
 
   Future<void> _saveEntry() async {
+    if (_isSaving) return;
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
     if (_isLentFlow && _lentToController.text.trim().isEmpty) {

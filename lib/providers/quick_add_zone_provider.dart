@@ -337,6 +337,9 @@ class ZoneQuickAddController extends StateNotifier<ZoneQuickAddState> {
   }
 
   Future<QuickAddSaveOutcome> saveAll(Zone zone) async {
+    if (state.isSaving) {
+      return const QuickAddSaveOutcome(savedCount: 0, ignoredBlankCount: 0);
+    }
     final invalidRowIds = _findInvalidRowIds(state.rows);
     if (invalidRowIds.isNotEmpty) {
       state = state.copyWith(invalidRowIds: invalidRowIds);
