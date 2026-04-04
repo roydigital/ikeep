@@ -12,27 +12,17 @@ import '../theme/app_dimensions.dart';
 /// Which main tab is currently active.
 enum AppNavTab { items, locations, search, settings }
 
-/// Shared bottom navigation bar used across all main screens.
-/// Visual style is identical to the Rooms & Zones screen (the app's native theme):
-///  • Dark background  • Primary-accented top border  • ALL-CAPS bold labels
-///  • 27 px icons  • 10.5 px labels with letter-spacing 1
-///
-/// When [onTabChanged] is provided (e.g. inside [MainScreen]), the callback
-/// handles tab switching directly. Otherwise the bar updates the
-/// [mainTabProvider] and navigates to `/home`.
+/// Shared bottom navigation bar — glassmorphic vibrant design.
 class AppNavBar extends ConsumerWidget {
   const AppNavBar({super.key, required this.activeTab, this.onTabChanged});
 
   final AppNavTab activeTab;
-
-  /// Optional callback for tab changes (used inside MainScreen's PageView).
-  /// When null, the bar sets [mainTabProvider] and calls `context.go('/home')`.
   final ValueChanged<AppNavTab>? onTabChanged;
 
   static const double _topPadding = 10;
   static const double _bottomPadding = 10;
   static const double _itemVerticalPadding = 6;
-  static const double _iconSize = 27;
+  static const double _iconSize = 26;
   static const double _iconLabelGap = 5;
   static const double _labelFontSize = 10.5;
   static const double _fabSize = 72;
@@ -76,7 +66,6 @@ class AppNavBar extends ConsumerWidget {
     if (onTabChanged != null) {
       onTabChanged!(tab);
     } else {
-      // From a sub-screen — update provider and go home.
       ref.read(mainTabProvider.notifier).state = tab.index;
       context.go(AppRoutes.home);
     }
@@ -89,7 +78,7 @@ class AppNavBar extends ConsumerWidget {
 
     return ClipRRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
           padding: EdgeInsets.fromLTRB(
             AppDimensions.spacingSm,
@@ -100,11 +89,11 @@ class AppNavBar extends ConsumerWidget {
           decoration: BoxDecoration(
             color:
                 (isDark ? AppColors.backgroundDark : AppColors.backgroundLight)
-                    .withValues(alpha: 0.75),
+                    .withValues(alpha: 0.7),
             border: Border(
               top: BorderSide(
-                color: AppColors.primary.withValues(alpha: 0.35),
-                width: 0.6,
+                color: AppColors.primary.withValues(alpha: 0.2),
+                width: 0.5,
               ),
             ),
           ),
@@ -112,25 +101,29 @@ class AppNavBar extends ConsumerWidget {
             children: [
               _NavItem(
                 label: 'ITEMS',
-                icon: Icons.inventory_2,
+                icon: Icons.inventory_2_outlined,
+                activeIcon: Icons.inventory_2_rounded,
                 active: activeTab == AppNavTab.items,
                 onTap: () => _handleTap(context, ref, AppNavTab.items),
               ),
               _NavItem(
                 label: 'LOCATIONS',
-                icon: Icons.location_on,
+                icon: Icons.location_on_outlined,
+                activeIcon: Icons.location_on_rounded,
                 active: activeTab == AppNavTab.locations,
                 onTap: () => _handleTap(context, ref, AppNavTab.locations),
               ),
               _NavItem(
                 label: 'SEARCH',
-                icon: Icons.search,
+                icon: Icons.search_outlined,
+                activeIcon: Icons.search_rounded,
                 active: activeTab == AppNavTab.search,
                 onTap: () => _handleTap(context, ref, AppNavTab.search),
               ),
               _NavItem(
                 label: 'SETTINGS',
-                icon: Icons.settings,
+                icon: Icons.settings_outlined,
+                activeIcon: Icons.settings_rounded,
                 active: activeTab == AppNavTab.settings,
                 onTap: () => _handleTap(context, ref, AppNavTab.settings),
               ),
@@ -146,21 +139,25 @@ class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.label,
     required this.icon,
+    required this.activeIcon,
     required this.active,
     required this.onTap,
   });
 
   final String label;
   final IconData icon;
+  final IconData activeIcon;
   final bool active;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = active
-        ? AppColors.primary
-        : (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight);
+    final activeColor = AppColors.secondary;
+    final inactiveColor =
+        isDark ? AppColors.textDisabledDark : AppColors.textSecondaryLight;
+    final color = active ? activeColor : inactiveColor;
+
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -172,15 +169,40 @@ class _NavItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: AppNavBar._iconSize),
+              // Glowing dot indicator above active icon
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOut,
+                width: active ? 6 : 0,
+                height: active ? 6 : 0,
+                margin: const EdgeInsets.only(bottom: 4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: active ? activeColor : Colors.transparent,
+                  boxShadow: active
+                      ? [
+                          BoxShadow(
+                            color: activeColor.withValues(alpha: 0.6),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+              Icon(
+                active ? activeIcon : icon,
+                color: color,
+                size: AppNavBar._iconSize,
+              ),
               const SizedBox(height: AppNavBar._iconLabelGap),
               Text(
                 label,
                 style: TextStyle(
                   color: color,
                   fontSize: AppNavBar._labelFontSize,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                  letterSpacing: 0.8,
                 ),
               ),
             ],

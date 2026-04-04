@@ -23,15 +23,9 @@ const List<String> _legacyPremiumPrefKeys = <String>[
   'app_plan',
 ];
 
-ThemeMode _storedThemeModeFromPrefs(SharedPreferences prefs) {
-  final storedIndex = prefs.getInt(AppSettingsKeys.themeMode);
-  if (storedIndex != null &&
-      storedIndex >= 0 &&
-      storedIndex < ThemeMode.values.length) {
-    return ThemeMode.values[storedIndex];
-  }
-
-  return ThemeMode.light;
+ThemeMode _storedThemeModeFromPrefs(SharedPreferences _) {
+  // Dark theme is permanent — ignore any previously stored value.
+  return ThemeMode.dark;
 }
 
 Future<void> _migrateLegacyPremiumPrefs(SharedPreferences prefs) async {
@@ -68,7 +62,7 @@ Future<AppSettings> loadStoredAppSettings() async {
 
 class AppSettings {
   const AppSettings({
-    this.themeMode = ThemeMode.light,
+    this.themeMode = ThemeMode.dark,
     this.isOnboardingComplete = false,
     this.isBackupEnabled = false,
     this.stillThereRemindersEnabled = true,
@@ -133,11 +127,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     state = appSettingsFromPrefs(prefs);
   }
 
-  Future<void> setThemeMode(ThemeMode mode) async {
-    state = state.copyWith(themeMode: mode);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(AppSettingsKeys.themeMode, mode.index);
-  }
+  // Theme is permanently dark — no setter needed.
 
   Future<void> completeOnboarding() async {
     state = state.copyWith(isOnboardingComplete: true);

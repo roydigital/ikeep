@@ -27,19 +27,12 @@ import '../../widgets/app_showcase.dart';
 enum _FilterType { all, recent, location, tags }
 
 Color _searchResultLocationColor(bool isDark) {
-  if (isDark) {
-    return Color.lerp(
-      AppColors.primaryLight,
-      AppColors.textPrimaryDark,
-      0.32,
-    )!;
-  }
-  return AppColors.primaryDark;
+  return isDark ? AppColors.secondary : AppColors.primaryDark;
 }
 
 Color _searchResultLocationBackground(bool isDark) {
   return isDark
-      ? AppColors.primaryLight.withValues(alpha: 0.12)
+      ? AppColors.secondary.withValues(alpha: 0.12)
       : AppColors.primary.withValues(alpha: 0.08);
 }
 
@@ -859,20 +852,33 @@ class _FilterChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(right: AppDimensions.spacingSm),
         padding: const EdgeInsets.symmetric(
           horizontal: AppDimensions.spacingMd,
-          vertical: AppDimensions.spacingXs + 2,
+          vertical: AppDimensions.spacingXs + 3,
         ),
         decoration: BoxDecoration(
+          gradient: isActive ? AppColors.primaryGradient : null,
           color: isActive
-              ? AppColors.primary
-              : AppColors.primary.withValues(alpha: 0.10),
+              ? null
+              : AppColors.primary.withValues(alpha: isDark ? 0.1 : 0.06),
           borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
           border: isActive
               ? null
-              : Border.all(color: AppColors.primary.withValues(alpha: 0.20)),
+              : Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.18),
+                ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -881,7 +887,7 @@ class _FilterChip extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: FontWeight.w500,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                 color: isActive
                     ? AppColors.onPrimary
                     : (isDark

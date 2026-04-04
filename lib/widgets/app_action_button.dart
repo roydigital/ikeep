@@ -36,18 +36,12 @@ class AppActionButton extends StatelessWidget {
     // In light mode, starting from a light blue (#5B9CF6 @ 80%) produces
     // near-white contrast against the white onPrimary text — use solid
     // purples instead so the button is clearly visible on light cards.
-    final primaryStart = isDark
-        ? Color.lerp(AppColors.info, AppColors.primaryLight, 0.20)!
-        : AppColors.primaryLight;
-    final primaryMid = isDark
-        ? Color.lerp(AppColors.info, AppColors.primary, 0.42)!
-        : AppColors.primary;
     final gradient = isPrimary && isEnabled
-        ? LinearGradient(
+        ? const LinearGradient(
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
-            colors: [primaryStart, primaryMid, AppColors.primaryDark],
-            stops: [0.0, 0.52, 1.0],
+            colors: [AppColors.primary, AppColors.primaryDark, Color(0xFF3D2999)],
+            stops: [0.0, 0.6, 1.0],
           )
         : null;
 

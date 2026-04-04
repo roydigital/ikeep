@@ -173,7 +173,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 gradient: LinearGradient(
                   colors: [
                     Colors.transparent,
-                    AppColors.primary.withValues(alpha: 0.3),
+                    AppColors.primary.withValues(alpha: 0.4),
+                    AppColors.secondary.withValues(alpha: 0.3),
                     Colors.transparent,
                   ],
                 ),

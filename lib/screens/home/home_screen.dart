@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../domain/models/item.dart';
 import '../../domain/models/location_model.dart';
-import '../../providers/auth_providers.dart';
+
 import '../../providers/item_providers.dart';
 import '../../providers/location_usage_providers.dart';
 import '../../providers/main_tab_provider.dart';
@@ -36,12 +38,9 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authStateProvider).valueOrNull;
-
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: _MainContent(
-        profilePhotoUrl: user?.photoURL,
         searchShowcaseKey: tourKeys.searchBar,
         dashboardShowcaseKey: tourKeys.dashboard,
       ),
@@ -53,12 +52,10 @@ class HomeScreen extends ConsumerWidget {
 
 class _MainContent extends ConsumerWidget {
   const _MainContent({
-    required this.profilePhotoUrl,
     required this.searchShowcaseKey,
     required this.dashboardShowcaseKey,
   });
 
-  final String? profilePhotoUrl;
   final GlobalKey searchShowcaseKey;
   final GlobalKey dashboardShowcaseKey;
 
@@ -76,7 +73,6 @@ class _MainContent extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(context, ref),
             const SizedBox(height: AppDimensions.spacingMd),
             Padding(
               padding: const EdgeInsets.symmetric(
@@ -177,86 +173,21 @@ class _MainContent extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context, WidgetRef ref) {
+  void _startVoiceSearch(BuildContext context, WidgetRef ref) {
+    final speech = stt.SpeechToText();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final avatarBorderColor = isDark
-        ? AppColors.primary.withValues(alpha: 0.55)
-        : AppColors.borderLight;
-    final avatarShadowColor = isDark
-        ? AppColors.primary.withValues(alpha: 0.28)
-        : AppColors.primary.withValues(alpha: 0.16);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppDimensions.spacingMd,
-        AppDimensions.spacingLg,
-        AppDimensions.spacingMd,
-        0,
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-            child: Image.asset(
-              'assets/optimized/icon.png',
-              width: 42,
-              height: 42,
-              fit: BoxFit.cover,
-            ),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => ref.read(mainTabProvider.notifier).state = 3,
-            child: SizedBox(
-              width: 48,
-              height: 48,
-              child: Center(
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: avatarBorderColor,
-                      width: 1.8,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: avatarShadowColor,
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child:
-                        profilePhotoUrl != null && profilePhotoUrl!.isNotEmpty
-                            ? Image.network(
-                                profilePhotoUrl!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
-                                    _buildProfileFallback(),
-                              )
-                            : _buildProfileFallback(),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileFallback() {
-    return Container(
-      color: AppColors.primary.withValues(alpha: 0.14),
-      child: const Icon(
-        Icons.person_outline,
-        color: AppColors.primary,
-        size: 22,
-      ),
-    );
+    showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _VoiceSearchSheet(speech: speech, isDark: isDark),
+    ).then((result) {
+      if (result != null && result.trim().isNotEmpty) {
+        ref.read(itemSearchQueryProvider.notifier).state = result.trim();
+        ref.read(mainTabProvider.notifier).state = 2;
+      }
+    });
   }
 
   Widget _buildSearchBar(BuildContext context, WidgetRef ref) {
@@ -269,32 +200,57 @@ class _MainContent extends ConsumerWidget {
           color: (isDark
                   ? AppColors.surfaceVariantDark
                   : AppColors.surfaceVariantLight)
-              .withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(AppDimensions.radiusXl),
+              .withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+          border: Border.all(
+            color: AppColors.primary.withValues(alpha: isDark ? 0.2 : 0.12),
+          ),
+          boxShadow: isDark
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
             const SizedBox(width: AppDimensions.spacingMd),
             Icon(
-              Icons.search,
-              color: isDark
-                  ? AppColors.textSecondaryDark
-                  : AppColors.textSecondaryLight,
+              Icons.search_rounded,
+              color: isDark ? AppColors.primaryLight : AppColors.primary,
             ),
             const SizedBox(width: AppDimensions.spacingSm),
             Expanded(
               child: Text(
-                'Search your saved world...',
+                'Find your stuff...',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: 15,
                   color: isDark
-                      ? AppColors.textSecondaryDark
+                      ? AppColors.textDisabledDark
                       : AppColors.textSecondaryLight,
                 ),
               ),
             ),
-            const Icon(Icons.mic, color: AppColors.primary),
-            const SizedBox(width: AppDimensions.spacingMd),
+            GestureDetector(
+              onTap: () => _startVoiceSearch(context, ref),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.mic_rounded,
+                  color: AppColors.primaryLight,
+                  size: 18,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppDimensions.spacingSm),
           ],
         ),
       ),
@@ -378,7 +334,7 @@ class _MainContent extends ConsumerWidget {
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
-                    color: AppColors.primary,
+                    color: AppColors.secondary,
                   ),
                 ),
               ),
@@ -844,22 +800,44 @@ class _DashboardMetric extends StatelessWidget {
         onTap: onTap,
         child: Ink(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppDimensions.spacingSm,
-            vertical: AppDimensions.spacingSm,
+            horizontal: AppDimensions.spacingSm + 2,
+            vertical: AppDimensions.spacingSm + 2,
           ),
           decoration: BoxDecoration(
-            color: accentColor.withValues(alpha: isDark ? 0.18 : 0.1),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accentColor.withValues(alpha: isDark ? 0.22 : 0.12),
+                accentColor.withValues(alpha: isDark ? 0.08 : 0.04),
+              ],
+            ),
             borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
             border: Border.all(
-              color: accentColor.withValues(alpha: isDark ? 0.24 : 0.16),
+              color: accentColor.withValues(alpha: isDark ? 0.3 : 0.2),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.1),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Icon(icon, color: accentColor, size: 16),
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, color: accentColor, size: 16),
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -868,16 +846,14 @@ class _DashboardMetric extends StatelessWidget {
                         color: isDark
                             ? AppColors.textPrimaryDark
                             : AppColors.textPrimaryLight,
-                        fontSize: 20,
+                        fontSize: 22,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
                   Icon(
                     Icons.chevron_right_rounded,
-                    color: isDark
-                        ? AppColors.textSecondaryDark
-                        : AppColors.textSecondaryLight,
+                    color: accentColor.withValues(alpha: 0.6),
                     size: 18,
                   ),
                 ],
@@ -1002,10 +978,21 @@ class _TopLocationTile extends StatelessWidget {
 
   final LocationModel location;
 
+  static const _tileAccentColors = [
+    AppColors.secondary,
+    AppColors.tertiary,
+    AppColors.accentYellow,
+    AppColors.success,
+    AppColors.info,
+    AppColors.primaryLight,
+  ];
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final icon = _iconForLocation(location.iconName);
+    final accentColor =
+        _tileAccentColors[location.name.length % _tileAccentColors.length];
 
     return InkWell(
       onTap: () => context.push(
@@ -1019,7 +1006,9 @@ class _TopLocationTile extends StatelessWidget {
           color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
           border: Border.all(
-            color: isDark ? AppColors.borderDark : AppColors.borderLight,
+            color: isDark
+                ? accentColor.withValues(alpha: 0.2)
+                : AppColors.borderLight,
           ),
         ),
         child: Column(
@@ -1029,10 +1018,17 @@ class _TopLocationTile extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.12),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accentColor.withValues(alpha: 0.2),
+                    accentColor.withValues(alpha: 0.08),
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               ),
-              child: Icon(icon, color: AppColors.primary),
+              child: Icon(icon, color: accentColor, size: 22),
             ),
             const SizedBox(height: 12),
             Text(
@@ -1064,8 +1060,8 @@ class _TopLocationTile extends StatelessWidget {
               location.usageCount == 1
                   ? '1 item'
                   : '${location.usageCount} items',
-              style: const TextStyle(
-                color: AppColors.primary,
+              style: TextStyle(
+                color: accentColor,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -1484,8 +1480,8 @@ class _ForgottenItemsCarouselState extends State<_ForgottenItemsCarousel> {
                 height: 6,
                 decoration: BoxDecoration(
                   color: active
-                      ? AppColors.primary
-                      : AppColors.primary.withValues(alpha: 0.25),
+                      ? AppColors.secondary
+                      : AppColors.secondary.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(999),
                 ),
               );
@@ -1565,7 +1561,7 @@ class _ForgottenItemCard extends StatelessWidget {
                     const Text(
                       'Tap to revisit',
                       style: TextStyle(
-                        color: AppColors.primary,
+                        color: AppColors.secondary,
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
                       ),
@@ -1585,5 +1581,240 @@ class _ForgottenItemCard extends StatelessWidget {
     final months = (diffDays / 30).floor();
     if (months <= 1) return '1 month ago';
     return '$months months ago';
+  }
+}
+
+// ── Voice Search Bottom Sheet ─────────────────────────────────────────────────
+
+class _VoiceSearchSheet extends StatefulWidget {
+  const _VoiceSearchSheet({
+    required this.speech,
+    required this.isDark,
+  });
+
+  final stt.SpeechToText speech;
+  final bool isDark;
+
+  @override
+  State<_VoiceSearchSheet> createState() => _VoiceSearchSheetState();
+}
+
+class _VoiceSearchSheetState extends State<_VoiceSearchSheet> {
+  bool _isListening = false;
+  bool _speechAvailable = false;
+  bool _initializing = true;
+  bool _permissionDenied = false;
+  String _recognizedText = '';
+  String _statusMessage = 'Initializing...';
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    // Request microphone permission before initializing speech
+    final micStatus = await Permission.microphone.request();
+    if (!micStatus.isGranted) {
+      if (mounted) {
+        setState(() {
+          _initializing = false;
+          _permissionDenied = true;
+          _statusMessage = micStatus.isPermanentlyDenied
+              ? 'Microphone permission denied. Please enable it in Settings.'
+              : 'Microphone permission is required for voice search.';
+        });
+      }
+      return;
+    }
+
+    try {
+      _speechAvailable = await widget.speech.initialize(
+        onError: (error) {
+          debugPrint('Speech error: ${error.errorMsg}');
+          if (mounted) {
+            setState(() {
+              _isListening = false;
+              _statusMessage = 'Could not recognize. Tap to retry.';
+            });
+          }
+        },
+        onStatus: (status) {
+          if (status == 'notListening' && mounted) {
+            setState(() => _isListening = false);
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('Speech init exception: $e');
+      _speechAvailable = false;
+    }
+    if (mounted) {
+      setState(() => _initializing = false);
+      if (_speechAvailable) {
+        _startListening();
+      } else {
+        setState(
+            () => _statusMessage = 'Speech recognition not available on this device');
+      }
+    }
+  }
+
+  void _onMicTap() {
+    if (_initializing) return;
+    if (_permissionDenied) {
+      // Open app settings so user can grant microphone permission
+      openAppSettings();
+      return;
+    }
+    if (_isListening) {
+      _stopListening();
+    } else if (_speechAvailable) {
+      _startListening();
+    } else {
+      // Re-attempt initialization if speech wasn't available
+      setState(() {
+        _initializing = true;
+        _statusMessage = 'Retrying...';
+      });
+      _initSpeech();
+    }
+  }
+
+  void _startListening() {
+    if (!_speechAvailable) return;
+    widget.speech.listen(
+      onResult: (result) {
+        if (mounted) {
+          setState(() {
+            _recognizedText = result.recognizedWords;
+            _statusMessage = result.recognizedWords.isEmpty
+                ? 'Listening...'
+                : result.recognizedWords;
+          });
+          if (result.finalResult && result.recognizedWords.isNotEmpty) {
+            Navigator.of(context).pop(result.recognizedWords);
+          }
+        }
+      },
+      listenFor: const Duration(seconds: 10),
+      pauseFor: const Duration(seconds: 3),
+      localeId: 'en_US',
+    );
+    setState(() {
+      _isListening = true;
+      _statusMessage = 'Listening...';
+    });
+  }
+
+  void _stopListening() {
+    widget.speech.stop();
+    setState(() => _isListening = false);
+    if (_recognizedText.isNotEmpty) {
+      Navigator.of(context).pop(_recognizedText);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.speech.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor =
+        widget.isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final textColor = widget.isDark
+        ? AppColors.textPrimaryDark
+        : AppColors.textPrimaryLight;
+    final subtitleColor = widget.isDark
+        ? AppColors.textSecondaryDark
+        : AppColors.textSecondaryLight;
+
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(24, 16, 24, 40 + bottomInset),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppDimensions.radiusXl),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: subtitleColor.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 28),
+          Text(
+            _statusMessage,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _isListening ? AppColors.primary : textColor,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 28),
+          GestureDetector(
+            onTap: _onMicTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _initializing
+                    ? subtitleColor.withValues(alpha: 0.1)
+                    : _isListening
+                        ? AppColors.error.withValues(alpha: 0.15)
+                        : AppColors.primary.withValues(alpha: 0.12),
+                border: Border.all(
+                  color: _initializing
+                      ? subtitleColor
+                      : _isListening
+                          ? AppColors.error
+                          : AppColors.primary,
+                  width: 2.5,
+                ),
+              ),
+              child: _initializing
+                  ? SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: subtitleColor,
+                      ),
+                    )
+                  : Icon(
+                      _isListening ? Icons.stop_rounded : Icons.mic_rounded,
+                      color:
+                          _isListening ? AppColors.error : AppColors.primary,
+                      size: 34,
+                    ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _initializing
+                ? 'Setting up...'
+                : _isListening
+                    ? 'Tap to stop'
+                    : 'Tap to speak',
+            style: TextStyle(color: subtitleColor, fontSize: 13),
+          ),
+        ],
+      ),
+    );
   }
 }

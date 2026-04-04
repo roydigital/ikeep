@@ -74,18 +74,6 @@ const _darkColors = _SettingsColors(
   switchOffThumb: AppColors.textDisabledDark,
 );
 
-const _lightColors = _SettingsColors(
-  bg: AppColors.backgroundLight,
-  card: AppColors.surfaceLight,
-  cardSoft: AppColors.surfaceVariantLight,
-  border: AppColors.borderLight,
-  textPrimary: AppColors.textPrimaryLight,
-  textMuted: AppColors.textSecondaryLight,
-  icon: AppColors.textSecondaryLight,
-  success: AppColors.success,
-  switchOffTrack: AppColors.surfaceVariantLight,
-  switchOffThumb: AppColors.surfaceLight,
-);
 
 late _SettingsColors _activeColors;
 
@@ -151,7 +139,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       Uri.parse('https://roydigital.in/ikeep/delete-account.html');
 
   bool _initialized = false;
-  bool _darkMode = true;
+
   bool _stillThere = true;
   bool _seasonal = true;
   bool _lentReminders = true;
@@ -234,7 +222,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   void _initFromSettings(AppSettings settings) {
     if (_initialized) return;
-    _darkMode = settings.themeMode == ThemeMode.dark;
     _stillThere = settings.stillThereRemindersEnabled;
     _seasonal = settings.seasonalRemindersEnabled;
     _lentReminders = settings.lentRemindersEnabled;
@@ -243,19 +230,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   bool _hasChanges(AppSettings settings) {
-    return _darkMode != (settings.themeMode == ThemeMode.dark) ||
-        _stillThere != settings.stillThereRemindersEnabled ||
+    return _stillThere != settings.stillThereRemindersEnabled ||
         _seasonal != settings.seasonalRemindersEnabled ||
         _lentReminders != settings.lentRemindersEnabled ||
         _backupEnabled != settings.isBackupEnabled;
   }
 
-  Future<void> _toggleDarkMode(bool enabled) async {
-    setState(() => _darkMode = enabled);
-    await ref
-        .read(settingsProvider.notifier)
-        .setThemeMode(enabled ? ThemeMode.dark : ThemeMode.light);
-  }
+  // Dark theme is permanent — no toggle needed.
 
   Future<void> _save(AppSettings settings) async {
     if (_isSaving || !_hasChanges(settings)) return;
@@ -283,14 +264,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         }
       }
 
-      await notifier.setThemeMode(_darkMode ? ThemeMode.dark : ThemeMode.light);
       await notifier.setStillThereReminders(_stillThere);
       await notifier.setSeasonalReminders(_seasonal);
       await notifier.setLentReminders(_lentReminders);
       await notifier.setBackupEnabled(_backupEnabled);
 
       final updatedSettings = settings.copyWith(
-        themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
         stillThereRemindersEnabled: _stillThere,
         seasonalRemindersEnabled: _seasonal,
         lentRemindersEnabled: _lentReminders,
@@ -398,7 +377,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    final colors = _darkMode ? _darkColors : _lightColors;
+    final colors = _darkColors;
     try {
       final items = await ref.read(allItemsProvider.future);
       final locations = await ref.read(allLocationsProvider.future);
@@ -613,7 +592,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     _initFromSettings(settings);
-    _activeColors = _darkMode ? _darkColors : _lightColors;
+    _activeColors = _darkColors;
     final appVersionLabel = ref.watch(appStoreVersionLabelProvider).maybeWhen(
           data: (label) => label,
           orElse: () => '${AppConstants.appName} Version',
@@ -765,11 +744,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   'Adjust theme and reminder behavior here so Ikeep matches how you actually use it.',
                               tooltipPosition: TooltipPosition.top,
                               child: _PreferencesCard(
-                                darkMode: _darkMode,
                                 stillThere: _stillThere,
                                 seasonal: _seasonal,
                                 lentReminders: _lentReminders,
-                                onDarkModeChanged: _toggleDarkMode,
                                 onStillThereChanged: (v) =>
                                     setState(() => _stillThere = v),
                                 onSeasonalChanged: (v) =>
@@ -1064,19 +1041,32 @@ class _AccountCard extends StatelessWidget {
                   height: 74,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _kCardSoft,
-                    border: Border.all(color: _kBorder, width: 2),
+                    gradient: AppColors.primaryGradient,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.25),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                  child: ClipOval(
-                    child: photoUrl != null && photoUrl!.isNotEmpty
-                        ? Image.network(
-                            photoUrl!,
-                            width: 74,
-                            height: 74,
-                            fit: BoxFit.cover,
-                          )
-                        : const Icon(Icons.person,
-                            color: Color(0xFF9A8E76), size: 42),
+                  child: Container(
+                    margin: const EdgeInsets.all(2.5),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _kCard,
+                    ),
+                    child: ClipOval(
+                      child: photoUrl != null && photoUrl!.isNotEmpty
+                          ? Image.network(
+                              photoUrl!,
+                              width: 69,
+                              height: 69,
+                              fit: BoxFit.cover,
+                            )
+                          : const Icon(Icons.person_rounded,
+                              color: AppColors.primaryLight, size: 38),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -1352,21 +1342,17 @@ class _GoogleSignInButton extends StatelessWidget {
 
 class _PreferencesCard extends StatelessWidget {
   const _PreferencesCard({
-    required this.darkMode,
     required this.stillThere,
     required this.seasonal,
     required this.lentReminders,
-    required this.onDarkModeChanged,
     required this.onStillThereChanged,
     required this.onSeasonalChanged,
     required this.onLentRemindersChanged,
   });
 
-  final bool darkMode;
   final bool stillThere;
   final bool seasonal;
   final bool lentReminders;
-  final ValueChanged<bool> onDarkModeChanged;
   final ValueChanged<bool> onStillThereChanged;
   final ValueChanged<bool> onSeasonalChanged;
   final ValueChanged<bool> onLentRemindersChanged;
@@ -1384,25 +1370,6 @@ class _PreferencesCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.dark_mode, color: _kIcon, size: 32),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    'Dark Mode',
-                    style: TextStyle(
-                        color: _kTextPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ),
-                _IkeepSwitch(value: darkMode, onChanged: onDarkModeChanged),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Divider(color: _kBorder, height: 1),
-            const SizedBox(height: 18),
             Text(
               'NOTIFICATIONS',
               style: TextStyle(

@@ -1674,14 +1674,33 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                         width: 46,
                         height: 46,
                         decoration: BoxDecoration(
-                          color: isExpanded
-                              ? AppColors.primary
-                              : AppColors.primary.withValues(alpha: 0.12),
+                          gradient: isExpanded
+                              ? AppColors.primaryGradient
+                              : LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    AppColors.primary.withValues(alpha: 0.18),
+                                    AppColors.secondary.withValues(alpha: 0.08),
+                                  ],
+                                ),
                           borderRadius: BorderRadius.circular(14),
+                          boxShadow: isExpanded
+                              ? [
+                                  BoxShadow(
+                                    color:
+                                        AppColors.primary.withValues(alpha: 0.3),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ]
+                              : null,
                         ),
                         child: Icon(
                           Icons.home_work_outlined,
-                          color: isExpanded ? Colors.white : AppColors.primary,
+                          color: isExpanded
+                              ? Colors.white
+                              : AppColors.primaryLight,
                           size: 22,
                         ),
                       ),
@@ -3384,9 +3403,22 @@ class _RoomsStarterPackTile extends StatelessWidget {
                       width: 42,
                       height: 42,
                       decoration: BoxDecoration(
-                        color: Colors.white
-                            .withValues(alpha: isDark ? 0.10 : 0.55),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            pack.accentColor.withValues(alpha: 0.3),
+                            pack.accentColor.withValues(alpha: 0.1),
+                          ],
+                        ),
                         borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: pack.accentColor.withValues(alpha: 0.15),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
                       child: Icon(
                         pack.icon,

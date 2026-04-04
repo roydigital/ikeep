@@ -1329,38 +1329,61 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
       child: AnimatedOpacity(
         opacity: canSave ? 1.0 : 0.55,
         duration: const Duration(milliseconds: 200),
-        child: ElevatedButton(
-          onPressed: canSave ? _saveEntry : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.5),
-            padding: const EdgeInsets.symmetric(vertical: 17),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-            ),
-            elevation: 8,
-            shadowColor: AppColors.primary.withValues(alpha: 0.4),
-          ),
-          child: _isSaving
-              ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: Colors.white),
-                )
-              : const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Save Entry',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: canSave ? AppColors.primaryGradient : null,
+            color: canSave ? null : AppColors.primary.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+            boxShadow: canSave
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
                     ),
-                    SizedBox(width: 8),
-                    Icon(Icons.arrow_forward, size: 20),
-                  ],
-                ),
+                    BoxShadow(
+                      color: AppColors.secondary.withValues(alpha: 0.2),
+                      blurRadius: 20,
+                      offset: const Offset(4, 8),
+                    ),
+                  ]
+                : null,
+          ),
+          child: ElevatedButton(
+            onPressed: canSave ? _saveEntry : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.transparent,
+              disabledForegroundColor: Colors.white.withValues(alpha: 0.6),
+              padding: const EdgeInsets.symmetric(vertical: 17),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+              ),
+              elevation: 0,
+            ),
+            child: _isSaving
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white),
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.auto_awesome_rounded, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Save Entry',
+                        style:
+                            TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                      SizedBox(width: 8),
+                      Icon(Icons.arrow_forward_rounded, size: 20),
+                    ],
+                  ),
+          ),
         ),
       ),
     );

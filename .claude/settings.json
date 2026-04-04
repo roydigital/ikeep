@@ -9,7 +9,12 @@
       "Read(//c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev/**)",
       "Bash(grep -h \"^final.*Provider\\\\|^const.*Provider\" lib/providers/*.dart)",
       "Bash(flutter clean:*)",
-      "Bash(flutter build:*)"
+      "Bash(flutter build:*)",
+      "mcp__stitch__create_project",
+      "mcp__stitch__create_design_system",
+      "mcp__stitch__generate_screen_from_text",
+      "mcp__stitch__get_project",
+      "mcp__stitch__list_screens"
     ]
   }
 }

@@ -143,36 +143,28 @@ class _IkeepAppState extends ConsumerState<IkeepApp>
     );
 
     final router = ref.watch(routerProvider);
-    final settings = ref.watch(settingsProvider);
+    // Watch settings so the router rebuilds on onboarding-complete changes.
+    ref.watch(settingsProvider);
     final updateState = ref.watch(appUpdateControllerProvider);
     final updateDecision = updateState.decision;
 
     return MaterialApp.router(
       title: 'Ikeep',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: settings.themeMode,
+      theme: AppTheme.darkTheme,
       routerConfig: router,
       builder: (context, child) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      const Color(0xFF040124),
-                      const Color(0xFF130A38),
-                      const Color(0xFF0C0A20)
-                    ]
-                  : [
-                      const Color(0xFFF7F5FC),
-                      const Color(0xFFEBE6F5),
-                      const Color(0xFFFFFFFF)
-                    ],
-              stops: const [0.0, 0.5, 1.0],
+              colors: [
+                Color(0xFF0F0B1E),
+                Color(0xFF130E2A),
+                Color(0xFF0D0918),
+              ],
+              stops: [0.0, 0.5, 1.0],
             ),
           ),
           child: Stack(

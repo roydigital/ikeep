@@ -18,9 +18,9 @@ class AppDimensions {
   static const double radiusFull = 999.0;
 
   // Card
-  static const double cardElevation = 0.0; // Flat cards — elevation via color
+  static const double cardElevation = 0.0;
   static const double cardPaddingH = 16.0;
-  static const double cardPaddingV = 12.0;
+  static const double cardPaddingV = 14.0;
 
   // Icon sizes
   static const double iconSm = 16.0;
@@ -43,5 +43,9 @@ class AppDimensions {
 
   // Input
   static const double inputHeight = 52.0;
-  static const double inputBorderRadius = 12.0;
+  static const double inputBorderRadius = 14.0;
+
+  // Dashboard card
+  static const double dashboardCardHeight = 100.0;
+  static const double dashboardCardWidth = 140.0;
 }

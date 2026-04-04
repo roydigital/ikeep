@@ -3480,7 +3480,14 @@ class _DetailQuickActionTile extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: isDark ? 0.18 : 0.12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      accentColor.withValues(alpha: 0.25),
+                      accentColor.withValues(alpha: 0.08),
+                    ],
+                  ),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, color: accentColor, size: 18),
@@ -3734,21 +3741,27 @@ class _DetailFab extends StatelessWidget {
             height: 72,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.primary,
+              gradient: AppColors.primaryGradient,
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.12),
-                width: 4,
+                color: Colors.white.withValues(alpha: 0.15),
+                width: 3,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.5),
-                  blurRadius: 28,
-                  spreadRadius: 6,
+                  color: AppColors.primary.withValues(alpha: 0.45),
+                  blurRadius: 24,
+                  spreadRadius: 4,
+                ),
+                BoxShadow(
+                  color: AppColors.secondary.withValues(alpha: 0.25),
+                  blurRadius: 32,
+                  spreadRadius: 2,
+                  offset: const Offset(4, 4),
                 ),
               ],
             ),
             child: const Icon(
-              Icons.photo_camera,
+              Icons.photo_camera_rounded,
               color: Colors.white,
               size: 30,
             ),
