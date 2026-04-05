@@ -18,9 +18,20 @@ import java.io.FileOutputStream
 class MainActivity : FlutterActivity() {
     companion object {
         private const val invoicePickerChannel = "ikeep/native_invoice_picker"
+        private const val notificationRecoveryChannel =
+            "com.roydigital.ikeep/notification_recovery"
         private const val itemInvoicesDir = "item_invoices"
         private const val sharedInvoicesDir = "shared_invoices"
         private const val invoicePickerRequestCode = 41011
+
+        // SharedPreferences file and key used by flutter_local_notifications
+        // to persist scheduled notification payloads via Gson. When the
+        // serialized data becomes corrupt (e.g. after R8 strips TypeToken
+        // generics), clearing this key is the last-resort recovery path.
+        private const val NOTIFICATION_PREFS_FILE =
+            "notification_plugin"
+        private const val SCHEDULED_NOTIFICATIONS_KEY =
+            "flutter_local_notifications"
     }
 
     private var pendingInvoicePickerResult: MethodChannel.Result? = null
@@ -39,6 +50,37 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "pickInvoice" -> launchInvoicePicker(result)
                 "openInvoice" -> openInvoice(call, result)
+                else -> result.notImplemented()
+            }
+        }
+
+        // Recovery channel: clears the flutter_local_notifications plugin's
+        // internal SharedPreferences cache of scheduled notification payloads.
+        // Used as a last-resort recovery when Gson TypeToken deserialization
+        // fails due to corrupted data from a previous build/version.
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            notificationRecoveryChannel,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "clearScheduledNotificationCache" -> {
+                    try {
+                        val prefs = applicationContext.getSharedPreferences(
+                            NOTIFICATION_PREFS_FILE,
+                            android.content.Context.MODE_PRIVATE,
+                        )
+                        prefs.edit()
+                            .remove(SCHEDULED_NOTIFICATIONS_KEY)
+                            .apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "cache_clear_failed",
+                            e.message ?: "Could not clear notification cache.",
+                            null,
+                        )
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
