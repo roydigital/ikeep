@@ -2576,6 +2576,7 @@ class _RoomsLocationSearchState {
       );
     }
 
+    // Search rooms and zones by name.
     final matches = hierarchy.searchLocations(
       normalizedQuery,
       types: const {LocationType.room, LocationType.zone},
@@ -2586,6 +2587,30 @@ class _RoomsLocationSearchState {
     final visibleAreaUuids = <String>{};
     final visibleRoomUuids = <String>{};
     final visibleZoneUuids = <String>{};
+
+    // Also check if the query matches any area name — if so, show all
+    // children of that area so users can search by area (e.g. "home").
+    final matchedAreas = hierarchy.searchLocations(
+      normalizedQuery,
+      types: const {LocationType.area},
+      pathMatchMinTokenCount: 2,
+    );
+    for (final area in matchedAreas) {
+      visibleAreaUuids.add(area.uuid);
+      final rooms = hierarchy.roomsForArea(area.uuid);
+      for (final room in rooms) {
+        matchedRoomUuids.add(room.uuid);
+        visibleRoomUuids.add(room.uuid);
+        for (final zone in hierarchy.zonesForRoom(room.uuid)) {
+          matchedZoneUuids.add(zone.uuid);
+          visibleZoneUuids.add(zone.uuid);
+        }
+      }
+      for (final zone in hierarchy.directZonesForArea(area.uuid)) {
+        matchedZoneUuids.add(zone.uuid);
+        visibleZoneUuids.add(zone.uuid);
+      }
+    }
 
     for (final location in matches) {
       if (location.type == LocationType.room) {
@@ -2612,9 +2637,19 @@ class _RoomsLocationSearchState {
       }
     }
 
+    // Combine direct matches with area-matched children for total count.
+    final allMatchUuids = <String>{
+      ...matches.map((l) => l.uuid),
+      ...matchedRoomUuids,
+      ...matchedZoneUuids,
+    };
+
     return _RoomsLocationSearchState._(
       query: normalizedQuery,
-      matches: matches,
+      matches: allMatchUuids
+          .map((uuid) => hierarchy.byUuid[uuid])
+          .whereType<LocationModel>()
+          .toList(),
       matchedRoomUuids: matchedRoomUuids,
       matchedZoneUuids: matchedZoneUuids,
       visibleAreaUuids: visibleAreaUuids,

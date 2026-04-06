@@ -12,10 +12,14 @@ class FuzzySearch {
     if (q.isEmpty) return true;
     if (t.contains(q)) return true;
 
-    // Check each word in the target against the query
+    // Check each word in the target against the query.
+    // Scale allowed distance by the shorter string's length to avoid
+    // false positives when comparing very short strings (e.g. "hom" vs "on").
     final words = t.split(RegExp(r'\s+'));
     for (final word in words) {
-      if (_levenshtein(q, word) <= maxDistance) return true;
+      final shorter = q.length < word.length ? q.length : word.length;
+      final allowed = shorter <= 2 ? 0 : (shorter <= 4 ? 1 : maxDistance);
+      if (_levenshtein(q, word) <= allowed) return true;
     }
     return false;
   }

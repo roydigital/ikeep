@@ -258,6 +258,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     // Only start the tour when the Search tab (index 2) is actually visible.
     final activeTab = ref.watch(mainTabProvider);
 
+    // Sync external query changes (e.g. voice search from Home) into the
+    // TextEditingController so the text field and provider stay in sync.
+    ref.listen<String>(itemSearchQueryProvider, (prev, next) {
+      if (_controller.text != next) {
+        _controller.text = next;
+        _controller.selection = TextSelection.collapsed(offset: next.length);
+      }
+    });
+
     // Handle "View All" from Home → switch to Recent filter and show items.
     ref.listen<bool>(viewAllRecentRequestedProvider, (prev, next) {
       if (next) {
