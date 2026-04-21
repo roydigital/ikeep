@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/feature_limits.dart';
 import '../../domain/models/household_member.dart';
+import '../../providers/auth_providers.dart';
 import '../../providers/household_providers.dart';
 import '../../theme/app_colors.dart';
 
@@ -311,6 +314,13 @@ class _CreateHouseholdCard extends StatelessWidget {
           TextField(
             controller: controller,
             textInputAction: TextInputAction.done,
+            maxLength: locationNameMaxLength,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(locationNameMaxLength),
+            ],
+            buildCounter: (context,
+                    {required currentLength, required isFocused, maxLength}) =>
+                null,
             decoration: const InputDecoration(
               labelText: 'Household name',
               hintText: 'The Smiths',
@@ -478,6 +488,13 @@ class _AddMemberCard extends ConsumerWidget {
             readOnly: hasFoundUser,
             enabled: !isSubmitting,
             keyboardType: TextInputType.emailAddress,
+            maxLength: emailMaxLength,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(emailMaxLength),
+            ],
+            buildCounter: (context,
+                    {required currentLength, required isFocused, maxLength}) =>
+                null,
             textInputAction:
                 hasFoundUser ? TextInputAction.next : TextInputAction.search,
             onChanged: (_) {
@@ -563,6 +580,15 @@ class _AddMemberCard extends ConsumerWidget {
               controller: nameController,
               enabled: !isSubmitting,
               textInputAction: TextInputAction.done,
+              maxLength: lentToMaxLength,
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(lentToMaxLength),
+              ],
+              buildCounter: (context,
+                      {required currentLength,
+                      required isFocused,
+                      maxLength}) =>
+                  null,
               onSubmitted: (_) {
                 if (!isSubmitting && nameController.text.trim().isNotEmpty) {
                   onAdd();
@@ -646,7 +672,7 @@ class _LookupMessage extends StatelessWidget {
   }
 }
 
-class _MembersCard extends StatelessWidget {
+class _MembersCard extends ConsumerWidget {
   const _MembersCard({
     required this.cardColor,
     required this.borderColor,
@@ -662,7 +688,8 @@ class _MembersCard extends StatelessWidget {
   final AsyncValue<List<HouseholdMember>> membersAsync;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentUserUid = ref.watch(authStateProvider).valueOrNull?.uid;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -698,6 +725,8 @@ class _MembersCard extends StatelessWidget {
                         member: member,
                         textPrimary: textPrimary,
                         textSecondary: textSecondary,
+                        isCurrentUser: currentUserUid != null &&
+                            member.uuid == currentUserUid,
                       ),
                     )
                     .toList(),
@@ -725,14 +754,19 @@ class _MemberTile extends StatelessWidget {
     required this.member,
     required this.textPrimary,
     required this.textSecondary,
+    this.isCurrentUser = false,
   });
 
   final HouseholdMember member;
   final Color textPrimary;
   final Color textSecondary;
+  final bool isCurrentUser;
 
   @override
   Widget build(BuildContext context) {
+    final displayName = member.name.trim().isEmpty ? 'Member' : member.name.trim();
+    final nameLabel = isCurrentUser ? '$displayName (You)' : displayName;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -746,7 +780,7 @@ class _MemberTile extends StatelessWidget {
             backgroundColor: AppColors.primary.withValues(alpha: 0.14),
             foregroundColor: AppColors.primary,
             child: Text(
-              member.name.isEmpty ? '?' : member.name.characters.first.toUpperCase(),
+              displayName.characters.first.toUpperCase(),
             ),
           ),
           const SizedBox(width: 12),
@@ -755,7 +789,7 @@ class _MemberTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  member.name,
+                  nameLabel,
                   style: TextStyle(
                     color: textPrimary,
                     fontWeight: FontWeight.w700,

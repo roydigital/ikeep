@@ -1,8 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/constants/feature_limits.dart';
 import '../../core/utils/location_hierarchy_utils.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/location_model.dart';
@@ -212,6 +214,13 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: locationNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(locationNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           style: TextStyle(
             color:
                 isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
@@ -342,6 +351,15 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
                 TextField(
                   controller: controller,
                   autofocus: true,
+                  maxLength: locationNameMaxLength,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(locationNameMaxLength),
+                  ],
+                  buildCounter: (context,
+                          {required currentLength,
+                          required isFocused,
+                          maxLength}) =>
+                      null,
                   style: TextStyle(
                     color: isDark
                         ? AppColors.textPrimaryDark
@@ -554,6 +572,13 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: locationNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(locationNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           decoration: InputDecoration(
             hintText: 'e.g. Top Shelf, Left Drawer',
             filled: true,
@@ -681,6 +706,13 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: locationNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(locationNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           decoration: InputDecoration(
             hintText: 'e.g. Bedroom, Kitchen, Store Room',
             filled: true,
@@ -2467,6 +2499,11 @@ class _TopHeader extends StatelessWidget {
                                     )
                                   : null,
                               border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              disabledBorder: InputBorder.none,
+                              errorBorder: InputBorder.none,
+                              focusedErrorBorder: InputBorder.none,
                               isDense: true,
                             ),
                           ),

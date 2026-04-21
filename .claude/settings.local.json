@@ -10,7 +10,19 @@
       "Read(//c/Users/roy/Documents/VS/ Code/ Projects/Apps/Ikeep/ikeep/**)",
       "Bash(find /c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev -name showcase.dart -path *showcaseview*)",
       "Bash(grep -n \"TooltipPosition\\\\|enum Tooltip\" /c/Users/roy/AppData/Local/Pub/Cache/hosted/pub.dev/showcaseview-4.0.1/lib/src/*.dart)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(grep -iE \"google-services|\\\\.json$\")",
+      "Bash(flutter --version)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://roydigital.in/ikeep/terms-privacy.html\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://roydigital.in/ikeep/help-center.html\")",
+      "Bash(./gradlew :app:properties -q)",
+      "Bash(./gradlew :app:properties)",
+      "Bash(xargs cat *)",
+      "Bash(dart run *)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "code-review-graph"
+  ]
 }

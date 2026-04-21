@@ -75,7 +75,7 @@ void main() {
         userId: 'user-1',
         itemUuid: 'item-1',
         imagePaths: const [
-          '/data/user/0/com.example.ikeep/app_flutter/item_images/missing.jpg'
+          '/data/user/0/in.roydigital.ikeep/app_flutter/item_images/missing.jpg'
         ],
       );
 
@@ -99,7 +99,7 @@ void main() {
         userId: 'user-1',
         itemUuid: 'item-1',
         imagePaths: const [
-          '/data/user/0/com.example.ikeep/app_flutter/item_images/missing.jpg'
+          '/data/user/0/in.roydigital.ikeep/app_flutter/item_images/missing.jpg'
         ],
       );
 

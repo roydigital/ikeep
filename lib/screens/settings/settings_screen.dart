@@ -14,6 +14,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/feature_limits.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/cloud_entitlement.dart';
+import '../../domain/models/effective_app_update_decision.dart';
 import '../../domain/models/sync_status.dart';
 import '../../providers/app_update_providers.dart';
 import '../../providers/auth_providers.dart';
@@ -26,6 +27,7 @@ import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/sync_providers.dart';
 import '../../routing/app_routes.dart';
+import '../../services/location_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimensions.dart';
 import '../../widgets/app_version_tile.dart';
@@ -516,7 +518,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _showInfo('Update download in progress');
       return;
     }
+    if (decision.isError) {
+      _showUpdateErrorSnack(decision);
+      return;
+    }
     _showInfo('Unable to check updates right now');
+  }
+
+  // Surfaces a helpful message and a one-tap Play Store fallback when the
+  // native check can't complete (most commonly on side-loaded builds).
+  void _showUpdateErrorSnack(EffectiveAppUpdateDecision decision) {
+    if (!mounted) return;
+    final bool playUnavailable = decision.isPlayStoreUnavailable;
+    final String message = playUnavailable
+        ? 'Can\'t check Google Play from this build. Open the Play Store to see updates.'
+        : 'Couldn\'t check for updates. Please try again.';
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: playUnavailable ? 'Open Play Store' : 'Retry',
+          onPressed: () {
+            if (playUnavailable) {
+              _openPlayStoreForUpdate();
+            } else {
+              _checkForUpdates();
+            }
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _handleUpdateNowFromSettings() async {
@@ -1547,13 +1580,32 @@ class _NearbyLendingCard extends ConsumerWidget {
                       onPressed: () async {
                         final locationService =
                             ref.read(locationServiceProvider);
-                        final locality =
-                            await locationService.refreshLocality();
-                        if (locality != null) {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final result =
+                            await locationService.refreshLocality(context);
+                        if (result.isSuccess && result.locality != null) {
                           ref
                               .read(settingsProvider.notifier)
-                              .setCachedLocality(locality);
+                              .setCachedLocality(result.locality!);
+                          return;
                         }
+                        // User tapping "Not Now" is intentional — stay silent
+                        // and let them type locations manually. For other
+                        // failure modes, surface a short hint.
+                        if (result.status ==
+                            LocationResult.userDeclinedRationale) {
+                          return;
+                        }
+                        final message = switch (result.status) {
+                          LocationResult.serviceDisabled =>
+                            'Turn on device location to detect your area.',
+                          LocationResult.permissionDenied =>
+                            'Location permission denied. You can enable it in system settings.',
+                          _ => 'Could not detect your location. Try again.',
+                        };
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(message)),
+                        );
                       },
                       icon: const Icon(Icons.refresh,
                           color: AppColors.primary, size: 20),

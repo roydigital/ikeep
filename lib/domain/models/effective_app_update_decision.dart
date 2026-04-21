@@ -1,4 +1,5 @@
 import '../../core/constants/update_constants.dart';
+import 'play_update_state.dart';
 
 enum EffectiveAppUpdateStatus {
   noUpdate,
@@ -22,6 +23,7 @@ class EffectiveAppUpdateDecision {
     required this.availableVersionCode,
     required this.availableVersionName,
     required this.errorMessage,
+    this.errorKind = PlayUpdateErrorKind.none,
   });
 
   const EffectiveAppUpdateDecision.noUpdate()
@@ -35,7 +37,8 @@ class EffectiveAppUpdateDecision {
         canStartImmediateUpdate = false,
         availableVersionCode = null,
         availableVersionName = '',
-        errorMessage = null;
+        errorMessage = null,
+        errorKind = PlayUpdateErrorKind.none;
 
   final EffectiveAppUpdateStatus status;
   final String title;
@@ -48,6 +51,11 @@ class EffectiveAppUpdateDecision {
   final int? availableVersionCode;
   final String availableVersionName;
   final String? errorMessage;
+  final PlayUpdateErrorKind errorKind;
+
+  bool get isPlayStoreUnavailable =>
+      errorKind == PlayUpdateErrorKind.playStoreUnavailable ||
+      errorKind == PlayUpdateErrorKind.playServicesUnavailable;
 
   bool get isNoUpdate => status == EffectiveAppUpdateStatus.noUpdate;
   bool get isOptionalUpdate =>
@@ -74,6 +82,7 @@ class EffectiveAppUpdateDecision {
     String? availableVersionName,
     String? errorMessage,
     bool clearErrorMessage = false,
+    PlayUpdateErrorKind? errorKind,
   }) {
     return EffectiveAppUpdateDecision(
       status: status ?? this.status,
@@ -92,6 +101,9 @@ class EffectiveAppUpdateDecision {
       availableVersionName: availableVersionName ?? this.availableVersionName,
       errorMessage:
           clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
+      errorKind: clearErrorMessage
+          ? PlayUpdateErrorKind.none
+          : (errorKind ?? this.errorKind),
     );
   }
 }

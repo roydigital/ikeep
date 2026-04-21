@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -2002,6 +2003,13 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           autofocus: true,
           textInputAction: TextInputAction.done,
           onSubmitted: (value) => Navigator.pop(ctx, value.trim()),
+          maxLength: itemNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(itemNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           style: TextStyle(
             color:
                 isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
@@ -2133,6 +2141,15 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                 TextField(
                   controller: lentToController,
                   autofocus: true,
+                  maxLength: lentToMaxLength,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(lentToMaxLength),
+                  ],
+                  buildCounter: (context,
+                          {required currentLength,
+                          required isFocused,
+                          maxLength}) =>
+                      null,
                   style: TextStyle(
                     color: isDark
                         ? AppColors.textPrimaryDark

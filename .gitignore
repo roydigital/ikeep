@@ -48,3 +48,8 @@ app.*.map.json
 google-services.json
 google-services authentication.json
 **/google-services.json
+
+# Firebase CLI local files (DO NOT commit)
+.firebase/
+firebase-debug.log
+firebase-debug.*.log

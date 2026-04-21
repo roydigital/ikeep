@@ -1,0 +1,147 @@
+rules_version = '2';
+
+// Firestore Security Rules for Ikeep (project: ikeep-1af18)
+//
+// Scopes:
+//   1. Personal cloud backup      — users/{uid} and its subtree
+//   2. Households (future scope)  — households/{id} with members + shared items
+//   3. Invites (future scope)     — household_invites, readable by invitee
+//   4. Nearby lending (future)    — locked down until feature ships
+//
+// All reads/writes require authentication. Cross-user writes are never allowed.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Personal cloud backup subtree — owner-only access.
+    // Paths used by FirebaseSyncService:
+    //   users/{uid}
+    //   users/{uid}/items/{itemUuid}
+    //   users/{uid}/locations/{locationUuid}
+    // ──────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Households (future feature — household sharing).
+    // Readable by owner + members; owner controls create/delete;
+    // members can update the parent doc (e.g. to add/remove themselves).
+    // ──────────────────────────────────────────────────────────────────
+    function householdDoc(id) {
+      return get(/databases/$(database)/documents/households/$(id)).data;
+    }
+
+    function isHouseholdMember(id) {
+      return isSignedIn()
+             && (householdDoc(id).ownerUid == request.auth.uid
+                 || request.auth.uid in householdDoc(id).memberIds);
+    }
+
+    function isHouseholdOwner(id) {
+      return isSignedIn() && householdDoc(id).ownerUid == request.auth.uid;
+    }
+
+    match /households/{householdId} {
+      allow read: if isSignedIn()
+                  && (resource.data.ownerUid == request.auth.uid
+                      || request.auth.uid in resource.data.memberIds);
+
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow update: if isSignedIn()
+                    && (resource.data.ownerUid == request.auth.uid
+                        || request.auth.uid in resource.data.memberIds);
+
+      allow delete: if isSignedIn()
+                    && resource.data.ownerUid == request.auth.uid;
+
+      // Each member manages their own profile; owner manages all profiles.
+      match /members/{memberUid} {
+        allow read:  if isHouseholdMember(householdId);
+        allow write: if isSignedIn()
+                     && (request.auth.uid == memberUid
+                         || isHouseholdOwner(householdId));
+      }
+
+      // Shared items — visible to every member.
+      // Authors can write their own items; owner can write any.
+      match /shared_items/{itemId} {
+        allow read: if isHouseholdMember(householdId);
+
+        allow create: if isHouseholdMember(householdId)
+                      && request.resource.data.ownerUid == request.auth.uid;
+
+        allow update, delete: if isHouseholdMember(householdId)
+                              && (resource.data.ownerUid == request.auth.uid
+                                  || isHouseholdOwner(householdId));
+      }
+
+      // Borrow requests — visible to all members of the household.
+      match /borrow_requests/{requestId} {
+        allow read: if isHouseholdMember(householdId);
+
+        allow create: if isHouseholdMember(householdId)
+                      && request.resource.data.requesterUid == request.auth.uid;
+
+        allow update: if isHouseholdMember(householdId);
+
+        allow delete: if isHouseholdMember(householdId)
+                      && (resource.data.requesterUid == request.auth.uid
+                          || isHouseholdOwner(householdId));
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Household invitations — readable by invitee or owner.
+    // Creation allowed for any signed-in user (invite flow); invitee can
+    // accept/decline by updating status; owner can rescind.
+    // ──────────────────────────────────────────────────────────────────
+    match /household_invites/{inviteId} {
+      allow read: if isSignedIn()
+                  && (resource.data.inviteeEmail == request.auth.token.email
+                      || resource.data.ownerUid == request.auth.uid);
+
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow update: if isSignedIn()
+                    && (resource.data.inviteeEmail == request.auth.token.email
+                        || resource.data.ownerUid == request.auth.uid);
+
+      allow delete: if isSignedIn()
+                    && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Nearby lending (future feature) — locked by default.
+    // Flip to public read when the Nearby feature ships.
+    // ──────────────────────────────────────────────────────────────────
+    match /nearby_items/{itemId} {
+      allow read, write: if false;
+    }
+
+    match /nearby_borrow_requests/{requestId} {
+      allow read, write: if false;
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

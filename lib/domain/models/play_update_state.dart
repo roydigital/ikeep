@@ -16,6 +16,18 @@ enum PlayUpdateInstallState {
   downloaded,
 }
 
+/// Classifies why a Play update check failed, so callers can choose between
+/// a user-friendly fallback (open the Play Store) and a transient retry.
+enum PlayUpdateErrorKind {
+  none,
+  // App wasn't installed from Google Play (side-loaded / debug / other store).
+  playStoreUnavailable,
+  // Device has no/outdated Play Services or no network.
+  playServicesUnavailable,
+  // Anything else: genuine transient failure, safe to retry.
+  transient,
+}
+
 class PlayUpdateState {
   const PlayUpdateState({
     required this.availability,
@@ -27,6 +39,7 @@ class PlayUpdateState {
     required this.updatePriority,
     required this.playPackageName,
     this.errorMessage,
+    this.errorKind = PlayUpdateErrorKind.none,
   });
 
   const PlayUpdateState.unknown()
@@ -38,7 +51,8 @@ class PlayUpdateState {
         clientVersionStalenessDays = null,
         updatePriority = null,
         playPackageName = '',
-        errorMessage = null;
+        errorMessage = null,
+        errorKind = PlayUpdateErrorKind.none;
 
   final PlayUpdateAvailabilityState availability;
   final PlayUpdateInstallState installState;
@@ -49,8 +63,13 @@ class PlayUpdateState {
   final int? updatePriority;
   final String playPackageName;
   final String? errorMessage;
+  final PlayUpdateErrorKind errorKind;
 
   bool get isError => (errorMessage?.trim().isNotEmpty ?? false);
+
+  bool get isPlayStoreUnavailable =>
+      errorKind == PlayUpdateErrorKind.playStoreUnavailable ||
+      errorKind == PlayUpdateErrorKind.playServicesUnavailable;
 
   bool get hasUpdate =>
       availability == PlayUpdateAvailabilityState.updateAvailable ||
@@ -80,6 +99,7 @@ class PlayUpdateState {
     String? playPackageName,
     String? errorMessage,
     bool clearErrorMessage = false,
+    PlayUpdateErrorKind? errorKind,
   }) {
     return PlayUpdateState(
       availability: availability ?? this.availability,
@@ -97,8 +117,12 @@ class PlayUpdateState {
       updatePriority:
           clearUpdatePriority ? null : (updatePriority ?? this.updatePriority),
       playPackageName: playPackageName ?? this.playPackageName,
-      errorMessage:
-          clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
+      errorMessage: clearErrorMessage
+          ? null
+          : (errorMessage ?? this.errorMessage),
+      errorKind: clearErrorMessage
+          ? PlayUpdateErrorKind.none
+          : (errorKind ?? this.errorKind),
     );
   }
 }

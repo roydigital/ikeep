@@ -37,6 +37,7 @@ class PlayInAppUpdateService {
         playPackageName: info.packageName,
       );
     } on PlatformException catch (error) {
+      final kind = _classifyPlatformException(error);
       return PlayUpdateState(
         availability: PlayUpdateAvailabilityState.unknown,
         installState: PlayUpdateInstallState.unknown,
@@ -48,6 +49,7 @@ class PlayInAppUpdateService {
         playPackageName: '',
         errorMessage:
             'Play update check failed (${error.code}): ${error.message ?? 'unknown error'}',
+        errorKind: kind,
       );
     } catch (error) {
       return PlayUpdateState(
@@ -60,8 +62,45 @@ class PlayInAppUpdateService {
         updatePriority: null,
         playPackageName: '',
         errorMessage: 'Play update check failed: $error',
+        errorKind: PlayUpdateErrorKind.transient,
       );
     }
+  }
+
+  // Classify Play Core install-exception codes to separate "we cannot ever
+  // check via Play on this device" from "try again later".
+  //
+  // Codes come through as either PlatformException.code (e.g. "TASK_FAILURE")
+  // with a message containing "Install Error(-X)", or directly as "-X".
+  // Reference: Play Core InstallErrorCode constants.
+  PlayUpdateErrorKind _classifyPlatformException(PlatformException error) {
+    final haystack = '${error.code} ${error.message ?? ''}'.toLowerCase();
+
+    // -10 ERROR_APP_NOT_OWNED — app not installed from Play.
+    // -6  ERROR_API_NOT_AVAILABLE — in-app updates not supported by Play.
+    final bool looksLikeAppNotOwned =
+        haystack.contains('install error(-10)') ||
+            haystack.contains('error_app_not_owned') ||
+            haystack.contains('app_not_owned');
+    final bool looksLikeApiUnavailable =
+        haystack.contains('install error(-6)') ||
+            haystack.contains('error_api_not_available') ||
+            haystack.contains('api_not_available');
+    if (looksLikeAppNotOwned || looksLikeApiUnavailable) {
+      return PlayUpdateErrorKind.playStoreUnavailable;
+    }
+
+    // -9 ERROR_PLAY_STORE_NOT_FOUND, -2 ERROR_UNKNOWN via missing services.
+    final bool looksLikePlayMissing =
+        haystack.contains('install error(-9)') ||
+            haystack.contains('play_store_not_found') ||
+            haystack.contains('playservicesrepairable') ||
+            haystack.contains('google play services');
+    if (looksLikePlayMissing) {
+      return PlayUpdateErrorKind.playServicesUnavailable;
+    }
+
+    return PlayUpdateErrorKind.transient;
   }
 
   Stream<PlayUpdateInstallState> installStateStream() {

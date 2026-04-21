@@ -7,6 +7,7 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 val keystoreProperties = Properties()
@@ -25,7 +26,7 @@ val hasReleaseSigning =
 
 android {
     namespace = "com.roydigital.ikeep"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -42,8 +43,11 @@ android {
         applicationId = "in.roydigital.ikeep"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // minSdk pinned to 24 because speech_to_text package requires it.
+        // Also drops ~3% of legacy Android 5/6 devices but prevents install failures.
+        minSdk = 24
+        // targetSdk 35 (Android 15) — required by Google Play for new uploads since Aug 2025.
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

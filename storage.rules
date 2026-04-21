@@ -1,0 +1,34 @@
+rules_version = '2';
+
+// Firebase Storage rules for Ikeep (project: ikeep-1af18)
+//
+// Layout (set by FirebaseImageUploadService + FirebaseInvoiceStorageService):
+//   users/{uid}/items/{itemUuid}/images/...
+//   users/{uid}/items/{itemUuid}/invoice/...
+//
+// Only the authenticated owner of {uid} may read or write their own objects.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{uid}/{allPaths=**} {
+      // Reads: user can read their own files
+      allow read: if request.auth.uid == uid;
+
+      // Writes: user can write to their own path, with size + content-type limits
+      allow write: if request.auth.uid == uid
+        && request.resource.size < 15 * 1024 * 1024  // 15MB hard cap per file
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('application/pdf')
+        );
+
+      // Deletes: user can always delete their own files regardless of size/type
+      allow delete: if request.auth.uid == uid;
+    }
+
+    // Deny all other paths by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

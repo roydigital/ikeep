@@ -3,16 +3,26 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- Remove AD_ID permission merged by firebase_analytics — app has no ads -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"/>
 
+    <!--
+      Security flags (locked down for privacy-sensitive user data):
+      - allowBackup=false: prevents ADB backup extraction of user items, photos, auth tokens
+      - usesCleartextTraffic=false: enforces HTTPS-only network calls (app errors on HTTP attempts)
+      - fullBackupContent=false + dataExtractionRules: disables Google Drive auto-backup and device-transfer
+      User data is safely stored in Firebase with explicit user-initiated backup/restore.
+    -->
     <application
         android:label="Ikeep"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:replace="android:allowBackup,android:fullBackupContent">
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

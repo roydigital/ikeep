@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -547,6 +548,13 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
         TextField(
           controller: _nameController,
           onChanged: (_) => setState(() {}),
+          maxLength: itemNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(itemNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           style: TextStyle(color: textColor, fontWeight: FontWeight.w500),
           decoration: InputDecoration(
             hintText: 'Enter item name...',
@@ -862,12 +870,24 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
         controller: _tagController,
         focusNode: _tagFocusNode,
         autofocus: true,
+        maxLength: tagMaxLength,
+        inputFormatters: [
+          LengthLimitingTextInputFormatter(tagMaxLength),
+        ],
+        buildCounter: (context,
+                {required currentLength, required isFocused, maxLength}) =>
+            null,
         style: TextStyle(color: textColor, fontSize: 12),
         decoration: InputDecoration(
           hintText: 'Tag name',
           hintStyle:
               TextStyle(color: textColor.withValues(alpha: 0.4), fontSize: 12),
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          errorBorder: InputBorder.none,
+          focusedErrorBorder: InputBorder.none,
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(vertical: 6),
           prefix: const Text(
@@ -1249,6 +1269,13 @@ class _SaveScreenState extends ConsumerState<SaveScreen> {
           const SizedBox(height: 10),
           TextField(
             controller: _lentToController,
+            maxLength: lentToMaxLength,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(lentToMaxLength),
+            ],
+            buildCounter: (context,
+                    {required currentLength, required isFocused, maxLength}) =>
+                null,
             style: TextStyle(color: textColor, fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               hintText: 'Lent to (name)',

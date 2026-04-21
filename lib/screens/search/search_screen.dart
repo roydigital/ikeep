@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:showcaseview/showcaseview.dart';
 
+import '../../core/constants/feature_limits.dart';
 import '../../domain/models/item.dart';
 import '../../domain/models/location_model.dart';
 import '../../domain/models/shared_item.dart';
@@ -375,15 +377,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 onModeChanged: (_) {},
                 showBackButton: !widget.isEmbedded,
               ),
-              if (selectedZoneUuid != null)
-                _ZoneContextBanner(
-                  isDark: isDark,
-                  zoneAsync: selectedZoneAsync,
-                  onAddItemHere: () => _openNormalSaveForZone(selectedZoneUuid),
-                  onQuickAddMultiple: () => _openQuickAddForZone(
-                    selectedZoneUuid,
-                  ),
-                ),
               Expanded(
                 child: _ResultsList(
                   isDark: isDark,
@@ -393,6 +386,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   bottomPadding: widget.isEmbedded
                       ? AppNavBar.contentBottomSpacing(context)
                       : MediaQuery.paddingOf(context).bottom,
+                  header: selectedZoneUuid == null
+                      ? null
+                      : _ZoneContextBanner(
+                          isDark: isDark,
+                          zoneAsync: selectedZoneAsync,
+                          onAddItemHere: () =>
+                              _openNormalSaveForZone(selectedZoneUuid),
+                          onQuickAddMultiple: () =>
+                              _openQuickAddForZone(selectedZoneUuid),
+                        ),
                 ),
               ),
             ],
@@ -437,12 +440,6 @@ class _ZoneContextBanner extends StatelessWidget {
 
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(
-            AppDimensions.spacingMd,
-            0,
-            AppDimensions.spacingMd,
-            AppDimensions.spacingMd,
-          ),
           padding: const EdgeInsets.all(AppDimensions.spacingMd),
           decoration: BoxDecoration(
             color: background,
@@ -540,12 +537,6 @@ class _ZoneContextBanner extends StatelessWidget {
       },
       loading: () => Container(
         width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(
-          AppDimensions.spacingMd,
-          0,
-          AppDimensions.spacingMd,
-          AppDimensions.spacingMd,
-        ),
         padding: const EdgeInsets.all(AppDimensions.spacingMd),
         decoration: BoxDecoration(
           color: background,
@@ -1043,6 +1034,7 @@ class _ResultsList extends ConsumerStatefulWidget {
     required this.activeFilter,
     required this.resultsShowcaseKey,
     this.bottomPadding = 0,
+    this.header,
   });
 
   final bool isDark;
@@ -1052,6 +1044,12 @@ class _ResultsList extends ConsumerStatefulWidget {
 
   /// Extra bottom padding when embedded in MainScreen (accounts for fixed nav bar).
   final double bottomPadding;
+
+  /// Optional widget pinned at the top of the scroll view (e.g. zone banner).
+  /// Kept inside the scroll view so it cannot fight the keyboard for fixed
+  /// height, which previously caused a vertical overflow when the keyboard
+  /// opened over the zone-filtered search screen.
+  final Widget? header;
 
   @override
   ConsumerState<_ResultsList> createState() => _ResultsListState();
@@ -1201,6 +1199,7 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
       controller: _scrollController,
       padding: _resultsListPadding(),
       children: [
+        if (widget.header != null) widget.header!,
         _buildResultsShowcaseAnchor(),
         const SizedBox(height: AppDimensions.spacingSm),
         child,
@@ -1212,21 +1211,32 @@ class _ResultsListState extends ConsumerState<_ResultsList> {
     List<Item> filtered, {
     bool isLoadingMore = false,
   }) {
+    final hasHeader = widget.header != null;
+    final headerOffset = hasHeader ? 1 : 0;
+    final showcaseIndex = headerOffset; // 0 or 1
+    final firstItemIndex = showcaseIndex + 1;
+
     return ListView.separated(
       controller: _scrollController,
       padding: _resultsListPadding(),
-      itemCount: filtered.length + (isLoadingMore ? 1 : 0) + 1,
+      itemCount:
+          filtered.length + (isLoadingMore ? 1 : 0) + 1 + headerOffset,
       separatorBuilder: (_, index) => SizedBox(
-        height: index == 0 ? AppDimensions.spacingSm : AppDimensions.spacingMd,
+        height: index == showcaseIndex
+            ? AppDimensions.spacingSm
+            : AppDimensions.spacingMd,
       ),
       itemBuilder: (context, i) {
-        if (i == 0) {
+        if (hasHeader && i == 0) {
+          return widget.header!;
+        }
+        if (i == showcaseIndex) {
           // Keep the showcase target inside the results scroll view so it
           // does not reserve a fixed blank strip below the header.
           return _buildResultsShowcaseAnchor();
         }
 
-        final resultIndex = i - 1;
+        final resultIndex = i - firstItemIndex;
         if (isLoadingMore && resultIndex >= filtered.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: AppDimensions.spacingSm),
@@ -1756,6 +1766,15 @@ Future<void> _showBorrowRequestSheet(
                   TextField(
                     controller: noteController,
                     maxLines: 3,
+                    maxLength: itemNotesMaxLength,
+                    inputFormatters: [
+                      LengthLimitingTextInputFormatter(itemNotesMaxLength),
+                    ],
+                    buildCounter: (context,
+                            {required currentLength,
+                            required isFocused,
+                            maxLength}) =>
+                        null,
                     decoration: const InputDecoration(
                       hintText: 'Optional note — tell them why you need it.',
                     ),

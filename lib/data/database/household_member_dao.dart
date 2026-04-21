@@ -62,18 +62,50 @@ class HouseholdMemberDao {
     });
   }
 
+  /// Inserts a placeholder owner row only when no owner record exists yet.
+  /// Used as a fallback when household creation cannot resolve the
+  /// authenticated user (e.g. offline or anonymous flows).
   Future<void> ensureOwnerMember() async {
     final db = await _db;
+    final existingOwners = await db.query(
+      DbConstants.tableHouseholdMembers,
+      where: '${DbConstants.colMemberIsOwner} = 1',
+      limit: 1,
+    );
+    if (existingOwners.isNotEmpty) return;
+
     await db.insert(
       DbConstants.tableHouseholdMembers,
       {
-        DbConstants.colMemberUuid: 'owner-local',
-        DbConstants.colMemberName: 'You',
+        DbConstants.colMemberUuid: HouseholdMember.localOwnerUuid,
+        DbConstants.colMemberName: HouseholdMember.localOwnerName,
         DbConstants.colMemberInvitedAt: DateTime.now().millisecondsSinceEpoch,
         DbConstants.colMemberIsOwner: 1,
         DbConstants.colMemberJoinedAt: DateTime.now().millisecondsSinceEpoch,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  /// Removes the legacy `owner-local` placeholder row if a real owner
+  /// (with a Firebase UID) is also stored. Prevents duplicate "Owner" tiles
+  /// in the Members list for users created before the real-owner insert was
+  /// added to `createHousehold`.
+  Future<void> removeLocalOwnerPlaceholderIfRealOwnerExists() async {
+    final db = await _db;
+    final realOwners = await db.query(
+      DbConstants.tableHouseholdMembers,
+      where:
+          '${DbConstants.colMemberIsOwner} = 1 AND ${DbConstants.colMemberUuid} != ?',
+      whereArgs: [HouseholdMember.localOwnerUuid],
+      limit: 1,
+    );
+    if (realOwners.isEmpty) return;
+
+    await db.delete(
+      DbConstants.tableHouseholdMembers,
+      where: '${DbConstants.colMemberUuid} = ?',
+      whereArgs: [HouseholdMember.localOwnerUuid],
     );
   }
 }

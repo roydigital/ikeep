@@ -75,10 +75,15 @@ class UpdateDecisionEngine {
 
     if (transientErrorMessage != null &&
         transientErrorMessage.trim().isNotEmpty) {
+      final bool playStoreUnavailable = playUpdateState.isPlayStoreUnavailable;
       return EffectiveAppUpdateDecision(
         status: EffectiveAppUpdateStatus.updateError,
-        title: 'Update check failed',
-        message: 'Unable to verify updates right now. Please try again later.',
+        title: playStoreUnavailable
+            ? 'Updates via Google Play only'
+            : 'Update check failed',
+        message: playStoreUnavailable
+            ? 'This build can\'t check Google Play from inside the app. Open the Play Store to see if an update is available.'
+            : 'Unable to verify updates right now. Please try again later.',
         playStoreUrl: remotePolicy.playStoreUrl,
         showChangelog: false,
         changelogText: '',
@@ -87,6 +92,7 @@ class UpdateDecisionEngine {
         availableVersionCode: playUpdateState.availableVersionCode,
         availableVersionName: remotePolicy.latestVersionNameAndroid,
         errorMessage: transientErrorMessage,
+        errorKind: playUpdateState.errorKind,
       );
     }
 

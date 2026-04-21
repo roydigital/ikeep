@@ -33,6 +33,28 @@ const int maxPdfBytes = pdfHardLimitBytes;
 const String pdfSoftLimitLabel = '2 MB';
 const String pdfHardLimitLabel = '10 MB';
 
+// ── Text input length caps ──────────────────────────────────────────────────
+// Prevent paste-based UI freezes and Firestore 1 MB doc overflow. Enforced at
+// the TextField layer via maxLength + LengthLimitingTextInputFormatter.
+
+/// Maximum character length for item name input field
+const int itemNameMaxLength = 100;
+
+/// Maximum character length for a single tag
+const int tagMaxLength = 30;
+
+/// Maximum character length for the "lent to" person name
+const int lentToMaxLength = 60;
+
+/// Maximum character length for location name input
+const int locationNameMaxLength = 80;
+
+/// Maximum character length for notes/description (if the app has one — apply only if field exists)
+const int itemNotesMaxLength = 500;
+
+/// Maximum character length for email address input (RFC 5321 standard)
+const int emailMaxLength = 254;
+
 String pdfHardLimitExceededError() {
   return 'This PDF is too large (max $pdfHardLimitLabel). '
       'Please upload a smaller or cleaner PDF.';

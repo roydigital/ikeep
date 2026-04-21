@@ -363,7 +363,7 @@ class Item {
     );
   }
 
-  /// Converts to JSON for Appwrite sync. Excludes joined display fields.
+  /// Converts to JSON for cloud sync. Excludes joined display fields.
   Map<String, dynamic> toJson() {
     return {
       'uuid': uuid,

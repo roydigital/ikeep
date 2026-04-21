@@ -101,6 +101,7 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
             joinedAt: now,
           ),
         );
+        await memberDao.removeLocalOwnerPlaceholderIfRealOwnerExists();
       } else {
         await memberDao.ensureOwnerMember();
       }
@@ -119,6 +120,9 @@ class HouseholdRepositoryImpl implements HouseholdRepository {
   @override
   Future<List<HouseholdMember>> getAllMembers() async {
     try {
+      // Drop the legacy `owner-local` placeholder if a real owner row already
+      // exists — otherwise the Members list shows a duplicate "Owner" tile.
+      await memberDao.removeLocalOwnerPlaceholderIfRealOwnerExists();
       await memberDao.ensureOwnerMember();
       final household = await getCurrentHousehold();
       final localMembers = await memberDao.getAllMembers();

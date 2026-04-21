@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/feature_limits.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../domain/models/location_model.dart';
 import '../../providers/location_providers.dart';
@@ -357,6 +359,13 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: locationNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(locationNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           style: TextStyle(
             color:
                 isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
@@ -556,6 +565,16 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                                 const SizedBox(height: 10),
                                 TextField(
                                   controller: _roomNameController,
+                                  maxLength: locationNameMaxLength,
+                                  inputFormatters: [
+                                    LengthLimitingTextInputFormatter(
+                                        locationNameMaxLength),
+                                  ],
+                                  buildCounter: (context,
+                                          {required currentLength,
+                                          required isFocused,
+                                          maxLength}) =>
+                                      null,
                                   style: TextStyle(
                                     color: textPrimary,
                                     fontSize: 16,
@@ -813,6 +832,16 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                                       Expanded(
                                         child: TextField(
                                           controller: _customZoneController,
+                                          maxLength: locationNameMaxLength,
+                                          inputFormatters: [
+                                            LengthLimitingTextInputFormatter(
+                                                locationNameMaxLength),
+                                          ],
+                                          buildCounter: (context,
+                                                  {required currentLength,
+                                                  required isFocused,
+                                                  maxLength}) =>
+                                              null,
                                           style: TextStyle(
                                             color: textPrimary,
                                             fontSize: 15,
@@ -823,6 +852,12 @@ class _AddNewRoomScreenState extends ConsumerState<AddNewRoomScreen> {
                                             hintStyle: TextStyle(
                                                 color: textMuted, fontSize: 15),
                                             border: InputBorder.none,
+                                            enabledBorder: InputBorder.none,
+                                            focusedBorder: InputBorder.none,
+                                            disabledBorder: InputBorder.none,
+                                            errorBorder: InputBorder.none,
+                                            focusedErrorBorder:
+                                                InputBorder.none,
                                             isDense: true,
                                             contentPadding:
                                                 const EdgeInsets.symmetric(
@@ -1283,6 +1318,13 @@ class _AreaPickerSheetState extends ConsumerState<_AreaPickerSheet> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: locationNameMaxLength,
+          inputFormatters: [
+            LengthLimitingTextInputFormatter(locationNameMaxLength),
+          ],
+          buildCounter: (context,
+                  {required currentLength, required isFocused, maxLength}) =>
+              null,
           decoration: InputDecoration(
             hintText: 'Area name',
             hintStyle: TextStyle(
